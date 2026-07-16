@@ -1,0 +1,92 @@
+using PlayHub.Application.Common;
+using PlayHub.Domain.Enums;
+
+namespace PlayHub.Application.Cafeteria;
+
+public record CafeteriaItemDto(
+    Guid Id,
+    Guid BranchId,
+    string Name,
+    string? NameAr,
+    decimal SellPrice,
+    int CurrentQuantity,
+    int MinThreshold,
+    bool IsLowStock,
+    bool IsActive,
+    string BaseUnitName,
+    string? LargeUnitName,
+    int UnitsPerLarge,
+    DateTime CreatedAt);
+
+public record CreateCafeteriaItemRequest(
+    string Name,
+    string? NameAr,
+    decimal SellPrice,
+    int CurrentQuantity,
+    int MinThreshold,
+    Guid BaseUnitId,
+    Guid? LargeUnitId = null,
+    int UnitsPerLarge = 1,
+    InventoryUnitKind InitialStockUnit = InventoryUnitKind.Base);
+
+public record UpdateCafeteriaItemRequest(
+    string Name,
+    string? NameAr,
+    decimal SellPrice,
+    int MinThreshold,
+    bool IsActive,
+    Guid BaseUnitId,
+    Guid? LargeUnitId = null,
+    int UnitsPerLarge = 1);
+
+public record CafeteriaSaleLineInput(
+    Guid CafeteriaItemId,
+    int Quantity,
+    InventoryUnitKind Unit = InventoryUnitKind.Base);
+
+public record CreateCafeteriaSaleRequest(
+    IReadOnlyList<CafeteriaSaleLineInput> Lines,
+    PaymentRequest Payment,
+    string? CustomerName = null);
+
+public record CafeteriaSaleLineDto(
+    Guid Id,
+    Guid CafeteriaItemId,
+    string ItemName,
+    int Quantity,
+    int ReturnedQuantity,
+    decimal UnitPrice,
+    decimal LineTotal);
+
+public record CafeteriaSaleDto(
+    Guid Id,
+    Guid BranchId,
+    Guid? SessionId,
+    string? CustomerName,
+    decimal TotalAmount,
+    CafeteriaSaleStatus Status,
+    DateTime SoldAt,
+    string SoldByName,
+    IReadOnlyList<CafeteriaSaleLineDto> Lines,
+    CafeteriaSaleInvoiceDto? Invoice);
+
+public record CafeteriaSaleInvoiceDto(
+    Guid Id,
+    string InvoiceNumber,
+    decimal Total,
+    PaymentMethod PaymentMethod,
+    PaymentStatus PaymentStatus);
+
+public record ReturnCafeteriaItemRequest(
+    Guid SaleLineId,
+    int Quantity,
+    string Reason);
+
+public record CafeteriaReturnDto(
+    Guid Id,
+    Guid SaleId,
+    Guid SaleLineId,
+    int Quantity,
+    string Reason,
+    decimal RefundAmount,
+    DateTime ReturnedAt);

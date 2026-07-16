@@ -1,0 +1,39 @@
+## Build
+bin/
+obj/
+out/
+publish/
+
+## IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Environment
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+# Contains production secrets (JWT key, DB connection, admin password) — deployed via zip, not git
+appsettings.Production.json
+
+## Logs
+*.log
+
+## Node (frontend + WhatsApp gateway)
+node_modules/
+dist/
+whatsapp-gateway/.wwebjs_auth/
+whatsapp-gateway/sessions/
+whatsapp-gateway/whatsapp_session.json
+
+## Uploads
+uploads/
+
+## EF
+**/Migrations/*.Designer.cs.bak

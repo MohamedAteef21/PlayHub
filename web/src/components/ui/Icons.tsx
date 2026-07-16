@@ -1,0 +1,92 @@
+import {
+  LayoutGrid,
+  Coffee,
+  Package,
+  Wallet,
+  BarChart3,
+  Users,
+  ContactRound,
+  Settings,
+  LogOut,
+  Languages,
+  Menu,
+  Play,
+  Pause,
+  Square,
+  Plus,
+  ShoppingCart,
+  Clock,
+  Gamepad2,
+  Monitor,
+  DoorOpen,
+  Tag,
+  ArrowRight,
+  Shield,
+  Moon,
+  Sun,
+  User,
+  Building2,
+  Printer,
+  Mail,
+  Wrench,
+  Download,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Eye,
+  EyeOff,
+  type LucideIcon,
+} from 'lucide-react';
+
+export const Icons = {
+  dashboard: LayoutGrid,
+  floor: Gamepad2,
+  cafeteria: Coffee,
+  inventory: Package,
+  accounting: Wallet,
+  reports: BarChart3,
+  settings: Settings,
+  users: Users,
+  customers: ContactRound,
+  logout: LogOut,
+  language: Languages,
+  menu: Menu,
+  play: Play,
+  pause: Pause,
+  stop: Square,
+  plus: Plus,
+  cart: ShoppingCart,
+  clock: Clock,
+  gaming: Gamepad2,
+  watching: Monitor,
+  room: DoorOpen,
+  pricing: Tag,
+  arrow: ArrowRight,
+  shield: Shield,
+  moon: Moon,
+  sun: Sun,
+  user: User,
+  branch: Building2,
+  print: Printer,
+  mail: Mail,
+  wrench: Wrench,
+  download: Download,
+  panelClose: PanelLeftClose,
+  panelOpen: PanelLeftOpen,
+  eye: Eye,
+  eyeOff: EyeOff,
+} as const;
+
+export type IconName = keyof typeof Icons;
+
+export function Icon({
+  name,
+  className = 'h-4 w-4',
+  strokeWidth = 1.75,
+}: {
+  name: IconName;
+  className?: string;
+  strokeWidth?: number;
+}) {
+  const Cmp: LucideIcon = Icons[name];
+  return <Cmp className={className} strokeWidth={strokeWidth} aria-hidden />;
+}

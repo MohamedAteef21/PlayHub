@@ -1,0 +1,15 @@
+---
+description: Soft-delete is mandatory for domain entities; never hard-delete business data.
+globs: src/**/*.cs
+alwaysApply: false
+---
+
+# Soft delete (PlayHub)
+
+- Business entities that implement `ISoftDelete` must never be hard-deleted from the database.
+- `PlayHubDbContext.SaveChanges` converts any `Remove()` / `EntityState.Deleted` on `ISoftDelete` into `IsDeleted` / `DeletedAt` / `DeletedByUserId` (and clears `IsActive` when present).
+- Global query filters hide `IsDeleted` rows. Prefer `entity.MarkAsDeleted(userId)` for explicit deletes.
+- Child replace tables without soft-delete (`GamingRate`, `DeviceController`, `Screen`, join tables) may still use `RemoveRange`.
+- Do not soft-delete audit logs, permissions catalog, or inventory movements (append-only).
+- When adding a new catalog entity (rooms, devices, plans, items, users, branches, etc.), implement `ISoftDelete` and add `!e.IsDeleted` to its query filter.
+- When adding a new feature that deletes data, also add a corresponding permission if user-facing.
