@@ -10,7 +10,8 @@ public class Tenant : BaseEntity
     public string DefaultLanguage { get; set; } = "en";
     public string DefaultCurrency { get; set; } = "EGP";
     public string Timezone { get; set; } = "Africa/Cairo";
-    public bool BillingRoundUp { get; set; } = true;
+    /// <summary>When true, time is billed in whole units (round up). Default: exact prorated minutes.</summary>
+    public bool BillingRoundUp { get; set; } = false;
     public bool IsActive { get; set; } = true;
 
     /// <summary>Optional override for WhatsApp gateway base URL; null uses appsettings.</summary>

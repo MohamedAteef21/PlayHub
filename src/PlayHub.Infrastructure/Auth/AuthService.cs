@@ -45,7 +45,7 @@ public class AuthService : IAuthService
             Slug = slug,
             DefaultLanguage = request.DefaultLanguage,
             DefaultCurrency = request.DefaultCurrency,
-            BillingRoundUp = true
+            BillingRoundUp = false
         };
 
         var user = new User

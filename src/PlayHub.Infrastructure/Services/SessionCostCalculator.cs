@@ -74,6 +74,9 @@ public class SessionCostCalculator : ISessionCostCalculator
         return units;
     }
 
+    /// <summary>Rates are stored per pricing tier: 1 = single (1-2 controllers), 2 = couple (3-4 controllers).</summary>
+    public static int GamingRateTier(int controllerCount) => controllerCount <= 2 ? 1 : 2;
+
     private static decimal CalculateGamingCost(RateSnapshot snapshot, int? controllerCount, decimal units)
     {
         // Misconfigured plan / legacy session: bill 0 for the time instead of breaking
@@ -81,8 +84,9 @@ public class SessionCostCalculator : ISessionCostCalculator
         if (controllerCount is null or <= 0)
             return 0;
 
+        var tier = GamingRateTier(controllerCount.Value);
         var rate = snapshot.GamingRates
-            .Where(r => r.ControllerCount == controllerCount.Value)
+            .Where(r => r.ControllerCount == tier)
             .Select(r => r.Rate)
             .FirstOrDefault();
 

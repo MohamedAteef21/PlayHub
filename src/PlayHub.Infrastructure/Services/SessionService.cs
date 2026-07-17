@@ -390,12 +390,8 @@ public class SessionService : ISessionService
         if (session.SessionMode != SessionMode.Watching)
             throw new InvalidOperationException("Only watching sessions can be converted to gaming.");
 
-        if (request.ControllerCount is not (1 or 2))
-            throw new InvalidOperationException("Choose individual (1) or couple (2) pricing.");
-
-        var maxPlayers = session.Device.DeviceControllers.Sum(c => c.WorkingCount);
-        if (request.ControllerCount > maxPlayers)
-            throw new InvalidOperationException($"This device supports at most {maxPlayers} player(s).");
+        if (request.ControllerCount is < 1 or > 4)
+            throw new InvalidOperationException("Controller count must be between 1 and 4.");
 
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
@@ -404,8 +400,9 @@ public class SessionService : ISessionService
                 && (p.BranchId == null || p.BranchId == branchId), ct)
             ?? throw new KeyNotFoundException("Gaming pricing plan not found.");
 
-        if (!plan.GamingRates.Any(r => r.ControllerCount == request.ControllerCount && r.Rate > 0))
-            throw new InvalidOperationException($"No gaming rate configured for {(request.ControllerCount == 1 ? "individual" : "couple")} in this plan.");
+        var rateTier = SessionCostCalculator.GamingRateTier(request.ControllerCount);
+        if (!plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0))
+            throw new InvalidOperationException($"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
 
         // End any active pause and accrue watching segment cost
         if (session.Status == SessionStatus.Paused)
@@ -495,8 +492,8 @@ public class SessionService : ISessionService
         var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
         var segmentCost = _costCalculator.CalculateTimeCost(
             session.RateSnapshot, session.SessionMode, billableSeconds, session.ControllerCount, session.WatcherCount, billingRoundUp);
-        session.TimeCost = session.AccruedTimeCost + segmentCost;
-        session.RoomSurchargeCost = CalculateRoomSurcharge(session.RoomSurchargePerHour, billableSeconds);
+        session.TimeCost = decimal.Round(session.AccruedTimeCost + segmentCost, 2);
+        session.RoomSurchargeCost = decimal.Round(CalculateRoomSurcharge(session.RoomSurchargePerHour, billableSeconds), 2);
         session.CafeteriaCost = session.CafeteriaLines.Sum(l => l.LineTotal);
 
         var subtotal = session.TimeCost + session.RoomSurchargeCost + session.CafeteriaCost;
@@ -826,11 +823,9 @@ public class SessionService : ISessionService
     {
         if (request.SessionMode == SessionMode.Gaming)
         {
-            var maxPlayers = device.DeviceControllers.Sum(c => c.WorkingCount);
-            if (request.ControllerCount is null or <= 0)
-                throw new InvalidOperationException("Controller count is required for gaming sessions.");
-            if (request.ControllerCount > maxPlayers)
-                throw new InvalidOperationException($"This device supports at most {maxPlayers} player(s).");
+            // Single play: 1-2 controllers, couple play: 3-4 controllers.
+            if (request.ControllerCount is null or < 1 or > 4)
+                throw new InvalidOperationException("Controller count must be between 1 and 4.");
         }
         else
         {
@@ -846,11 +841,12 @@ public class SessionService : ISessionService
     {
         if (request.SessionMode == SessionMode.Gaming)
         {
+            var tier = SessionCostCalculator.GamingRateTier(request.ControllerCount ?? 1);
             var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
-            var hasRate = plan.GamingRates.Any(r => r.ControllerCount == request.ControllerCount && r.Rate > 0);
+            var hasRate = plan.GamingRates.Any(r => r.ControllerCount == tier && r.Rate > 0);
             if (!hasRate && !hasPackage)
                 throw new InvalidOperationException(
-                    $"Pricing plan '{plan.Name}' has no rate for {request.ControllerCount} controller(s). Configure the rate first.");
+                    $"Pricing plan '{plan.Name}' has no {(tier == 1 ? "single" : "couple")} rate. Configure the rate first.");
         }
         else if (!plan.WatchingRates.Any(r => r.RatePerPerson > 0))
         {

@@ -37,7 +37,7 @@ public static class DatabaseSeeder
             DefaultLanguage = "en",
             DefaultCurrency = "EGP",
             Timezone = "Africa/Cairo",
-            BillingRoundUp = true,
+            BillingRoundUp = false,
             IsActive = true,
             CreatedAt = seedTime
         };

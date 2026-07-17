@@ -194,7 +194,7 @@ export function DashboardPage() {
   const [closeModal, setCloseModal] = useState<SessionLive | null>(null);
   const [convertModal, setConvertModal] = useState<SessionLive | null>(null);
   const [convertPlanId, setConvertPlanId] = useState('');
-  const [convertControllers, setConvertControllers] = useState(1);
+  const [convertControllers, setConvertControllers] = useState(2);
   const [convertError, setConvertError] = useState('');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
@@ -737,6 +737,7 @@ export function DashboardPage() {
                       setPlanId('');
                       setBookingMode('open');
                       setDurationHours(2);
+                      setControllerCount(2);
                       setOpenError('');
                     }}
                     onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
@@ -753,7 +754,7 @@ export function DashboardPage() {
                       if (!session) return;
                       setConvertModal(session);
                       setConvertPlanId('');
-                      setConvertControllers(1);
+                      setConvertControllers(2);
                       setConvertError('');
                     }}
                     onClose={() => {
@@ -949,8 +950,8 @@ export function DashboardPage() {
             <div className="flex gap-2">
               <Button
                 size="sm"
-                variant={convertControllers === 1 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(1)}
+                variant={convertControllers <= 2 ? 'primary' : 'secondary'}
+                onClick={() => setConvertControllers(2)}
               >
                 {t('settings.individual')}
                 {(() => {
@@ -961,8 +962,8 @@ export function DashboardPage() {
               </Button>
               <Button
                 size="sm"
-                variant={convertControllers === 2 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(2)}
+                variant={convertControllers >= 3 ? 'primary' : 'secondary'}
+                onClick={() => setConvertControllers(4)}
               >
                 {t('settings.couple')}
                 {(() => {
@@ -971,6 +972,19 @@ export function DashboardPage() {
                   return rate != null ? ` · ${formatCurrency(rate)}` : '';
                 })()}
               </Button>
+            </div>
+            <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
+            <div className="flex gap-2">
+              {(convertControllers <= 2 ? [1, 2] : [3, 4]).map((n) => (
+                <Button
+                  key={n}
+                  size="sm"
+                  variant={convertControllers === n ? 'primary' : 'secondary'}
+                  onClick={() => setConvertControllers(n)}
+                >
+                  {n}
+                </Button>
+              ))}
             </div>
           </div>
           {convertError && <p className="text-sm text-danger">{convertError}</p>}
@@ -1190,31 +1204,32 @@ export function DashboardPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  variant={controllerCount === 1 ? 'primary' : 'secondary'}
-                  onClick={() => setControllerCount(1)}
+                  variant={controllerCount <= 2 ? 'primary' : 'secondary'}
+                  onClick={() => setControllerCount(2)}
                 >
                   {t('settings.individual')}
                 </Button>
                 <Button
                   size="sm"
-                  variant={controllerCount === 2 ? 'primary' : 'secondary'}
-                  onClick={() => setControllerCount(2)}
-                  disabled={(openModal?.maxGamingPlayers ?? 0) < 2}
+                  variant={controllerCount >= 3 ? 'primary' : 'secondary'}
+                  onClick={() => setControllerCount(4)}
                 >
                   {t('settings.couple')}
                 </Button>
               </div>
-              {(openModal?.maxGamingPlayers ?? 0) > 2 && (
-                <Input
-                  className="mt-2"
-                  label={t('dashboard.controllers')}
-                  type="number"
-                  min={1}
-                  max={openModal?.maxGamingPlayers}
-                  value={controllerCount}
-                  onChange={(e) => setControllerCount(+e.target.value)}
-                />
-              )}
+              <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
+              <div className="flex gap-2">
+                {(controllerCount <= 2 ? [1, 2] : [3, 4]).map((n) => (
+                  <Button
+                    key={n}
+                    size="sm"
+                    variant={controllerCount === n ? 'primary' : 'secondary'}
+                    onClick={() => setControllerCount(n)}
+                  >
+                    {n}
+                  </Button>
+                ))}
+              </div>
             </div>
           ) : (
             <Input
