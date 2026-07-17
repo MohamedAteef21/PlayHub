@@ -61,6 +61,7 @@ public class WalletTransaction : BaseEntity, ITenantEntity
 public class CustomerOffer : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    public Guid? OwnerUserId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
@@ -69,4 +70,5 @@ public class CustomerOffer : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public User? OwnerUser { get; set; }
 }

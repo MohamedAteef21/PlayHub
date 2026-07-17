@@ -123,7 +123,14 @@ public class AssetService : IAssetService
 
     public async Task<IReadOnlyList<VenueAssetTypeDto>> GetVenueAssetTypesAsync(CancellationToken ct = default)
     {
-        return await _db.VenueAssetTypes
+        var query = _db.VenueAssetTypes.AsQueryable();
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            query = query.Where(c => c.OwnerUserId == ownerId);
+        }
+
+        return await query
             .OrderBy(c => c.Name)
             .Select(c => new VenueAssetTypeDto(c.Id, c.Name, c.Description, c.IsActive))
             .ToListAsync(ct);
@@ -135,9 +142,11 @@ public class AssetService : IAssetService
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Asset type name is required.");
 
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var type = new VenueAssetType
         {
             TenantId = _tenantContext.TenantId,
+            OwnerUserId = ownerId,
             Name = name,
             Description = request.Description?.Trim()
         };
@@ -151,8 +160,7 @@ public class AssetService : IAssetService
 
     public async Task<VenueAssetTypeDto> UpdateVenueAssetTypeAsync(Guid id, UpdateVenueAssetTypeRequest request, CancellationToken ct = default)
     {
-        var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Venue asset type not found.");
+        var type = await RequireOwnedVenueAssetTypeAsync(id, ct);
 
         type.Name = request.Name.Trim();
         type.Description = request.Description?.Trim();
@@ -166,8 +174,7 @@ public class AssetService : IAssetService
 
     public async Task SoftDeleteVenueAssetTypeAsync(Guid id, CancellationToken ct = default)
     {
-        var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Venue asset type not found.");
+        var type = await RequireOwnedVenueAssetTypeAsync(id, ct);
 
         type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         type.IsActive = false;
@@ -177,7 +184,14 @@ public class AssetService : IAssetService
 
     public async Task<IReadOnlyList<ControllerTypeDto>> GetControllerTypesAsync(CancellationToken ct = default)
     {
-        return await _db.ControllerTypes
+        var query = _db.ControllerTypes.AsQueryable();
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            query = query.Where(c => c.OwnerUserId == ownerId);
+        }
+
+        return await query
             .OrderBy(c => c.Name)
             .Select(c => new ControllerTypeDto(c.Id, c.Name, c.Description, c.IsActive))
             .ToListAsync(ct);
@@ -185,9 +199,11 @@ public class AssetService : IAssetService
 
     public async Task<ControllerTypeDto> CreateControllerTypeAsync(CreateControllerTypeRequest request, CancellationToken ct = default)
     {
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var type = new ControllerType
         {
             TenantId = _tenantContext.TenantId,
+            OwnerUserId = ownerId,
             Name = request.Name.Trim(),
             Description = request.Description?.Trim()
         };
@@ -201,8 +217,7 @@ public class AssetService : IAssetService
 
     public async Task<ControllerTypeDto> UpdateControllerTypeAsync(Guid id, UpdateControllerTypeRequest request, CancellationToken ct = default)
     {
-        var type = await _db.ControllerTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Controller type not found.");
+        var type = await RequireOwnedControllerTypeAsync(id, ct);
 
         type.Name = request.Name.Trim();
         type.Description = request.Description?.Trim();
@@ -216,13 +231,42 @@ public class AssetService : IAssetService
 
     public async Task SoftDeleteControllerTypeAsync(Guid id, CancellationToken ct = default)
     {
-        var type = await _db.ControllerTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Controller type not found.");
+        var type = await RequireOwnedControllerTypeAsync(id, ct);
 
         type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         type.IsActive = false;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("ControllerType.SoftDeleted", "ControllerType", type.Id, new { type.Name }, ct: ct);
+    }
+
+    private async Task<VenueAssetType> RequireOwnedVenueAssetTypeAsync(Guid id, CancellationToken ct)
+    {
+        var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Venue asset type not found.");
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(type.OwnerUserId, ownerId, false))
+                throw new KeyNotFoundException("Venue asset type not found.");
+        }
+
+        return type;
+    }
+
+    private async Task<ControllerType> RequireOwnedControllerTypeAsync(Guid id, CancellationToken ct)
+    {
+        var type = await _db.ControllerTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Controller type not found.");
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(type.OwnerUserId, ownerId, false))
+                throw new KeyNotFoundException("Controller type not found.");
+        }
+
+        return type;
     }
 
     public async Task<IReadOnlyList<DeviceDto>> GetDevicesAsync(Guid? roomId = null, CancellationToken ct = default)

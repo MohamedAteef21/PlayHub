@@ -1,6 +1,7 @@
 import { Outlet, NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useEffect, useRef, useState } from 'react';
+import { queryClient } from '@/App';
 import { useAuthStore, useUiStore } from '@/store';
 import { authApi } from '@/api/client';
 import { Icon, type IconName } from '@/components/ui/Icons';
@@ -150,6 +151,7 @@ export function AppLayout() {
     setUserMenuOpen(false);
     if (refreshToken) await authApi.logout(refreshToken).catch(() => {});
     logout();
+    queryClient.clear();
     navigate('/login');
   }
 

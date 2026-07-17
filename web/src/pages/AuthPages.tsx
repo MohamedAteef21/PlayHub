@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, Link } from 'react-router-dom';
+import { queryClient } from '@/App';
 import { useAuthStore, useUiStore } from '@/store';
 import { authApi } from '@/api/client';
 import { Button } from '@/components/ui/Button';
@@ -45,6 +46,7 @@ export function LoginPage() {
     setError('');
     try {
       const res = await authApi.login(username, password);
+      queryClient.clear();
       setAuth(res.accessToken, res.refreshToken, res.user, res.activeBranchId, res.accessTokenExpiresAt);
       navigate(res.activeBranchId || res.user.isMaster ? '/' : '/select-branch');
     } catch (err) {
@@ -101,6 +103,7 @@ export function RegisterPage() {
     setError('');
     try {
       const res = await authApi.register(form);
+      queryClient.clear();
       setAuth(res.accessToken, res.refreshToken, res.user, res.activeBranchId, res.accessTokenExpiresAt);
       navigate(res.activeBranchId ? '/' : '/select-branch');
     } catch (err) {

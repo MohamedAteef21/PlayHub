@@ -23,6 +23,12 @@ public class OfferService : IOfferService
     public async Task<IReadOnlyList<OfferDto>> GetAllAsync(bool? activeOnly = null, CancellationToken ct = default)
     {
         var query = _db.CustomerOffers.AsNoTracking().AsQueryable();
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            query = query.Where(o => o.OwnerUserId == ownerId);
+        }
+
         if (activeOnly == true)
             query = query.Where(o => o.IsActive);
 
@@ -33,7 +39,16 @@ public class OfferService : IOfferService
     public async Task<OfferDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var offer = await _db.CustomerOffers.AsNoTracking().FirstOrDefaultAsync(o => o.Id == id, ct);
-        return offer is null ? null : Map(offer);
+        if (offer is null) return null;
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(offer.OwnerUserId, ownerId, false))
+                return null;
+        }
+
+        return Map(offer);
     }
 
     public async Task<OfferDto> CreateAsync(CreateOfferRequest request, CancellationToken ct = default)
@@ -45,9 +60,11 @@ public class OfferService : IOfferService
         if (string.IsNullOrWhiteSpace(message))
             throw new InvalidOperationException("Offer message is required.");
 
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var offer = new CustomerOffer
         {
             TenantId = _tenantContext.TenantId,
+            OwnerUserId = ownerId,
             Title = title,
             Message = message,
             IsActive = request.IsActive
@@ -61,8 +78,7 @@ public class OfferService : IOfferService
 
     public async Task<OfferDto> UpdateAsync(Guid id, UpdateOfferRequest request, CancellationToken ct = default)
     {
-        var offer = await _db.CustomerOffers.FirstOrDefaultAsync(o => o.Id == id, ct)
-            ?? throw new KeyNotFoundException("Offer not found.");
+        var offer = await RequireOwnedAsync(id, ct);
 
         var title = request.Title?.Trim() ?? string.Empty;
         var message = request.Message?.Trim() ?? string.Empty;
@@ -82,14 +98,28 @@ public class OfferService : IOfferService
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var offer = await _db.CustomerOffers.FirstOrDefaultAsync(o => o.Id == id, ct)
-            ?? throw new KeyNotFoundException("Offer not found.");
+        var offer = await RequireOwnedAsync(id, ct);
 
         offer.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         offer.IsActive = false;
 
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Offer.SoftDeleted", "CustomerOffer", offer.Id, new { offer.Title }, ct: ct);
+    }
+
+    private async Task<CustomerOffer> RequireOwnedAsync(Guid id, CancellationToken ct)
+    {
+        var offer = await _db.CustomerOffers.FirstOrDefaultAsync(o => o.Id == id, ct)
+            ?? throw new KeyNotFoundException("Offer not found.");
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(offer.OwnerUserId, ownerId, false))
+                throw new KeyNotFoundException("Offer not found.");
+        }
+
+        return offer;
     }
 
     private static OfferDto Map(CustomerOffer o) =>

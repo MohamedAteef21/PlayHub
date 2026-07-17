@@ -101,11 +101,20 @@ export function SettingsPage() {
   const [maintReason, setMaintReason] = useState('');
   const [maintOpen, setMaintOpen] = useState(false);
 
-  const { data: rooms = [] } = useQuery({ queryKey: ['rooms'], queryFn: assetsApi.getRooms });
-  const { data: devices = [] } = useQuery({ queryKey: ['devices'], queryFn: () => assetsApi.getDevices() });
-  const { data: plans = [] } = useQuery({ queryKey: ['all-plans'], queryFn: () => pricingApi.getPlans() });
+  const { data: rooms = [] } = useQuery({
+    queryKey: ['rooms', user?.id, activeBranchId],
+    queryFn: assetsApi.getRooms,
+  });
+  const { data: devices = [] } = useQuery({
+    queryKey: ['devices', user?.id, activeBranchId],
+    queryFn: () => assetsApi.getDevices(),
+  });
+  const { data: plans = [] } = useQuery({
+    queryKey: ['all-plans', user?.id, activeBranchId],
+    queryFn: () => pricingApi.getPlans(),
+  });
   const { data: branches = [] } = useQuery({
-    queryKey: ['branches'],
+    queryKey: ['branches', user?.id],
     queryFn: branchesApi.getAll,
     enabled: (isMaster && tab === 'branches') || tab === 'payments',
   });
@@ -117,25 +126,25 @@ export function SettingsPage() {
   });
 
   const { data: ctrlTypes = [] } = useQuery({
-    queryKey: ['controller-types'],
+    queryKey: ['controller-types', user?.id],
     queryFn: assetsApi.getControllerTypes,
     enabled: canManageAssets,
   });
 
   const { data: venueAssetTypes = [] } = useQuery({
-    queryKey: ['venue-asset-types'],
+    queryKey: ['venue-asset-types', user?.id],
     queryFn: assetsApi.getVenueAssetTypes,
     enabled: canManageAssets && (tab === 'venueAssets' || tab === 'rooms'),
   });
 
   const { data: alertSettings } = useQuery({
-    queryKey: ['alert-settings'],
+    queryKey: ['alert-settings', user?.id],
     queryFn: alertsApi.getSettings,
     enabled: isMaster && tab === 'alerts',
   });
 
   const { data: openMaintenance = [] } = useQuery({
-    queryKey: ['device-maintenance'],
+    queryKey: ['device-maintenance', user?.id, activeBranchId],
     queryFn: alertsApi.getMaintenance,
     enabled: canManageAssets && tab === 'maintenance',
   });

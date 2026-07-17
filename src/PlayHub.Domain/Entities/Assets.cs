@@ -21,10 +21,12 @@ public class Room : BaseEntity, IBranchEntity, ISoftDelete
     public ICollection<RoomAsset> RoomAssets { get; set; } = [];
 }
 
-/// <summary>Tenant-level catalog for venue furniture/equipment (couches, extra TVs, etc.).</summary>
+/// <summary>Per-master catalog for venue furniture/equipment (couches, extra TVs, etc.).</summary>
 public class VenueAssetType : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    /// <summary>Master Admin who owns this catalog row. Staff inherit their master's id.</summary>
+    public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
@@ -33,6 +35,7 @@ public class VenueAssetType : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public User? OwnerUser { get; set; }
     public ICollection<RoomAsset> RoomAssets { get; set; } = [];
 }
 
@@ -73,6 +76,8 @@ public class Device : BaseEntity, IBranchEntity, ISoftDelete
 public class ControllerType : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    /// <summary>Master Admin who owns this catalog row.</summary>
+    public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
@@ -81,6 +86,7 @@ public class ControllerType : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public User? OwnerUser { get; set; }
     public ICollection<DeviceController> DeviceControllers { get; set; } = [];
 }
 

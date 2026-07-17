@@ -22,9 +22,12 @@ public class InventoryUnitService : IInventoryUnitService
 
     public async Task<IReadOnlyList<InventoryUnitDto>> GetAllAsync(bool activeOnly = true, CancellationToken ct = default)
     {
-        await EnsureDefaultUnitsAsync(ct);
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        await EnsureDefaultUnitsAsync(ownerId, ct);
 
         var q = _db.InventoryUnits.AsQueryable();
+        if (!_tenantContext.IsSuperAdmin)
+            q = q.Where(u => u.OwnerUserId == ownerId);
         if (activeOnly)
             q = q.Where(u => u.IsActive);
 
@@ -40,14 +43,18 @@ public class InventoryUnitService : IInventoryUnitService
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
 
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var exists = await _db.InventoryUnits.AnyAsync(
-            u => u.TenantId == _tenantContext.TenantId && u.Name == name, ct);
+            u => u.TenantId == _tenantContext.TenantId
+                 && u.OwnerUserId == ownerId
+                 && u.Name == name, ct);
         if (exists)
             throw new InvalidOperationException("This unit name already exists.");
 
         var unit = new InventoryUnit
         {
             TenantId = _tenantContext.TenantId,
+            OwnerUserId = ownerId,
             Name = name,
             NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
             IsActive = true
@@ -60,21 +67,25 @@ public class InventoryUnitService : IInventoryUnitService
 
     public async Task<InventoryUnitDto> UpdateAsync(Guid id, UpdateInventoryUnitRequest request, CancellationToken ct = default)
     {
-        var unit = await _db.InventoryUnits.FirstOrDefaultAsync(u => u.Id == id, ct)
-            ?? throw new KeyNotFoundException("Unit not found.");
+        var unit = await RequireOwnedUnitAsync(id, ct);
 
         var name = request.Name.Trim();
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
 
+        var ownerId = unit.OwnerUserId ?? await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var duplicate = await _db.InventoryUnits.AnyAsync(
-            u => u.TenantId == _tenantContext.TenantId && u.Name == name && u.Id != id, ct);
+            u => u.TenantId == _tenantContext.TenantId
+                 && u.OwnerUserId == ownerId
+                 && u.Name == name
+                 && u.Id != id, ct);
         if (duplicate)
             throw new InvalidOperationException("This unit name already exists.");
 
         unit.Name = name;
         unit.NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
         unit.IsActive = request.IsActive;
+        unit.OwnerUserId ??= ownerId;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("InventoryUnit.Updated", "InventoryUnit", unit.Id, new { unit.Name, unit.IsActive }, ct: ct);
         return new InventoryUnitDto(unit.Id, unit.Name, unit.NameAr, unit.IsActive, unit.CreatedAt);
@@ -82,8 +93,7 @@ public class InventoryUnitService : IInventoryUnitService
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var unit = await _db.InventoryUnits.FirstOrDefaultAsync(u => u.Id == id, ct)
-            ?? throw new KeyNotFoundException("Unit not found.");
+        var unit = await RequireOwnedUnitAsync(id, ct);
 
         unit.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         unit.IsActive = false;
@@ -123,9 +133,26 @@ public class InventoryUnitService : IInventoryUnitService
             .ToListAsync(ct);
     }
 
-    private async Task EnsureDefaultUnitsAsync(CancellationToken ct)
+    private async Task<InventoryUnit> RequireOwnedUnitAsync(Guid id, CancellationToken ct)
     {
-        if (await _db.InventoryUnits.AnyAsync(ct))
+        var unit = await _db.InventoryUnits.FirstOrDefaultAsync(u => u.Id == id, ct)
+            ?? throw new KeyNotFoundException("Unit not found.");
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(unit.OwnerUserId, ownerId, false))
+                throw new KeyNotFoundException("Unit not found.");
+        }
+
+        return unit;
+    }
+
+    private async Task EnsureDefaultUnitsAsync(Guid ownerId, CancellationToken ct)
+    {
+        var hasAny = await _db.InventoryUnits.AnyAsync(
+            u => _tenantContext.IsSuperAdmin || u.OwnerUserId == ownerId, ct);
+        if (hasAny)
             return;
 
         var defaults = new[] { "قطعة", "علبة", "كرتونة" };
@@ -135,16 +162,20 @@ public class InventoryUnitService : IInventoryUnitService
             _db.InventoryUnits.Add(new InventoryUnit
             {
                 TenantId = _tenantContext.TenantId,
+                OwnerUserId = ownerId,
                 Name = name,
                 NameAr = name,
                 IsActive = true
             });
         }
 
-        // Also import distinct unit names already used on items
+        // Import distinct unit names already used on items in this master's branches.
+        var allowedBranches = _tenantContext.AllowedBranchIds;
         var used = await _db.CafeteriaItems
             .IgnoreQueryFilters()
-            .Where(i => i.TenantId == _tenantContext.TenantId && !i.IsDeleted)
+            .Where(i => i.TenantId == _tenantContext.TenantId
+                        && !i.IsDeleted
+                        && (_tenantContext.IsSuperAdmin || allowedBranches.Contains(i.BranchId)))
             .Select(i => new { i.BaseUnitName, i.LargeUnitName })
             .ToListAsync(ct);
 
@@ -162,6 +193,7 @@ public class InventoryUnitService : IInventoryUnitService
             _db.InventoryUnits.Add(new InventoryUnit
             {
                 TenantId = _tenantContext.TenantId,
+                OwnerUserId = ownerId,
                 Name = name,
                 NameAr = name,
                 IsActive = true

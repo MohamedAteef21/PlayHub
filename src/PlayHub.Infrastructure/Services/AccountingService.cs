@@ -22,7 +22,14 @@ public class AccountingService : IAccountingService
 
     public async Task<IReadOnlyList<ExpenseCategoryDto>> GetCategoriesAsync(CancellationToken ct = default)
     {
-        return await _db.ExpenseCategories
+        var query = _db.ExpenseCategories.AsQueryable();
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            query = query.Where(c => c.OwnerUserId == ownerId);
+        }
+
+        return await query
             .OrderBy(c => c.Name)
             .Select(c => new ExpenseCategoryDto(c.Id, c.Name, c.NameAr, c.IsActive))
             .ToListAsync(ct);
@@ -30,9 +37,11 @@ public class AccountingService : IAccountingService
 
     public async Task<ExpenseCategoryDto> CreateCategoryAsync(CreateExpenseCategoryRequest request, CancellationToken ct = default)
     {
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var category = new ExpenseCategory
         {
             TenantId = _tenantContext.TenantId,
+            OwnerUserId = ownerId,
             Name = request.Name.Trim(),
             NameAr = request.NameAr?.Trim()
         };
@@ -46,8 +55,7 @@ public class AccountingService : IAccountingService
 
     public async Task<ExpenseCategoryDto> UpdateCategoryAsync(Guid id, UpdateExpenseCategoryRequest request, CancellationToken ct = default)
     {
-        var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Category not found.");
+        var category = await RequireOwnedCategoryAsync(id, ct);
 
         category.Name = request.Name.Trim();
         category.NameAr = request.NameAr?.Trim();
@@ -61,13 +69,27 @@ public class AccountingService : IAccountingService
 
     public async Task SoftDeleteCategoryAsync(Guid id, CancellationToken ct = default)
     {
-        var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Category not found.");
+        var category = await RequireOwnedCategoryAsync(id, ct);
 
         category.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         category.IsActive = false;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("ExpenseCategory.SoftDeleted", "ExpenseCategory", category.Id, new { category.Name }, ct: ct);
+    }
+
+    private async Task<ExpenseCategory> RequireOwnedCategoryAsync(Guid id, CancellationToken ct)
+    {
+        var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Category not found.");
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+            if (!OwnerScope.CanAccess(category.OwnerUserId, ownerId, false))
+                throw new KeyNotFoundException("Category not found.");
+        }
+
+        return category;
     }
 
     public async Task<PagedResult<ExpenseDto>> GetExpensesAsync(

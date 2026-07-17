@@ -79,6 +79,7 @@ public class RevenueEntry : BaseEntity, IBranchEntity, ISoftDelete
 public class ExpenseCategory : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? NameAr { get; set; }
     public bool IsActive { get; set; } = true;
@@ -87,6 +88,7 @@ public class ExpenseCategory : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public User? OwnerUser { get; set; }
     public ICollection<Expense> Expenses { get; set; } = [];
 }
 

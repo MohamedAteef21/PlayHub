@@ -14,28 +14,29 @@ import { PageHeader, StatCard } from '@/components/ui/PageHelpers';
 export function HomeDashboardPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
+  const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const canReports = hasPermission(user, Permissions.ReportsView);
 
   const { data: sessions = [] } = useQuery({
-    queryKey: ['sessions', 'active'],
+    queryKey: ['sessions', 'active', user?.id, activeBranchId],
     queryFn: sessionsApi.getActive,
     refetchInterval: 10000,
     meta: { silent: true },
   });
 
   const { data: dashboard } = useQuery({
-    queryKey: ['assets-dashboard'],
+    queryKey: ['assets-dashboard', user?.id, activeBranchId],
     queryFn: assetsApi.getDashboard,
   });
 
   const { data: items = [] } = useQuery({
-    queryKey: ['cafeteria-items'],
+    queryKey: ['cafeteria-items', user?.id, activeBranchId],
     queryFn: cafeteriaApi.getItems,
   });
 
   const day = today();
   const { data: finance } = useQuery({
-    queryKey: ['home-finance', day],
+    queryKey: ['home-finance', day, user?.id, activeBranchId],
     queryFn: () => accountingApi.getDashboard(toIsoDate(day), toIsoDateEnd(day)),
     enabled: canReports,
   });

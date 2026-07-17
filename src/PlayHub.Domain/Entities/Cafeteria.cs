@@ -27,10 +27,11 @@ public class CafeteriaItem : BaseEntity, IBranchEntity, ISoftDelete
     public Branch Branch { get; set; } = null!;
 }
 
-/// <summary>Tenant-managed unit names (piece, carton, …) picked when creating items.</summary>
+/// <summary>Per-master unit names (piece, carton, …) picked when creating items.</summary>
 public class InventoryUnit : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? NameAr { get; set; }
     public bool IsActive { get; set; } = true;
@@ -39,6 +40,7 @@ public class InventoryUnit : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public User? OwnerUser { get; set; }
 }
 
 /// <summary>History of base/large unit or conversion factor changes on an item.</summary>

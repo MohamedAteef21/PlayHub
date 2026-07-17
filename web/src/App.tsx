@@ -20,7 +20,7 @@ import { useAuthStore, useUiStore } from '@/store';
 import { AuthSessionKeepAlive } from '@/components/AuthSessionKeepAlive';
 import '@/i18n';
 
-const queryClient = new QueryClient({
+export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
 });
 

@@ -242,7 +242,7 @@ export function DashboardPage() {
   }, [customerSearch]);
 
   const { data: dashboard, isLoading } = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', user?.id, activeBranchId],
     queryFn: assetsApi.getDashboard,
     refetchInterval: 30000,
     meta: { silent: true },
