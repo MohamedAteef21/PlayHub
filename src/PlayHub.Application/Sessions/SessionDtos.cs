@@ -82,6 +82,8 @@ public record AddSessionCafeteriaRequest(
 /// <summary>AdditionalMinutes = null switches the session to an open (unlimited) timer.</summary>
 public record ExtendSessionRequest(int? AdditionalMinutes);
 
+public record UpdateWatchersRequest(int WatcherCount);
+
 public record ReturnSessionCafeteriaRequest(Guid SessionCafeteriaLineId, int Quantity, string Reason);
 
 public record SessionCafeteriaReturnDto(
@@ -178,6 +180,7 @@ public interface ISessionService
     Task<SessionLiveDto> PauseSessionAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> ResumeSessionAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> ExtendSessionAsync(Guid id, ExtendSessionRequest request, CancellationToken ct = default);
+    Task<SessionLiveDto> UpdateWatcherCountAsync(Guid id, UpdateWatchersRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> ConvertSessionAsync(Guid id, ConvertSessionRequest request, CancellationToken ct = default);
     Task<SessionDetailDto> CloseSessionAsync(Guid id, CloseSessionRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> AddCafeteriaItemAsync(Guid id, AddSessionCafeteriaRequest request, CancellationToken ct = default);

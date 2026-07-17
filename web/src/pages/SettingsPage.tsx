@@ -7,7 +7,7 @@ import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import { SessionMode, TimeUnit, WatchingBilling, PaymentAccountType, NotificationChannel } from '@/types';
-import type { BranchPaymentAccount } from '@/types';
+import type { BranchPaymentAccount, PricingPlan, Room } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Icon, type IconName } from '@/components/ui/Icons';
@@ -46,6 +46,7 @@ export function SettingsPage() {
   const lastSavedWaSessionRef = useRef<string | null>(null);
 
   const [roomOpen, setRoomOpen] = useState(false);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [roomName, setRoomName] = useState('');
   const [roomNumber, setRoomNumber] = useState('');
   const [roomCapacity, setRoomCapacity] = useState('10');
@@ -59,6 +60,8 @@ export function SettingsPage() {
   const [ctrlQty, setCtrlQty] = useState('2');
 
   const [planOpen, setPlanOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<PricingPlan | null>(null);
+  const [planIsActive, setPlanIsActive] = useState(true);
   const [planName, setPlanName] = useState('');
   const [planMode, setPlanMode] = useState<number>(SessionMode.Gaming);
   const [planUnit, setPlanUnit] = useState<number>(TimeUnit.PerHour);
@@ -332,16 +335,21 @@ export function SettingsPage() {
   });
 
   const roomMutation = useMutation({
-    mutationFn: () =>
-      assetsApi.createRoom({
+    mutationFn: () => {
+      const data = {
         name: roomName,
         roomNumber: roomNumber || undefined,
         maxWatchingCapacity: Number(roomCapacity) || 10,
         assets: draftRoomAssets.length ? draftRoomAssets : undefined,
         vipSurchargePerHour: Number(roomVipSurcharge) || 0,
-      }),
+      };
+      return editingRoom
+        ? assetsApi.updateRoom(editingRoom.id, { ...data, isActive: editingRoom.isActive })
+        : assetsApi.createRoom(data);
+    },
     onSuccess: () => {
       setRoomOpen(false);
+      setEditingRoom(null);
       setRoomName('');
       setRoomNumber('');
       setRoomVipSurcharge('0');
@@ -446,10 +454,9 @@ export function SettingsPage() {
   });
 
   const planMutation = useMutation({
-    mutationFn: () =>
-      pricingApi.createPlan({
+    mutationFn: () => {
+      const data = {
         name: planName,
-        sessionMode: planMode,
         timeUnit: planUnit,
         watchingBilling:
           planMode === SessionMode.Watching ? planWatchingBilling : WatchingBilling.PerPerson,
@@ -470,14 +477,20 @@ export function SettingsPage() {
             : undefined,
         packagePrice:
           planMode === SessionMode.Gaming && planIsPackage ? Number(planPackagePrice) : undefined,
-      }),
+      };
+      return editingPlan
+        ? pricingApi.updatePlan(editingPlan.id, { ...data, isActive: planIsActive })
+        : pricingApi.createPlan({ ...data, sessionMode: planMode });
+    },
     onSuccess: () => {
       setPlanOpen(false);
+      setEditingPlan(null);
       setPlanName('');
       setPlanUnit(TimeUnit.PerHour);
       setPlanWatchingBilling(WatchingBilling.PerPerson);
       setPlanIsPackage(false);
       setPlanPackagePrice('');
+      setPlanIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
       queryClient.invalidateQueries({ queryKey: ['plans'] });
     },
@@ -581,7 +594,18 @@ export function SettingsPage() {
       {tab === 'rooms' && (
         <section className="space-y-4">
           {canManageAssets && (
-            <Button onClick={() => { setError(''); setRoomOpen(true); }}>
+            <Button
+              onClick={() => {
+                setError('');
+                setEditingRoom(null);
+                setRoomName('');
+                setRoomNumber('');
+                setRoomCapacity('10');
+                setRoomVipSurcharge('0');
+                setDraftRoomAssets([]);
+                setRoomOpen(true);
+              }}
+            >
               <Icon name="plus" className="h-4 w-4" />
               {t('settings.addRoom')}
             </Button>
@@ -593,7 +617,7 @@ export function SettingsPage() {
                   <span className="rounded-lg bg-primary/15 p-2 text-primary">
                     <Icon name="room" className="h-5 w-5" />
                   </span>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium">{r.name}</p>
                     <p className="text-xs text-muted">
                       {r.roomNumber ? `#${r.roomNumber} · ` : ''}
@@ -605,6 +629,30 @@ export function SettingsPage() {
                       </p>
                     )}
                   </div>
+                  {canManageAssets && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setError('');
+                        setEditingRoom(r);
+                        setRoomName(r.name);
+                        setRoomNumber(r.roomNumber ?? '');
+                        setRoomCapacity(String(r.maxWatchingCapacity));
+                        setRoomVipSurcharge(String(r.vipSurchargePerHour ?? 0));
+                        setDraftRoomAssets(
+                          (r.assets ?? []).map((a) => ({
+                            venueAssetTypeId: a.venueAssetTypeId,
+                            quantity: a.quantity,
+                            workingCount: a.workingCount,
+                          }))
+                        );
+                        setRoomOpen(true);
+                      }}
+                    >
+                      {t('users.edit')}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -674,7 +722,23 @@ export function SettingsPage() {
       {tab === 'pricing' && (
         <section className="space-y-4">
           {canManageSettings && (
-            <Button onClick={() => { setError(''); setPlanOpen(true); }}>
+            <Button
+              onClick={() => {
+                setError('');
+                setEditingPlan(null);
+                setPlanName('');
+                setPlanMode(SessionMode.Gaming);
+                setPlanUnit(TimeUnit.PerHour);
+                setPlanWatchingBilling(WatchingBilling.PerPerson);
+                setPlanRate('50');
+                setPlanCoupleRate('75');
+                setPlanIsPackage(false);
+                setPlanPackageHours('5');
+                setPlanPackagePrice('');
+                setPlanIsActive(true);
+                setPlanOpen(true);
+              }}
+            >
               <Icon name="plus" className="h-4 w-4" />
               {t('settings.addPlan')}
             </Button>
@@ -686,7 +750,7 @@ export function SettingsPage() {
                   <span className="rounded-lg bg-success/15 p-2 text-success">
                     <Icon name="pricing" className="h-5 w-5" />
                   </span>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium">{p.name}</p>
                     <p className="text-xs text-muted">
                       {p.sessionMode === SessionMode.Gaming ? t('session.gaming') : t('session.watching')}
@@ -708,7 +772,40 @@ export function SettingsPage() {
                         {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')} = {formatCurrency(p.packagePrice)}
                       </p>
                     )}
+                    {!p.isActive && (
+                      <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>
+                    )}
                   </div>
+                  {canManageSettings && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setError('');
+                        setEditingPlan(p);
+                        setPlanName(p.name);
+                        setPlanMode(p.sessionMode);
+                        setPlanUnit(p.timeUnit);
+                        setPlanWatchingBilling(p.watchingBilling);
+                        setPlanRate(
+                          String(
+                            p.sessionMode === SessionMode.Gaming
+                              ? p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.gamingRates[0]?.rate ?? 0
+                              : p.watchingRates[0]?.ratePerPerson ?? 0
+                          )
+                        );
+                        setPlanCoupleRate(String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0));
+                        const isPkg = p.packagePrice != null && p.packageDurationMinutes != null;
+                        setPlanIsPackage(isPkg);
+                        setPlanPackageHours(isPkg ? String(Math.round(((p.packageDurationMinutes ?? 0) / 60) * 10) / 10) : '5');
+                        setPlanPackagePrice(isPkg ? String(p.packagePrice) : '');
+                        setPlanIsActive(p.isActive);
+                        setPlanOpen(true);
+                      }}
+                    >
+                      {t('users.edit')}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -1053,7 +1150,14 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal open={roomOpen} onClose={() => setRoomOpen(false)} title={t('settings.addRoom')}>
+      <Modal
+        open={roomOpen}
+        onClose={() => {
+          setRoomOpen(false);
+          setEditingRoom(null);
+        }}
+        title={editingRoom ? t('settings.editRoom') : t('settings.addRoom')}
+      >
         <div className="space-y-3">
           <Input label={t('settings.roomName')} value={roomName} onChange={(e) => setRoomName(e.target.value)} />
           <Input label={t('settings.roomNumber')} value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} />
@@ -1186,18 +1290,25 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal open={planOpen} onClose={() => setPlanOpen(false)} title={t('settings.addPlan')}>
+      <Modal
+        open={planOpen}
+        onClose={() => {
+          setPlanOpen(false);
+          setEditingPlan(null);
+        }}
+        title={editingPlan ? t('settings.editPlan') : t('settings.addPlan')}
+      >
         <div className="space-y-3">
           <Input label={t('settings.planName')} value={planName} onChange={(e) => setPlanName(e.target.value)} />
 
           <div className="flex gap-2">
-            <Button size="sm" variant={planMode === SessionMode.Gaming ? 'primary' : 'secondary'} onClick={() => {
+            <Button size="sm" disabled={!!editingPlan} variant={planMode === SessionMode.Gaming ? 'primary' : 'secondary'} onClick={() => {
               setPlanMode(SessionMode.Gaming);
               setPlanWatchingBilling(WatchingBilling.PerPerson);
             }}>
               {t('session.gaming')}
             </Button>
-            <Button size="sm" variant={planMode === SessionMode.Watching ? 'primary' : 'secondary'} onClick={() => {
+            <Button size="sm" disabled={!!editingPlan} variant={planMode === SessionMode.Watching ? 'primary' : 'secondary'} onClick={() => {
               setPlanMode(SessionMode.Watching);
               setPlanWatchingBilling(WatchingBilling.PerPerson);
               setPlanUnit(TimeUnit.PerHour);
@@ -1286,6 +1397,17 @@ export function SettingsPage() {
                 </>
               )}
             </div>
+          )}
+
+          {editingPlan && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={planIsActive}
+                onChange={(e) => setPlanIsActive(e.target.checked)}
+              />
+              {t('settings.planActive')}
+            </label>
           )}
 
           {error && <p className="text-sm text-danger">{error}</p>}

@@ -214,6 +214,11 @@ export const sessionsApi = {
       body: JSON.stringify(data),
     }),
   getById: (id: string) => apiFetch<import('@/types').SessionDetail>(`/sessions/${id}`),
+  updateWatchers: (id: string, watcherCount: number) =>
+    apiFetch<import('@/types').SessionLive>(`/sessions/${id}/watchers`, {
+      method: 'POST',
+      body: JSON.stringify({ watcherCount }),
+    }),
   addCafeteria: (
     sessionId: string,
     cafeteriaItemId: string,
@@ -319,6 +324,23 @@ export const pricingApi = {
   }) =>
     apiFetch<import('@/types').PricingPlan>('/pricing/plans', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePlan: (
+    id: string,
+    data: {
+      name: string;
+      timeUnit: number;
+      watchingBilling?: number;
+      isActive: boolean;
+      gamingRates?: { controllerCount: number; rate: number }[];
+      watchingRates?: { ratePerPerson: number }[];
+      packageDurationMinutes?: number | null;
+      packagePrice?: number | null;
+    }
+  ) =>
+    apiFetch<import('@/types').PricingPlan>(`/pricing/plans/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
 };
@@ -439,25 +461,6 @@ export const inventoryApi = {
     apiFetch<import('@/types').ItemUnitConversionLog[]>(
       `/inventory/conversion-logs${itemId ? `?itemId=${itemId}` : ''}`
     ),
-};
-
-export const purchaseOrdersApi = {
-  getAll: (page = 1, pageSize = 20) =>
-    apiFetch<import('@/types').PagedResult<import('@/types').PurchaseOrder>>(
-      `/purchase-orders?page=${page}&pageSize=${pageSize}`
-    ),
-  create: (data: {
-    supplierName?: string;
-    lines: { cafeteriaItemId: string; orderedQuantity: number; unitCost: number }[];
-  }) =>
-    apiFetch<import('@/types').PurchaseOrder>('/purchase-orders', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  markOrdered: (id: string) =>
-    apiFetch<import('@/types').PurchaseOrder>(`/purchase-orders/${id}/order`, { method: 'POST' }),
-  receive: (id: string) =>
-    apiFetch<import('@/types').PurchaseOrder>(`/purchase-orders/${id}/receive`, { method: 'POST' }),
 };
 
 export const accountingApi = {

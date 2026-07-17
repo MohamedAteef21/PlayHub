@@ -67,6 +67,13 @@ public class SessionsController : ControllerBase
     public async Task<IActionResult> Extend(Guid id, [FromBody] ExtendSessionRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _sessionService.ExtendSessionAsync(id, request, ct));
 
+    /// <summary>Change the watcher headcount on an active watching session.</summary>
+    [HttpPost("{id:guid}/watchers")]
+    [Authorize(Policy = PermissionPolicies.SessionsCreate)]
+    [ProducesResponseType(typeof(SessionLiveDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateWatchers(Guid id, [FromBody] UpdateWatchersRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _sessionService.UpdateWatcherCountAsync(id, request, ct));
+
     /// <summary>Convert watching → gaming (individual/couple) and start hourly timer.</summary>
     [HttpPost("{id:guid}/convert")]
     [Authorize(Policy = PermissionPolicies.SessionsCreate)]

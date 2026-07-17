@@ -17,8 +17,6 @@ export const Permissions = {
   InventoryView: 'Inventory.View',
   InventoryAdjust: 'Inventory.Adjust',
   InventoryManageItems: 'Inventory.ManageItems',
-  PurchaseOrdersCreate: 'PurchaseOrders.Create',
-  PurchaseOrdersReceive: 'PurchaseOrders.Receive',
   ExpensesView: 'Expenses.View',
   ExpensesAdd: 'Expenses.Add',
   ReportsView: 'Reports.View',
@@ -44,8 +42,6 @@ export const PERMISSION_CATALOG: PermissionInfo[] = [
   { id: '9', code: 'Inventory.View', module: 'Inventory', action: 'View', description: 'View stock' },
   { id: '10', code: 'Inventory.Adjust', module: 'Inventory', action: 'Adjust', description: 'Stock vouchers' },
   { id: '11', code: 'Inventory.ManageItems', module: 'Inventory', action: 'ManageItems', description: 'Items & units' },
-  { id: '12', code: 'PurchaseOrders.Create', module: 'PurchaseOrders', action: 'Create', description: 'Create PO' },
-  { id: '13', code: 'PurchaseOrders.Receive', module: 'PurchaseOrders', action: 'Receive', description: 'Receive PO' },
   { id: '14', code: 'Expenses.View', module: 'Expenses', action: 'View', description: 'View expenses' },
   { id: '15', code: 'Expenses.Add', module: 'Expenses', action: 'Add', description: 'Add expense' },
   { id: '16', code: 'Reports.View', module: 'Reports', action: 'View', description: 'View reports' },
@@ -72,7 +68,9 @@ export function normalizePermissionCatalog(raw: unknown): PermissionInfo[] {
       if (!code || !module) return null;
       return { id, code, module, action, description } satisfies PermissionInfo;
     })
-    .filter((p): p is PermissionInfo => p !== null);
+    .filter((p): p is PermissionInfo => p !== null)
+    // Purchase orders feature was removed from the UI — hide its permissions.
+    .filter((p) => p.module !== 'PurchaseOrders');
 
   return mapped.length > 0 ? mapped : PERMISSION_CATALOG;
 }

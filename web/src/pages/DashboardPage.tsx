@@ -34,6 +34,7 @@ function DeviceCard({
   onClose,
   onConvert,
   onExtend,
+  onWatchersChange,
   onAddCafeteria,
   canAddCafeteria,
 }: {
@@ -46,6 +47,7 @@ function DeviceCard({
   onClose: () => void;
   onConvert: () => void;
   onExtend: (additionalMinutes: number | null) => void;
+  onWatchersChange: (watcherCount: number) => void;
   onAddCafeteria: () => void;
   canAddCafeteria: boolean;
 }) {
@@ -105,13 +107,38 @@ function DeviceCard({
               </Button>
             </div>
           )}
-          <p className="text-xs text-muted">
-            {session.sessionMode === SessionMode.Gaming
-              ? `${session.controllerCount} ${t('dashboard.controllers')}`
-              : `${session.watcherCount} ${t('dashboard.watchers')}`}
-            {' · '}{session.pricingPlanName}
-            {session.plannedDurationMinutes == null ? ` · ${t('dashboard.openTimer')}` : ''}
-          </p>
+          {session.sessionMode === SessionMode.Gaming ? (
+            <p className="text-xs text-muted">
+              {session.controllerCount} {t('dashboard.controllers')}
+              {' · '}{session.pricingPlanName}
+              {session.plannedDurationMinutes == null ? ` · ${t('dashboard.openTimer')}` : ''}
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+              <span>{t('dashboard.watchers')}:</span>
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-surface font-bold hover:bg-surface-hover disabled:opacity-40"
+                disabled={(session.watcherCount ?? 1) <= 1}
+                onClick={() => onWatchersChange((session.watcherCount ?? 2) - 1)}
+              >
+                −
+              </button>
+              <span className="min-w-5 text-center text-sm font-semibold text-text">{session.watcherCount}</span>
+              <button
+                type="button"
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-surface font-bold hover:bg-surface-hover disabled:opacity-40"
+                disabled={(session.watcherCount ?? 0) >= device.maxWatchingCapacity}
+                onClick={() => onWatchersChange((session.watcherCount ?? 0) + 1)}
+              >
+                +
+              </button>
+              <span>
+                · {session.pricingPlanName}
+                {session.plannedDurationMinutes == null ? ` · ${t('dashboard.openTimer')}` : ''}
+              </span>
+            </div>
+          )}
           {(session.cafeteriaCost > 0 || session.currentTimeCost > 0) && (
             <p className="text-xs text-muted">
               {t('dashboard.timeCost')}: {formatCurrency(session.currentTimeCost)}
@@ -715,6 +742,13 @@ export function DashboardPage() {
                     onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
                     onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
                     onExtend={(mins) => session && sessionsApi.extend(session.id, mins).then(onUpdate)}
+                    onWatchersChange={(count) =>
+                      session &&
+                      sessionsApi
+                        .updateWatchers(session.id, count)
+                        .then(onUpdate)
+                        .catch((e: Error) => window.alert(e.message))
+                    }
                     onConvert={() => {
                       if (!session) return;
                       setConvertModal(session);

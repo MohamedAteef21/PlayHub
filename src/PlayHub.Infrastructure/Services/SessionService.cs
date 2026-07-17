@@ -284,6 +284,96 @@ public class SessionService : ISessionService
         return live;
     }
 
+    /// <summary>Change the number of watchers on an active watching session.
+    /// Per-screen (time-billed) plans accrue the elapsed segment at the old headcount first.</summary>
+    public async Task<SessionLiveDto> UpdateWatcherCountAsync(Guid id, UpdateWatchersRequest request, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var billingRoundUp = await GetBillingRoundUpAsync(ct);
+
+        var session = await _db.Sessions
+            .Include(s => s.Pauses)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
+            .Include(s => s.Device).ThenInclude(d => d.Room)
+            .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
+            ?? throw new KeyNotFoundException("Active session not found.");
+
+        if (session.SessionMode != SessionMode.Watching)
+            throw new InvalidOperationException("Watcher count can only be changed on watching sessions.");
+
+        if (request.WatcherCount < 1)
+            throw new InvalidOperationException("Watcher count must be at least 1.");
+
+        var maxCapacity = session.Device.Room.MaxWatchingCapacity;
+        if (request.WatcherCount > maxCapacity)
+            throw new InvalidOperationException($"This room supports at most {maxCapacity} watcher(s).");
+
+        var oldCount = session.WatcherCount ?? 0;
+        if (request.WatcherCount == oldCount)
+        {
+            await LoadSessionGraphAsync(session, ct);
+            return MapLive(session, billingRoundUp);
+        }
+
+        if (IsTimeBilledWatching(session.RateSnapshot))
+        {
+            if (session.Status != SessionStatus.Open)
+                throw new InvalidOperationException("Resume the session before changing the watcher count.");
+
+            // Bill what has already run at the old headcount, then restart the segment at the new one.
+            // Intermediate segments are billed at exact prorated time (no round-up) so frequent
+            // headcount changes don't each add a full minimum unit; the final segment still rounds up.
+            var changeAt = DateTime.UtcNow;
+            var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, changeAt);
+            var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
+            var segmentCost = _costCalculator.CalculateTimeCost(
+                session.RateSnapshot, SessionMode.Watching, billableSeconds,
+                session.ControllerCount, session.WatcherCount, billingRoundUp: false);
+
+            session.AccruedTimeCost += segmentCost;
+            session.OriginalStartedAt ??= session.StartedAt;
+
+            // Keep the booking end time: the new segment carries only the remaining minutes.
+            if (session.PlannedDurationMinutes is > 0)
+            {
+                var consumedMinutes = (int)Math.Round(elapsed / 60.0);
+                session.PlannedDurationMinutes = Math.Max(1, session.PlannedDurationMinutes.Value - consumedMinutes);
+            }
+
+            session.StartedAt = changeAt;
+            session.TotalPausedSeconds = 0;
+        }
+
+        session.WatcherCount = request.WatcherCount;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Session.WatchersChanged", "Session", session.Id, new
+        {
+            From = oldCount,
+            To = request.WatcherCount
+        }, ct: ct);
+
+        await LoadSessionGraphAsync(session, ct);
+        var live = MapLive(session, billingRoundUp);
+        await _notifier.NotifySessionUpdatedAsync(branchId, live, ct);
+        return live;
+    }
+
+    /// <summary>Per-screen watching bills by time, so headcount changes must split the billing segments.</summary>
+    private static bool IsTimeBilledWatching(string rateSnapshotJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rateSnapshotJson);
+            return doc.RootElement.TryGetProperty("WatchingBilling", out var billing)
+                && billing.GetInt32() == (int)WatchingBilling.PerScreen;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public async Task<SessionLiveDto> ConvertSessionAsync(Guid id, ConvertSessionRequest request, CancellationToken ct = default)
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);

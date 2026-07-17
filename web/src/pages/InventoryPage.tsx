@@ -1,16 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { cafeteriaApi, inventoryApi, purchaseOrdersApi } from '@/api/client';
+import { cafeteriaApi, inventoryApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { formatStockDisplay, hasLargeUnit } from '@/lib/itemUnits';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import type { CafeteriaItem, InventoryUnit, PurchaseOrder, StockVoucher } from '@/types';
+import type { CafeteriaItem, InventoryUnit, StockVoucher } from '@/types';
 import {
   InventoryMovementType,
   InventoryUnitKind,
-  PurchaseOrderStatus,
   StockVoucherStatus,
   StockVoucherType,
 } from '@/types';
@@ -23,7 +22,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'stock' | 'vouchers' | 'movements' | 'orders' | 'units';
+type Tab = 'stock' | 'vouchers' | 'movements' | 'units';
 
 const selectClass = 'w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm';
 
@@ -36,13 +35,6 @@ const movementLabels: Record<number, string> = {
   [InventoryMovementType.StockIn]: 'Stock in',
   [InventoryMovementType.StockCount]: 'Count',
   [InventoryMovementType.Settlement]: 'Settlement',
-};
-
-const poStatusKey: Record<number, 'idle' | 'gaming' | 'watching' | 'paused'> = {
-  [PurchaseOrderStatus.Draft]: 'idle',
-  [PurchaseOrderStatus.Ordered]: 'gaming',
-  [PurchaseOrderStatus.Received]: 'watching',
-  [PurchaseOrderStatus.Cancelled]: 'paused',
 };
 
 export function InventoryPage() {
@@ -75,8 +67,6 @@ export function InventoryPage() {
 
   const canAdjust = hasPermission(user, Permissions.InventoryAdjust);
   const canManageItems = hasPermission(user, Permissions.InventoryManageItems);
-  const canCreatePo = hasPermission(user, Permissions.PurchaseOrdersCreate);
-  const canReceivePo = hasPermission(user, Permissions.PurchaseOrdersReceive);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['cafeteria-items'],
@@ -104,13 +94,6 @@ export function InventoryPage() {
     enabled: tab === 'movements',
   });
   const movements = movementsPage?.items ?? [];
-
-  const { data: ordersPage, isLoading: poLoading } = useQuery({
-    queryKey: ['purchase-orders', page, pageSize],
-    queryFn: () => purchaseOrdersApi.getAll(page, pageSize),
-    enabled: tab === 'orders',
-  });
-  const orders = ordersPage?.items ?? [];
 
   const { data: vouchersPage, isLoading: voucherLoading } = useQuery({
     queryKey: ['stock-vouchers', page, pageSize],
@@ -303,19 +286,6 @@ export function InventoryPage() {
     onError: (e: Error) => setError(e.message),
   });
 
-  const orderMutation = useMutation({
-    mutationFn: (id: string) => purchaseOrdersApi.markOrdered(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
-  });
-
-  const receiveMutation = useMutation({
-    mutationFn: (id: string) => purchaseOrdersApi.receive(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
-    },
-  });
-
   function itemLabel(item: CafeteriaItem) {
     return i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
   }
@@ -330,7 +300,6 @@ export function InventoryPage() {
     { id: 'stock', label: t('inventory.stock') },
     { id: 'vouchers', label: t('inventory.vouchers') },
     { id: 'movements', label: t('inventory.movements') },
-    { id: 'orders', label: t('inventory.purchaseOrders') },
     ...(canManageItems
       ? [{ id: 'units' as const, label: t('inventory.units', { defaultValue: 'Units' }) }]
       : []),
@@ -534,36 +503,6 @@ export function InventoryPage() {
               onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
             />
           </>
-        )
-      )}
-
-      {tab === 'orders' && (
-        poLoading ? (
-          <PageLoader />
-        ) : orders.length === 0 ? (
-          <p className="text-muted">{t('inventory.noOrders')}</p>
-        ) : (
-          <div className="space-y-4">
-            {orders.map((po) => (
-              <PoCard
-                key={po.id}
-                order={po}
-                canOrder={canCreatePo}
-                canReceive={canReceivePo}
-                onOrder={() => orderMutation.mutate(po.id)}
-                onReceive={() => receiveMutation.mutate(po.id)}
-                ordering={orderMutation.isPending}
-                receiving={receiveMutation.isPending}
-              />
-            ))}
-            <Pagination
-              page={page}
-              pageSize={pageSize}
-              totalCount={ordersPage?.totalCount ?? 0}
-              onPageChange={setPage}
-              onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-            />
-          </div>
         )
       )}
 
@@ -913,51 +852,3 @@ function VoucherCard({
   );
 }
 
-function PoCard({
-  order,
-  canOrder,
-  canReceive,
-  onOrder,
-  onReceive,
-  ordering,
-  receiving,
-}: {
-  order: PurchaseOrder;
-  canOrder: boolean;
-  canReceive: boolean;
-  onOrder: () => void;
-  onReceive: () => void;
-  ordering: boolean;
-  receiving: boolean;
-}) {
-  const { t } = useTranslation();
-  const status = poStatusKey[order.status] ?? 'idle';
-
-  return (
-    <div className="rounded-xl border border-border bg-surface-elevated p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-medium">{order.supplierName ?? t('inventory.noSupplier')}</p>
-          <p className="text-sm text-muted">{order.createdByName}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Badge status={status}>{t(`inventory.poStatus.${order.status}`, { defaultValue: String(order.status) })}</Badge>
-          <span className="font-semibold text-accent">{formatCurrency(order.totalCost)}</span>
-        </div>
-      </div>
-      <ul className="mb-3 space-y-1 text-sm text-muted">
-        {order.lines.map((l) => (
-          <li key={l.id}>{l.itemName} × {l.orderedQuantity} @ {formatCurrency(l.unitCost)}</li>
-        ))}
-      </ul>
-      <div className="flex gap-2">
-        {order.status === PurchaseOrderStatus.Draft && canOrder && (
-          <Button size="sm" loading={ordering} onClick={onOrder}>{t('inventory.markOrdered')}</Button>
-        )}
-        {order.status === PurchaseOrderStatus.Ordered && canReceive && (
-          <Button size="sm" loading={receiving} onClick={onReceive}>{t('inventory.receive')}</Button>
-        )}
-      </div>
-    </div>
-  );
-}
