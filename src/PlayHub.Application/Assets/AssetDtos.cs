@@ -20,7 +20,6 @@ public record RoomDto(
     string Name,
     string? RoomNumber,
     int MaxWatchingCapacity,
-    decimal VipSurchargePerHour,
     bool IsActive,
     int DeviceCount,
     IReadOnlyList<RoomAssetDto> Assets,
@@ -30,22 +29,36 @@ public record CreateRoomRequest(
     string Name,
     string? RoomNumber,
     int MaxWatchingCapacity,
-    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null,
-    decimal VipSurchargePerHour = 0);
+    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null);
 
 public record UpdateRoomRequest(
     string Name,
     string? RoomNumber,
     int MaxWatchingCapacity,
     bool IsActive,
-    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null,
-    decimal VipSurchargePerHour = 0);
+    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null);
 
-public record VenueAssetTypeDto(Guid Id, string Name, string? Description, bool IsActive);
+public record VenueAssetTypeDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    bool IsActive,
+    int TotalQuantity,
+    int WorkingCount,
+    int AssignedQuantity);
 
-public record CreateVenueAssetTypeRequest(string Name, string? Description);
+public record CreateVenueAssetTypeRequest(
+    string Name,
+    string? Description,
+    int TotalQuantity,
+    int WorkingCount);
 
-public record UpdateVenueAssetTypeRequest(string Name, string? Description, bool IsActive);
+public record UpdateVenueAssetTypeRequest(
+    string Name,
+    string? Description,
+    bool IsActive,
+    int TotalQuantity,
+    int WorkingCount);
 
 public record ControllerTypeDto(Guid Id, string Name, string? Description, bool IsActive);
 

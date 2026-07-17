@@ -16,6 +16,8 @@ public class PricingPlan : BaseEntity, ITenantEntity, ISoftDelete
     public int? PackageDurationMinutes { get; set; }
     /// <summary>Flat package price (usually cheaper than duration × hourly rate).</summary>
     public decimal? PackagePrice { get; set; }
+    /// <summary>Extra VIP amount added per billable hour when this plan is used (0 = none).</summary>
+    public decimal VipSurchargePerHour { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

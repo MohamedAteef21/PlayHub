@@ -27,7 +27,7 @@ export function SettingsPage() {
   const canManageAssets = hasPermission(user, Permissions.AssetsManage);
   const canManageSettings = hasPermission(user, Permissions.SettingsManage);
   const isMaster = !!user?.isMaster;
-  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : 'rooms');
+  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : canManageAssets ? 'venueAssets' : 'rooms');
 
   const [branchOpen, setBranchOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchDetail | null>(null);
@@ -52,7 +52,6 @@ export function SettingsPage() {
   const [roomName, setRoomName] = useState('');
   const [roomNumber, setRoomNumber] = useState('');
   const [roomCapacity, setRoomCapacity] = useState('10');
-  const [roomVipSurcharge, setRoomVipSurcharge] = useState('0');
 
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
@@ -75,11 +74,14 @@ export function SettingsPage() {
   const [planIsPackage, setPlanIsPackage] = useState(false);
   const [planPackageHours, setPlanPackageHours] = useState('5');
   const [planPackagePrice, setPlanPackagePrice] = useState('');
+  const [planVipSurcharge, setPlanVipSurcharge] = useState('0');
   const [error, setError] = useState('');
 
   const [assetTypeOpen, setAssetTypeOpen] = useState(false);
   const [editingAssetType, setEditingAssetType] = useState<VenueAssetType | null>(null);
   const [assetTypeName, setAssetTypeName] = useState('');
+  const [assetTotalQty, setAssetTotalQty] = useState('1');
+  const [assetWorkingQty, setAssetWorkingQty] = useState('1');
   const [roomAssetTypeId, setRoomAssetTypeId] = useState('');
   const [roomAssetQty, setRoomAssetQty] = useState('2');
   const [draftRoomAssets, setDraftRoomAssets] = useState<
@@ -374,7 +376,6 @@ export function SettingsPage() {
         roomNumber: roomNumber || undefined,
         maxWatchingCapacity: Number(roomCapacity) || 10,
         assets: draftRoomAssets.length ? draftRoomAssets : undefined,
-        vipSurchargePerHour: Number(roomVipSurcharge) || 0,
       };
       return editingRoom
         ? assetsApi.updateRoom(editingRoom.id, { ...data, isActive: editingRoom.isActive })
@@ -385,26 +386,34 @@ export function SettingsPage() {
       setEditingRoom(null);
       setRoomName('');
       setRoomNumber('');
-      setRoomVipSurcharge('0');
       setDraftRoomAssets([]);
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
     },
     onError: (e: Error) => setError(e.message),
   });
 
   const assetTypeMutation = useMutation({
-    mutationFn: () =>
-      editingAssetType
+    mutationFn: () => {
+      const data = {
+        name: assetTypeName,
+        totalQuantity: Number(assetTotalQty) || 0,
+        workingCount: Number(assetWorkingQty) || 0,
+      };
+      return editingAssetType
         ? assetsApi.updateVenueAssetType(editingAssetType.id, {
-            name: assetTypeName,
+            ...data,
             isActive: editingAssetType.isActive,
           })
-        : assetsApi.createVenueAssetType({ name: assetTypeName }),
+        : assetsApi.createVenueAssetType(data);
+    },
     onSuccess: () => {
       setAssetTypeOpen(false);
       setEditingAssetType(null);
       setAssetTypeName('');
+      setAssetTotalQty('1');
+      setAssetWorkingQty('1');
       queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -423,6 +432,7 @@ export function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -547,6 +557,7 @@ export function SettingsPage() {
         timeUnit: planUnit,
         watchingBilling:
           planMode === SessionMode.Watching ? planWatchingBilling : WatchingBilling.PerPerson,
+        vipSurchargePerHour: Number(planVipSurcharge) || 0,
         gamingRates:
           planMode === SessionMode.Gaming
             ? [
@@ -577,6 +588,7 @@ export function SettingsPage() {
       setPlanWatchingBilling(WatchingBilling.PerPerson);
       setPlanIsPackage(false);
       setPlanPackagePrice('');
+      setPlanVipSurcharge('0');
       setPlanIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -604,11 +616,11 @@ export function SettingsPage() {
 
   const tabs: { id: Tab; label: string; icon: IconName }[] = [
     ...(isMaster ? [{ id: 'branches' as const, label: t('settings.branches'), icon: 'branch' as const }] : []),
-    { id: 'rooms', label: t('settings.rooms'), icon: 'room' },
-    { id: 'devices', label: t('settings.devices'), icon: 'gaming' },
     ...(canManageAssets
       ? [{ id: 'venueAssets' as const, label: t('settings.venueAssets'), icon: 'inventory' as const }]
       : []),
+    { id: 'rooms', label: t('settings.rooms'), icon: 'room' },
+    { id: 'devices', label: t('settings.devices'), icon: 'gaming' },
     { id: 'pricing', label: t('settings.pricing'), icon: 'pricing' },
     ...(isMaster
       ? [{ id: 'alerts' as const, label: t('settings.alerts'), icon: 'mail' as const }]
@@ -724,7 +736,6 @@ export function SettingsPage() {
                 setRoomName('');
                 setRoomNumber('');
                 setRoomCapacity('10');
-                setRoomVipSurcharge('0');
                 setDraftRoomAssets([]);
                 setRoomOpen(true);
               }}
@@ -763,7 +774,6 @@ export function SettingsPage() {
                           setRoomName(r.name);
                           setRoomNumber(r.roomNumber ?? '');
                           setRoomCapacity(String(r.maxWatchingCapacity));
-                          setRoomVipSurcharge(String(r.vipSurchargePerHour ?? 0));
                           setDraftRoomAssets(
                             (r.assets ?? []).map((a) => ({
                               venueAssetTypeId: a.venueAssetTypeId,
@@ -806,6 +816,8 @@ export function SettingsPage() {
                 setError('');
                 setEditingAssetType(null);
                 setAssetTypeName('');
+                setAssetTotalQty('1');
+                setAssetWorkingQty('1');
                 setAssetTypeOpen(true);
               }}
             >
@@ -820,6 +832,16 @@ export function SettingsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{a.name}</p>
                     {a.description && <p className="text-xs text-muted">{a.description}</p>}
+                    <p className="mt-1 text-xs text-muted">
+                      {t('settings.assetTotalQty')}: {a.totalQuantity}
+                      {' · '}
+                      {t('settings.assetWorkingQty')}: {a.workingCount}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {t('settings.assetAssigned')}: {a.assignedQuantity}
+                      {' · '}
+                      {t('settings.assetAvailable')}: {Math.max(0, a.totalQuantity - a.assignedQuantity)}
+                    </p>
                     {!a.isActive && <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>}
                   </div>
                   {canManageAssets && (
@@ -831,6 +853,8 @@ export function SettingsPage() {
                           setError('');
                           setEditingAssetType(a);
                           setAssetTypeName(a.name);
+                          setAssetTotalQty(String(a.totalQuantity));
+                          setAssetWorkingQty(String(a.workingCount));
                           setAssetTypeOpen(true);
                         }}
                       >
@@ -950,6 +974,7 @@ export function SettingsPage() {
                 setPlanIsPackage(false);
                 setPlanPackageHours('5');
                 setPlanPackagePrice('');
+                setPlanVipSurcharge('0');
                 setPlanIsActive(true);
                 setPlanOpen(true);
               }}
@@ -987,6 +1012,11 @@ export function SettingsPage() {
                         {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')} = {formatCurrency(p.packagePrice)}
                       </p>
                     )}
+                    {(p.vipSurchargePerHour ?? 0) > 0 && (
+                      <p className="mt-1 text-xs text-muted">
+                        {t('settings.planVipSurcharge')}: {formatCurrency(p.vipSurchargePerHour)}
+                      </p>
+                    )}
                     {!p.isActive && (
                       <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>
                     )}
@@ -1015,6 +1045,7 @@ export function SettingsPage() {
                           setPlanIsPackage(isPkg);
                           setPlanPackageHours(isPkg ? String(Math.round(((p.packageDurationMinutes ?? 0) / 60) * 10) / 10) : '5');
                           setPlanPackagePrice(isPkg ? String(p.packagePrice) : '');
+                          setPlanVipSurcharge(String(p.vipSurchargePerHour ?? 0));
                           setPlanIsActive(p.isActive);
                           setPlanOpen(true);
                         }}
@@ -1408,56 +1439,70 @@ export function SettingsPage() {
           <Input label={t('settings.roomName')} value={roomName} onChange={(e) => setRoomName(e.target.value)} />
           <Input label={t('settings.roomNumber')} value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} />
           <Input label={t('settings.capacity')} type="number" value={roomCapacity} onChange={(e) => setRoomCapacity(e.target.value)} />
-          <div>
-            <Input label={t('settings.vipSurcharge')} type="number" value={roomVipSurcharge} onChange={(e) => setRoomVipSurcharge(e.target.value)} />
-            <p className="mt-1 text-xs text-muted">{t('settings.vipSurchargeHint')}</p>
+          <div className="space-y-2 rounded-lg border border-border p-3">
+            <p className="text-sm font-medium">{t('settings.roomAssets')}</p>
+            <p className="text-xs text-muted">{t('settings.assetsFirstHint')}</p>
+            {venueAssetTypes.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                    value={roomAssetTypeId}
+                    onChange={(e) => setRoomAssetTypeId(e.target.value)}
+                  >
+                    <option value="">{t('settings.assetTypeName')}</option>
+                    {venueAssetTypes.map((a) => {
+                      const originalQty =
+                        editingRoom?.assets?.find((x) => x.venueAssetTypeId === a.id)?.quantity ?? 0;
+                      const available = Math.max(0, a.totalQuantity - a.assignedQuantity + originalQty);
+                      return (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({t('settings.assetAvailable')}: {available})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <Input
+                    label={t('settings.assetQuantity')}
+                    type="number"
+                    value={roomAssetQty}
+                    onChange={(e) => setRoomAssetQty(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={!roomAssetTypeId}
+                    onClick={() => {
+                      const type = venueAssetTypes.find((a) => a.id === roomAssetTypeId);
+                      if (!type) return;
+                      const originalQty =
+                        editingRoom?.assets?.find((x) => x.venueAssetTypeId === roomAssetTypeId)?.quantity ?? 0;
+                      const available = Math.max(0, type.totalQuantity - type.assignedQuantity + originalQty);
+                      const qty = Math.min(Number(roomAssetQty) || 1, available);
+                      if (qty <= 0) return;
+                      setDraftRoomAssets((prev) => [
+                        ...prev.filter((x) => x.venueAssetTypeId !== roomAssetTypeId),
+                        { venueAssetTypeId: roomAssetTypeId, quantity: qty, workingCount: qty },
+                      ]);
+                      setRoomAssetTypeId('');
+                    }}
+                  >
+                    {t('common.save')}
+                  </Button>
+                </div>
+                {draftRoomAssets.map((a) => {
+                  const typeName = venueAssetTypes.find((t) => t.id === a.venueAssetTypeId)?.name ?? a.venueAssetTypeId;
+                  return (
+                    <p key={a.venueAssetTypeId} className="text-xs text-muted">
+                      {typeName}: {a.workingCount}/{a.quantity}
+                    </p>
+                  );
+                })}
+              </>
+            ) : (
+              <p className="text-xs text-muted">{t('settings.noAssetTypes')}</p>
+            )}
           </div>
-          {venueAssetTypes.length > 0 && (
-            <div className="space-y-2 rounded-lg border border-border p-3">
-              <p className="text-sm font-medium">{t('settings.roomAssets')}</p>
-              <div className="flex flex-wrap gap-2">
-                <select
-                  className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                  value={roomAssetTypeId}
-                  onChange={(e) => setRoomAssetTypeId(e.target.value)}
-                >
-                  <option value="">{t('settings.assetTypeName')}</option>
-                  {venueAssetTypes.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <Input
-                  label={t('settings.assetQuantity')}
-                  type="number"
-                  value={roomAssetQty}
-                  onChange={(e) => setRoomAssetQty(e.target.value)}
-                />
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={!roomAssetTypeId}
-                  onClick={() => {
-                    const qty = Number(roomAssetQty) || 1;
-                    setDraftRoomAssets((prev) => [
-                      ...prev.filter((x) => x.venueAssetTypeId !== roomAssetTypeId),
-                      { venueAssetTypeId: roomAssetTypeId, quantity: qty, workingCount: qty },
-                    ]);
-                    setRoomAssetTypeId('');
-                  }}
-                >
-                  {t('common.save')}
-                </Button>
-              </div>
-              {draftRoomAssets.map((a) => {
-                const typeName = venueAssetTypes.find((t) => t.id === a.venueAssetTypeId)?.name ?? a.venueAssetTypeId;
-                return (
-                  <p key={a.venueAssetTypeId} className="text-xs text-muted">
-                    {typeName}: {a.workingCount}/{a.quantity}
-                  </p>
-                );
-              })}
-            </div>
-          )}
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button className="w-full" loading={roomMutation.isPending} disabled={!roomName.trim()} onClick={() => roomMutation.mutate()}>
             {t('common.save')}
@@ -1502,6 +1547,20 @@ export function SettingsPage() {
       >
         <div className="space-y-3">
           <Input label={t('settings.assetTypeName')} value={assetTypeName} onChange={(e) => setAssetTypeName(e.target.value)} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label={t('settings.assetTotalQty')}
+              type="number"
+              value={assetTotalQty}
+              onChange={(e) => setAssetTotalQty(e.target.value)}
+            />
+            <Input
+              label={t('settings.assetWorkingQty')}
+              type="number"
+              value={assetWorkingQty}
+              onChange={(e) => setAssetWorkingQty(e.target.value)}
+            />
+          </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"
@@ -1648,6 +1707,16 @@ export function SettingsPage() {
           ) : (
             <Input label={planRateLabel()} type="number" value={planRate} onChange={(e) => setPlanRate(e.target.value)} />
           )}
+
+          <div>
+            <Input
+              label={t('settings.planVipSurcharge')}
+              type="number"
+              value={planVipSurcharge}
+              onChange={(e) => setPlanVipSurcharge(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-muted">{t('settings.vipSurchargeHint')}</p>
+          </div>
 
           {planMode === SessionMode.Gaming && planUnit !== TimeUnit.PerGame && (
             <div className="space-y-2 rounded-lg border border-border p-3">

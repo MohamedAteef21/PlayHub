@@ -71,6 +71,7 @@ public class PricingService : IPricingService
                 : WatchingBilling.PerPerson,
             PackageDurationMinutes = request.SessionMode == SessionMode.Gaming ? request.PackageDurationMinutes : null,
             PackagePrice = request.SessionMode == SessionMode.Gaming ? request.PackagePrice : null,
+            VipSurchargePerHour = Math.Max(0, request.VipSurchargePerHour),
         };
 
         ApplyRates(plan, request.GamingRates, request.WatchingRates);
@@ -101,6 +102,7 @@ public class PricingService : IPricingService
             : WatchingBilling.PerPerson;
         plan.PackageDurationMinutes = plan.SessionMode == SessionMode.Gaming ? request.PackageDurationMinutes : null;
         plan.PackagePrice = plan.SessionMode == SessionMode.Gaming ? request.PackagePrice : null;
+        plan.VipSurchargePerHour = Math.Max(0, request.VipSurchargePerHour);
         plan.IsActive = request.IsActive;
 
         _db.GamingRates.RemoveRange(plan.GamingRates);
@@ -214,6 +216,7 @@ public class PricingService : IPricingService
             plan.WatchingBilling,
             plan.PackageDurationMinutes,
             plan.PackagePrice,
+            plan.VipSurchargePerHour,
             plan.IsActive,
             plan.GamingRates.OrderBy(r => r.ControllerCount).Select(r => new GamingRateDto(r.ControllerCount, r.Rate)).ToList(),
             plan.WatchingRates.Select(r => new WatchingRateDto(r.RatePerPerson)).ToList(),

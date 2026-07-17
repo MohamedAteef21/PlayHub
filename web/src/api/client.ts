@@ -250,7 +250,6 @@ export const assetsApi = {
     roomNumber?: string;
     maxWatchingCapacity: number;
     assets?: { venueAssetTypeId: string; quantity: number; workingCount: number; notes?: string }[];
-    vipSurchargePerHour?: number;
   }) =>
     apiFetch<import('@/types').Room>('/assets/rooms', {
       method: 'POST',
@@ -264,7 +263,6 @@ export const assetsApi = {
       maxWatchingCapacity: number;
       isActive: boolean;
       assets?: { venueAssetTypeId: string; quantity: number; workingCount: number; notes?: string }[];
-      vipSurchargePerHour?: number;
     }
   ) =>
     apiFetch<import('@/types').Room>(`/assets/rooms/${id}`, {
@@ -319,12 +317,26 @@ export const assetsApi = {
     apiFetch<void>(`/assets/controller-types/${id}`, { method: 'DELETE' }),
   getVenueAssetTypes: () =>
     apiFetch<import('@/types').VenueAssetType[]>('/assets/venue-asset-types'),
-  createVenueAssetType: (data: { name: string; description?: string }) =>
+  createVenueAssetType: (data: {
+    name: string;
+    description?: string;
+    totalQuantity: number;
+    workingCount: number;
+  }) =>
     apiFetch<import('@/types').VenueAssetType>('/assets/venue-asset-types', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateVenueAssetType: (id: string, data: { name: string; description?: string; isActive: boolean }) =>
+  updateVenueAssetType: (
+    id: string,
+    data: {
+      name: string;
+      description?: string;
+      totalQuantity: number;
+      workingCount: number;
+      isActive: boolean;
+    }
+  ) =>
     apiFetch<import('@/types').VenueAssetType>(`/assets/venue-asset-types/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -343,6 +355,7 @@ export const pricingApi = {
     sessionMode: number;
     timeUnit: number;
     watchingBilling?: number;
+    vipSurchargePerHour?: number;
     gamingRates?: { controllerCount: number; rate: number }[];
     watchingRates?: { ratePerPerson: number }[];
     packageDurationMinutes?: number | null;
@@ -358,6 +371,7 @@ export const pricingApi = {
       name: string;
       timeUnit: number;
       watchingBilling?: number;
+      vipSurchargePerHour?: number;
       isActive: boolean;
       gamingRates?: { controllerCount: number; rate: number }[];
       watchingRates?: { ratePerPerson: number }[];

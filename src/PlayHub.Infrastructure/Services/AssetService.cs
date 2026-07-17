@@ -55,10 +55,10 @@ public class AssetService : IAssetService
         {
             TenantId = _tenantContext.TenantId,
             BranchId = branchId,
+            VipSurchargePerHour = 0,
             Name = request.Name.Trim(),
             RoomNumber = request.RoomNumber?.Trim(),
             MaxWatchingCapacity = request.MaxWatchingCapacity,
-            VipSurchargePerHour = Math.Max(0, request.VipSurchargePerHour)
         };
 
         _db.Rooms.Add(room);
@@ -87,7 +87,6 @@ public class AssetService : IAssetService
         room.Name = request.Name.Trim();
         room.RoomNumber = request.RoomNumber?.Trim();
         room.MaxWatchingCapacity = request.MaxWatchingCapacity;
-        room.VipSurchargePerHour = Math.Max(0, request.VipSurchargePerHour);
         room.IsActive = request.IsActive;
 
         if (request.Assets is not null)
@@ -130,10 +129,22 @@ public class AssetService : IAssetService
             query = query.Where(c => c.OwnerUserId == ownerId);
         }
 
-        return await query
-            .OrderBy(c => c.Name)
-            .Select(c => new VenueAssetTypeDto(c.Id, c.Name, c.Description, c.IsActive))
-            .ToListAsync(ct);
+        var types = await query.OrderBy(c => c.Name).ToListAsync(ct);
+        var typeIds = types.Select(t => t.Id).ToList();
+        var assigned = await _db.RoomAssets
+            .Where(a => typeIds.Contains(a.VenueAssetTypeId))
+            .GroupBy(a => a.VenueAssetTypeId)
+            .Select(g => new { TypeId = g.Key, Qty = g.Sum(x => x.Quantity) })
+            .ToDictionaryAsync(x => x.TypeId, x => x.Qty, ct);
+
+        return types.Select(c => new VenueAssetTypeDto(
+            c.Id,
+            c.Name,
+            c.Description,
+            c.IsActive,
+            c.TotalQuantity,
+            c.WorkingCount,
+            assigned.GetValueOrDefault(c.Id))).ToList();
     }
 
     public async Task<VenueAssetTypeDto> CreateVenueAssetTypeAsync(CreateVenueAssetTypeRequest request, CancellationToken ct = default)
@@ -141,6 +152,10 @@ public class AssetService : IAssetService
         var name = request.Name.Trim();
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Asset type name is required.");
+        if (request.TotalQuantity < 0 || request.WorkingCount < 0)
+            throw new InvalidOperationException("Asset quantities cannot be negative.");
+        if (request.WorkingCount > request.TotalQuantity)
+            throw new InvalidOperationException("Working count cannot exceed total quantity.");
 
         var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var type = new VenueAssetType
@@ -148,28 +163,42 @@ public class AssetService : IAssetService
             TenantId = _tenantContext.TenantId,
             OwnerUserId = ownerId,
             Name = name,
-            Description = request.Description?.Trim()
+            Description = request.Description?.Trim(),
+            TotalQuantity = request.TotalQuantity,
+            WorkingCount = request.WorkingCount
         };
 
         _db.VenueAssetTypes.Add(type);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("VenueAssetType.Created", "VenueAssetType", type.Id, new { type.Name }, ct: ct);
+        await _audit.LogAsync("VenueAssetType.Created", "VenueAssetType", type.Id, new { type.Name, type.TotalQuantity }, ct: ct);
 
-        return new VenueAssetTypeDto(type.Id, type.Name, type.Description, type.IsActive);
+        return new VenueAssetTypeDto(type.Id, type.Name, type.Description, type.IsActive, type.TotalQuantity, type.WorkingCount, 0);
     }
 
     public async Task<VenueAssetTypeDto> UpdateVenueAssetTypeAsync(Guid id, UpdateVenueAssetTypeRequest request, CancellationToken ct = default)
     {
         var type = await RequireOwnedVenueAssetTypeAsync(id, ct);
 
+        if (request.TotalQuantity < 0 || request.WorkingCount < 0)
+            throw new InvalidOperationException("Asset quantities cannot be negative.");
+        if (request.WorkingCount > request.TotalQuantity)
+            throw new InvalidOperationException("Working count cannot exceed total quantity.");
+
+        var assigned = await _db.RoomAssets.Where(a => a.VenueAssetTypeId == id).SumAsync(a => (int?)a.Quantity, ct) ?? 0;
+        if (request.TotalQuantity < assigned)
+            throw new InvalidOperationException(
+                $"Total quantity ({request.TotalQuantity}) cannot be less than already assigned to rooms ({assigned}).");
+
         type.Name = request.Name.Trim();
         type.Description = request.Description?.Trim();
         type.IsActive = request.IsActive;
+        type.TotalQuantity = request.TotalQuantity;
+        type.WorkingCount = request.WorkingCount;
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("VenueAssetType.Updated", "VenueAssetType", type.Id, new { type.Name, type.IsActive }, ct: ct);
+        await _audit.LogAsync("VenueAssetType.Updated", "VenueAssetType", type.Id, new { type.Name, type.TotalQuantity, type.IsActive }, ct: ct);
 
-        return new VenueAssetTypeDto(type.Id, type.Name, type.Description, type.IsActive);
+        return new VenueAssetTypeDto(type.Id, type.Name, type.Description, type.IsActive, type.TotalQuantity, type.WorkingCount, assigned);
     }
 
     public async Task SoftDeleteVenueAssetTypeAsync(Guid id, CancellationToken ct = default)
@@ -451,6 +480,26 @@ public class AssetService : IAssetService
 
     private async Task ReplaceRoomAssetsAsync(Room room, IReadOnlyList<UpsertRoomAssetRequest> assets, CancellationToken ct)
     {
+        // Validate stock before mutating: assigned elsewhere + this room ≤ TotalQuantity.
+        foreach (var group in assets.GroupBy(a => a.VenueAssetTypeId))
+        {
+            var typeId = group.Key;
+            var requestQty = group.Sum(a => a.Quantity);
+            var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(t => t.Id == typeId && t.IsActive, ct)
+                ?? throw new KeyNotFoundException($"Venue asset type {typeId} not found.");
+
+            var assignedElsewhere = await _db.RoomAssets
+                .Where(a => a.VenueAssetTypeId == typeId && a.RoomId != room.Id)
+                .SumAsync(a => (int?)a.Quantity, ct) ?? 0;
+
+            if (assignedElsewhere + requestQty > type.TotalQuantity)
+            {
+                var available = Math.Max(0, type.TotalQuantity - assignedElsewhere);
+                throw new InvalidOperationException(
+                    $"Not enough '{type.Name}' stock. Available to assign: {available}, requested: {requestQty}. Add stock in Venue Assets first.");
+            }
+        }
+
         _db.RoomAssets.RemoveRange(room.RoomAssets);
         room.RoomAssets.Clear();
 
@@ -533,7 +582,6 @@ public class AssetService : IAssetService
 
     private static RoomDto MapRoom(Room room) =>
         new(room.Id, room.BranchId, room.Name, room.RoomNumber, room.MaxWatchingCapacity,
-            room.VipSurchargePerHour,
             room.IsActive, room.Devices.Count(d => d.IsActive),
             room.RoomAssets.Select(MapRoomAsset).ToList(),
             room.CreatedAt);

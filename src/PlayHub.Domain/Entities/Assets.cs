@@ -9,7 +9,7 @@ public class Room : BaseEntity, IBranchEntity, ISoftDelete
     public string Name { get; set; } = string.Empty;
     public string? RoomNumber { get; set; }
     public int MaxWatchingCapacity { get; set; }
-    /// <summary>VIP premium added per hour on top of device rates (0 = regular room).</summary>
+    /// <summary>Legacy column — VIP surcharge now lives on PricingPlan.VipSurchargePerHour.</summary>
     public decimal VipSurchargePerHour { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
@@ -21,7 +21,7 @@ public class Room : BaseEntity, IBranchEntity, ISoftDelete
     public ICollection<RoomAsset> RoomAssets { get; set; } = [];
 }
 
-/// <summary>Per-master catalog for venue furniture/equipment (couches, extra TVs, etc.).</summary>
+/// <summary>Per-master catalog for venue furniture/equipment (couches, extra TVs, etc.). Add stock here, then assign to rooms.</summary>
 public class VenueAssetType : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
@@ -29,6 +29,10 @@ public class VenueAssetType : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    /// <summary>Total stock available to assign across rooms.</summary>
+    public int TotalQuantity { get; set; }
+    /// <summary>How many of the total are currently working / in service.</summary>
+    public int WorkingCount { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

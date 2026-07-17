@@ -15,6 +15,7 @@ public record PricingPlanDto(
     WatchingBilling WatchingBilling,
     int? PackageDurationMinutes,
     decimal? PackagePrice,
+    decimal VipSurchargePerHour,
     bool IsActive,
     IReadOnlyList<GamingRateDto> GamingRates,
     IReadOnlyList<WatchingRateDto> WatchingRates,
@@ -33,7 +34,8 @@ public record CreatePricingPlanRequest(
     IReadOnlyList<GamingRateInput>? GamingRates,
     IReadOnlyList<WatchingRateInput>? WatchingRates,
     int? PackageDurationMinutes = null,
-    decimal? PackagePrice = null);
+    decimal? PackagePrice = null,
+    decimal VipSurchargePerHour = 0);
 
 public record UpdatePricingPlanRequest(
     string Name,
@@ -43,4 +45,5 @@ public record UpdatePricingPlanRequest(
     IReadOnlyList<GamingRateInput>? GamingRates,
     IReadOnlyList<WatchingRateInput>? WatchingRates,
     int? PackageDurationMinutes = null,
-    decimal? PackagePrice = null);
+    decimal? PackagePrice = null,
+    decimal VipSurchargePerHour = 0);

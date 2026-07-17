@@ -151,7 +151,7 @@ public class SessionService : ISessionService
             PricingPlanId = plan.Id,
             ControllerCount = request.ControllerCount,
             WatcherCount = request.WatcherCount,
-            RoomSurchargePerHour = device.Room?.VipSurchargePerHour ?? 0m,
+            RoomSurchargePerHour = plan.VipSurchargePerHour,
             RateSnapshot = snapshot,
             Status = SessionStatus.Open,
             OpenedByUserId = _tenantContext.UserId,
@@ -441,6 +441,7 @@ public class SessionService : ISessionService
         session.SessionMode = SessionMode.Gaming;
         session.PricingPlanId = plan.Id;
         session.ControllerCount = request.ControllerCount;
+        session.RoomSurchargePerHour = plan.VipSurchargePerHour;
         session.RateSnapshot = snapshot;
         session.StartedAt = convertAt;
         session.TotalPausedSeconds = 0;

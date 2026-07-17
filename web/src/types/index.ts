@@ -226,6 +226,9 @@ export interface VenueAssetType {
   id: string;
   name: string;
   description: string | null;
+  totalQuantity: number;
+  workingCount: number;
+  assignedQuantity: number;
   isActive: boolean;
 }
 
@@ -251,6 +254,7 @@ export interface PricingPlan {
   sessionMode: number;
   timeUnit: number;
   watchingBilling: number;
+  vipSurchargePerHour: number;
   packageDurationMinutes: number | null;
   packagePrice: number | null;
   isActive: boolean;
@@ -527,7 +531,6 @@ export interface Room {
   name: string;
   roomNumber: string | null;
   maxWatchingCapacity: number;
-  vipSurchargePerHour: number;
   isActive: boolean;
   deviceCount: number;
   assets: RoomAsset[];
