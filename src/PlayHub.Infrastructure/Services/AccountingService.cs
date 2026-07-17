@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Accounting;
 using PlayHub.Application.Common;
+using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
 using PlayHub.Infrastructure.Data;
 
@@ -56,6 +57,17 @@ public class AccountingService : IAccountingService
         await _audit.LogAsync("ExpenseCategory.Updated", "ExpenseCategory", category.Id, new { category.Name }, ct: ct);
 
         return new ExpenseCategoryDto(category.Id, category.Name, category.NameAr, category.IsActive);
+    }
+
+    public async Task SoftDeleteCategoryAsync(Guid id, CancellationToken ct = default)
+    {
+        var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Category not found.");
+
+        category.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        category.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("ExpenseCategory.SoftDeleted", "ExpenseCategory", category.Id, new { category.Name }, ct: ct);
     }
 
     public async Task<PagedResult<ExpenseDto>> GetExpensesAsync(
@@ -115,6 +127,46 @@ public class AccountingService : IAccountingService
         await _db.Entry(expense).Reference(e => e.RecordedByUser).LoadAsync(ct);
 
         return MapExpense(expense);
+    }
+
+    public async Task<ExpenseDto> UpdateExpenseAsync(Guid id, UpdateExpenseRequest request, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+
+        if (request.Amount <= 0)
+            throw new InvalidOperationException("Expense amount must be greater than zero.");
+
+        var expense = await _db.Expenses
+            .Include(e => e.Category)
+            .Include(e => e.Branch)
+            .Include(e => e.RecordedByUser)
+            .FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Expense not found.");
+
+        var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == request.CategoryId && c.IsActive, ct)
+            ?? throw new KeyNotFoundException("Expense category not found.");
+
+        expense.CategoryId = category.Id;
+        expense.Amount = request.Amount;
+        expense.Description = request.Description.Trim();
+        expense.ExpenseDate = request.ExpenseDate;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Expense.Updated", "Expense", expense.Id, new { expense.Amount, category.Name }, ct: ct);
+
+        await _db.Entry(expense).Reference(e => e.Category).LoadAsync(ct);
+        return MapExpense(expense);
+    }
+
+    public async Task SoftDeleteExpenseAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var expense = await _db.Expenses.FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Expense not found.");
+
+        expense.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Expense.SoftDeleted", "Expense", expense.Id, new { expense.Amount, expense.Description }, ct: ct);
     }
 
     public async Task<FinancialDashboardDto> GetDashboardAsync(

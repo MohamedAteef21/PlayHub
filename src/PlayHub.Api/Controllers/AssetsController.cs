@@ -50,6 +50,12 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> UpdateRoom(Guid id, [FromBody] UpdateRoomRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _assetService.UpdateRoomAsync(id, request, ct));
 
+    [HttpDelete("rooms/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteRoom(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _assetService.SoftDeleteRoomAsync(id, ct));
+
     // --- Venue asset types (couches, etc.) ---
 
     [HttpGet("venue-asset-types")]
@@ -73,6 +79,12 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> UpdateVenueAssetType(Guid id, [FromBody] UpdateVenueAssetTypeRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _assetService.UpdateVenueAssetTypeAsync(id, request, ct));
 
+    [HttpDelete("venue-asset-types/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteVenueAssetType(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _assetService.SoftDeleteVenueAssetTypeAsync(id, ct));
+
     // --- Controller Types ---
 
     [HttpGet("controller-types")]
@@ -95,6 +107,12 @@ public class AssetsController : ControllerBase
     [ProducesResponseType(typeof(ControllerTypeDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateControllerType(Guid id, [FromBody] UpdateControllerTypeRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _assetService.UpdateControllerTypeAsync(id, request, ct));
+
+    [HttpDelete("controller-types/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteControllerType(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _assetService.SoftDeleteControllerTypeAsync(id, ct));
 
     // --- Devices ---
 
@@ -125,11 +143,34 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> UpdateDevice(Guid id, [FromBody] UpdateDeviceRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _assetService.UpdateDeviceAsync(id, request, ct));
 
+    [HttpDelete("devices/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteDevice(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _assetService.SoftDeleteDeviceAsync(id, ct));
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
         try
         {
             return Ok(await action());
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    private async Task<IActionResult> ExecuteNoContentAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Branches;
 using PlayHub.Application.Common;
+using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
@@ -134,6 +135,23 @@ public class BranchService : IBranchService
         await _audit.LogAsync("Branch.Updated", "Branch", branch.Id, new { branch.Name, branch.IsActive }, ct: ct);
 
         return ToDto(branch);
+    }
+
+    public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        if (!_tenantContext.IsSuperAdmin && !_tenantContext.AllowedBranchIds.Contains(id))
+            throw new UnauthorizedAccessException("You can only delete your own branches.");
+
+        var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == id, ct)
+            ?? throw new KeyNotFoundException("Branch not found.");
+
+        if (await _db.Sessions.AnyAsync(s => s.BranchId == id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Cannot delete a branch with active sessions.");
+
+        branch.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        branch.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Branch.SoftDeleted", "Branch", branch.Id, new { branch.Name }, ct: ct);
     }
 
     private void ReplacePaymentAccounts(Branch branch, IReadOnlyList<BranchPaymentAccountInput> inputs)

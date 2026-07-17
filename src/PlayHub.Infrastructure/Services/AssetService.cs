@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Assets;
 using PlayHub.Application.Common;
+using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
@@ -98,6 +99,28 @@ public class AssetService : IAssetService
         return MapRoom(room);
     }
 
+    public async Task SoftDeleteRoomAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var room = await _db.Rooms
+            .Include(r => r.Devices)
+            .FirstOrDefaultAsync(r => r.Id == id && r.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Room not found.");
+
+        var deviceIds = room.Devices.Where(d => !d.IsDeleted).Select(d => d.Id).ToList();
+        if (deviceIds.Count > 0 &&
+            await _db.Sessions.AnyAsync(s => deviceIds.Contains(s.DeviceId) && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Cannot delete a room that has devices with active sessions.");
+
+        foreach (var device in room.Devices.Where(d => !d.IsDeleted))
+            device.RoomId = null;
+
+        room.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        room.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Room.SoftDeleted", "Room", room.Id, new { room.Name }, ct: ct);
+    }
+
     public async Task<IReadOnlyList<VenueAssetTypeDto>> GetVenueAssetTypesAsync(CancellationToken ct = default)
     {
         return await _db.VenueAssetTypes
@@ -141,6 +164,17 @@ public class AssetService : IAssetService
         return new VenueAssetTypeDto(type.Id, type.Name, type.Description, type.IsActive);
     }
 
+    public async Task SoftDeleteVenueAssetTypeAsync(Guid id, CancellationToken ct = default)
+    {
+        var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Venue asset type not found.");
+
+        type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        type.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("VenueAssetType.SoftDeleted", "VenueAssetType", type.Id, new { type.Name }, ct: ct);
+    }
+
     public async Task<IReadOnlyList<ControllerTypeDto>> GetControllerTypesAsync(CancellationToken ct = default)
     {
         return await _db.ControllerTypes
@@ -178,6 +212,17 @@ public class AssetService : IAssetService
         await _audit.LogAsync("ControllerType.Updated", "ControllerType", type.Id, new { type.Name, type.IsActive }, ct: ct);
 
         return new ControllerTypeDto(type.Id, type.Name, type.Description, type.IsActive);
+    }
+
+    public async Task SoftDeleteControllerTypeAsync(Guid id, CancellationToken ct = default)
+    {
+        var type = await _db.ControllerTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Controller type not found.");
+
+        type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        type.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("ControllerType.SoftDeleted", "ControllerType", type.Id, new { type.Name }, ct: ct);
     }
 
     public async Task<IReadOnlyList<DeviceDto>> GetDevicesAsync(Guid? roomId = null, CancellationToken ct = default)
@@ -275,13 +320,20 @@ public class AssetService : IAssetService
         device.Name = request.Name.Trim();
         device.IsActive = request.IsActive;
 
-        _db.DeviceControllers.RemoveRange(device.DeviceControllers);
-        device.DeviceControllers.Clear();
-        _db.Screens.RemoveRange(device.Screens);
-        device.Screens.Clear();
+        if (request.Controllers is not null)
+        {
+            _db.DeviceControllers.RemoveRange(device.DeviceControllers);
+            device.DeviceControllers.Clear();
+            await ApplyControllersAsync(device, request.Controllers, ct);
+        }
 
-        await ApplyControllersAsync(device, request.Controllers, ct);
-        await ApplyScreenAsync(device, request.Screen, ct);
+        if (request.Screen is not null)
+        {
+            _db.Screens.RemoveRange(device.Screens);
+            device.Screens.Clear();
+            await ApplyScreenAsync(device, request.Screen, ct);
+        }
+
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Device.Updated", "Device", device.Id, new { device.Identifier, device.IsActive }, ct: ct);
 
@@ -291,6 +343,21 @@ public class AssetService : IAssetService
 
         var liveStatuses = await GetLiveStatusMapAsync(branchId, ct);
         return MapDevice(device, liveStatuses);
+    }
+
+    public async Task SoftDeleteDeviceAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == id && d.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Device not found.");
+
+        if (await _db.Sessions.AnyAsync(s => s.DeviceId == id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Cannot delete a device with an active session. Close the session first.");
+
+        device.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        device.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Device.SoftDeleted", "Device", device.Id, new { device.Identifier, device.Name }, ct: ct);
     }
 
     public async Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default)

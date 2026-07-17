@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Common;
 using PlayHub.Application.Pricing;
+using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
@@ -112,6 +113,22 @@ public class PricingService : IPricingService
         await _audit.LogAsync("PricingPlan.Updated", "PricingPlan", plan.Id, new { plan.Name, plan.IsActive }, ct: ct);
 
         return MapPlan(plan);
+    }
+
+    public async Task SoftDeletePlanAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var plan = await _db.PricingPlans
+            .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct)
+            ?? throw new KeyNotFoundException("Pricing plan not found.");
+
+        if (await _db.Sessions.AnyAsync(s => s.PricingPlanId == id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Cannot delete a pricing plan used by an active session.");
+
+        plan.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        plan.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("PricingPlan.SoftDeleted", "PricingPlan", plan.Id, new { plan.Name }, ct: ct);
     }
 
     private static void ValidatePlan(

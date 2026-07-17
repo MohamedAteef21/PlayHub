@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Common;
 using PlayHub.Application.Users;
+using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
@@ -236,6 +237,29 @@ public class UserService : IUserService
         await _audit.LogAsync("User.Updated", "User", user.Id, new { user.Email, user.Role, user.IsMaster, user.IsActive }, ct: ct);
 
         return (await GetByIdAsync(user.Id, ct))!;
+    }
+
+    public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        EnsureCanManageUsers();
+
+        var user = await _db.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.Id == id && u.TenantId == _tenantContext.TenantId && !u.IsDeleted, ct)
+            ?? throw new KeyNotFoundException("User not found.");
+
+        EnsureCanAccessUser(user);
+
+        if (user.Id == _tenantContext.UserId)
+            throw new InvalidOperationException("You cannot delete your own account.");
+
+        if (user.Role == UserRole.SuperAdmin)
+            throw new InvalidOperationException("Cannot delete a Super Admin account.");
+
+        user.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        user.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("User.SoftDeleted", "User", user.Id, new { user.Email, user.Role }, ct: ct);
     }
 
     public async Task ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default)

@@ -253,6 +253,12 @@ export function UsersPage() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => usersApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
   if (!canManage) return <Navigate to="/" replace />;
 
   return (
@@ -320,9 +326,25 @@ export function UsersPage() {
                 {u.isMaster ? t('users.allPermissions') : `${u.permissions.length} ${t('users.assigned')}`}
               </td>
               <td className="px-4 py-3">
-                <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
-                  {t('users.edit')}
-                </Button>
+                <div className="flex flex-wrap gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => openEdit(u)}>
+                    {t('users.edit')}
+                  </Button>
+                  {u.id !== user?.id && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      loading={deleteMutation.isPending}
+                      onClick={() => {
+                        if (window.confirm(t('common.confirmDelete'))) {
+                          deleteMutation.mutate(u.id);
+                        }
+                      }}
+                    >
+                      {t('common.delete')}
+                    </Button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

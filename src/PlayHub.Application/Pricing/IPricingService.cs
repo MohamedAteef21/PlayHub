@@ -9,4 +9,5 @@ public interface IPricingService
     Task<PricingPlanDto?> GetPlanByIdAsync(Guid id, CancellationToken ct = default);
     Task<PricingPlanDto> CreatePlanAsync(CreatePricingPlanRequest request, CancellationToken ct = default);
     Task<PricingPlanDto> UpdatePlanAsync(Guid id, UpdatePricingPlanRequest request, CancellationToken ct = default);
+    Task SoftDeletePlanAsync(Guid id, CancellationToken ct = default);
 }

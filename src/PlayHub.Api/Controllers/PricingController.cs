@@ -42,6 +42,20 @@ public class PricingController : ControllerBase
     public async Task<IActionResult> UpdatePlan(Guid id, [FromBody] UpdatePricingPlanRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _pricingService.UpdatePlanAsync(id, request, ct));
 
+    [HttpDelete("plans/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.SettingsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeletePlan(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _pricingService.SoftDeletePlanAsync(id, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action, int successStatus = StatusCodes.Status200OK)
     {
         try

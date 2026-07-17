@@ -52,11 +52,13 @@ export function InventoryPage() {
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
   const [voucherLineUnits, setVoucherLineUnits] = useState<Record<string, number>>({});
   const [addItemOpen, setAddItemOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
   const [itemName, setItemName] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemPrice, setItemPrice] = useState('');
   const [itemQty, setItemQty] = useState('0');
   const [itemThreshold, setItemThreshold] = useState('5');
+  const [itemIsActive, setItemIsActive] = useState(true);
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
   const [unitsPerLarge, setUnitsPerLarge] = useState('24');
@@ -127,6 +129,18 @@ export function InventoryPage() {
   const createItemMutation = useMutation({
     mutationFn: () => {
       const hasLarge = !!largeUnitId;
+      if (editingItem) {
+        return cafeteriaApi.updateItem(editingItem.id, {
+          name: itemName.trim(),
+          nameAr: itemNameAr.trim() || undefined,
+          sellPrice: Number(itemPrice),
+          minThreshold: Number(itemThreshold) || 0,
+          isActive: itemIsActive,
+          baseUnitId,
+          largeUnitId: largeUnitId || null,
+          ...(hasLarge ? { unitsPerLarge: Number(unitsPerLarge) || 1 } : {}),
+        });
+      }
       return cafeteriaApi.createItem({
         name: itemName.trim(),
         nameAr: itemNameAr.trim() || undefined,
@@ -141,11 +155,13 @@ export function InventoryPage() {
     },
     onSuccess: () => {
       setAddItemOpen(false);
+      setEditingItem(null);
       setItemName('');
       setItemNameAr('');
       setItemPrice('');
       setItemQty('0');
       setItemThreshold('5');
+      setItemIsActive(true);
       setBaseUnitId('');
       setLargeUnitId('');
       setUnitsPerLarge('24');
@@ -309,7 +325,23 @@ export function InventoryPage() {
     <div>
       <PageHeader title={t('inventory.title')}>
         {tab === 'stock' && canManageItems && (
-          <Button onClick={() => { setError(''); setAddItemOpen(true); }}>
+          <Button
+            onClick={() => {
+              setError('');
+              setEditingItem(null);
+              setItemName('');
+              setItemNameAr('');
+              setItemPrice('');
+              setItemQty('0');
+              setItemThreshold('5');
+              setItemIsActive(true);
+              setBaseUnitId('');
+              setLargeUnitId('');
+              setUnitsPerLarge('24');
+              setInitialStockUnit(InventoryUnitKind.Base);
+              setAddItemOpen(true);
+            }}
+          >
             <Icon name="plus" className="h-4 w-4" />
             {t('inventory.addItem')}
           </Button>
@@ -414,6 +446,29 @@ export function InventoryPage() {
                     )}
                     {canManageItems && (
                       <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingItem(item);
+                            setItemName(item.name);
+                            setItemNameAr(item.nameAr ?? '');
+                            setItemPrice(String(item.sellPrice));
+                            setItemThreshold(String(item.minThreshold));
+                            setItemIsActive(item.isActive);
+                            const base = units.find((u) => u.name.trim() === item.baseUnitName.trim());
+                            const large = item.largeUnitName
+                              ? units.find((u) => u.name.trim() === item.largeUnitName!.trim())
+                              : undefined;
+                            setBaseUnitId(base?.id ?? '');
+                            setLargeUnitId(large?.id ?? '');
+                            setUnitsPerLarge(String(item.unitsPerLarge || 24));
+                            setError('');
+                            setAddItemOpen(true);
+                          }}
+                        >
+                          {t('users.edit')}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -685,7 +740,14 @@ export function InventoryPage() {
         </div>
       </Modal>
 
-      <Modal open={addItemOpen} onClose={() => setAddItemOpen(false)} title={t('inventory.addItem')}>
+      <Modal
+        open={addItemOpen}
+        onClose={() => {
+          setAddItemOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? t('users.edit') : t('inventory.addItem')}
+      >
         <div className="space-y-3">
           <div className="space-y-2">
             <p className="text-sm font-medium text-text">{t('inventory.item')}</p>
@@ -745,31 +807,42 @@ export function InventoryPage() {
                 onChange={(e) => setUnitsPerLarge(e.target.value)}
               />
               <p className="text-xs text-muted">{t('inventory.conversionHint')}</p>
-              <div>
-                <label className="mb-1 block text-sm text-muted">{t('inventory.initialStockUnit')}</label>
-                <select
-                  className={selectClass}
-                  value={initialStockUnit}
-                  onChange={(e) => setInitialStockUnit(Number(e.target.value) as InventoryUnitKind)}
-                >
-                  <option value={InventoryUnitKind.Base}>
-                    {selectedBaseUnit ? catalogUnitLabel(selectedBaseUnit) : t('inventory.baseUnit')}
-                  </option>
-                  <option value={InventoryUnitKind.Large}>
-                    {selectedLargeUnit ? catalogUnitLabel(selectedLargeUnit) : t('inventory.largeUnit')}
-                  </option>
-                </select>
-              </div>
+              {!editingItem && (
+                <div>
+                  <label className="mb-1 block text-sm text-muted">{t('inventory.initialStockUnit')}</label>
+                  <select
+                    className={selectClass}
+                    value={initialStockUnit}
+                    onChange={(e) => setInitialStockUnit(Number(e.target.value) as InventoryUnitKind)}
+                  >
+                    <option value={InventoryUnitKind.Base}>
+                      {selectedBaseUnit ? catalogUnitLabel(selectedBaseUnit) : t('inventory.baseUnit')}
+                    </option>
+                    <option value={InventoryUnitKind.Large}>
+                      {selectedLargeUnit ? catalogUnitLabel(selectedLargeUnit) : t('inventory.largeUnit')}
+                    </option>
+                  </select>
+                </div>
+              )}
             </>
           )}
-          <Input label={t('inventory.initialStock')} type="number" value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
           <Input label={t('inventory.threshold')} type="number" value={itemThreshold} onChange={(e) => setItemThreshold(e.target.value)} />
-          <p className="text-xs text-muted">
-            {t('inventory.stockAlwaysBase', {
-              defaultValue:
-                'Stock is always stored in the small unit. You can enter stock-in using the large unit; it is converted automatically.',
-            })}
-          </p>
+          {editingItem ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={itemIsActive} onChange={(e) => setItemIsActive(e.target.checked)} />
+              {t('common.active')}
+            </label>
+          ) : (
+            <>
+              <Input label={t('inventory.initialStock')} type="number" value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
+              <p className="text-xs text-muted">
+                {t('inventory.stockAlwaysBase', {
+                  defaultValue:
+                    'Stock is always stored in the small unit. You can enter stock-in using the large unit; it is converted automatically.',
+                })}
+              </p>
+            </>
+          )}
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"

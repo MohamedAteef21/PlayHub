@@ -29,6 +29,12 @@ public class AccountingController : ControllerBase
     public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] UpdateExpenseCategoryRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _accountingService.UpdateCategoryAsync(id, request, ct));
 
+    [HttpDelete("categories/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.SettingsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteCategory(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _accountingService.SoftDeleteCategoryAsync(id, ct));
+
     [HttpGet("expenses")]
     [Authorize(Policy = PermissionPolicies.ExpensesView)]
     public async Task<IActionResult> GetExpenses(
@@ -44,6 +50,17 @@ public class AccountingController : ControllerBase
     public async Task<IActionResult> CreateExpense([FromBody] CreateExpenseRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _accountingService.CreateExpenseAsync(request, ct), StatusCodes.Status201Created);
 
+    [HttpPut("expenses/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.ExpensesAdd)]
+    public async Task<IActionResult> UpdateExpense(Guid id, [FromBody] UpdateExpenseRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _accountingService.UpdateExpenseAsync(id, request, ct));
+
+    [HttpDelete("expenses/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.ExpensesAdd)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteExpense(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _accountingService.SoftDeleteExpenseAsync(id, ct));
+
     [HttpGet("dashboard")]
     [Authorize(Policy = PermissionPolicies.ReportsView)]
     public async Task<IActionResult> GetDashboard(
@@ -52,6 +69,27 @@ public class AccountingController : ControllerBase
         [FromQuery] Guid? branchId,
         CancellationToken ct) =>
         await ExecuteAsync(() => _accountingService.GetDashboardAsync(from, to, branchId, ct));
+
+    private async Task<IActionResult> ExecuteNoContentAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+    }
 
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action, int successCode = StatusCodes.Status200OK)
     {

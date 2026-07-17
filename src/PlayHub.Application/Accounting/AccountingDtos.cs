@@ -25,6 +25,12 @@ public record CreateExpenseRequest(
     string Description,
     DateOnly ExpenseDate);
 
+public record UpdateExpenseRequest(
+    Guid CategoryId,
+    decimal Amount,
+    string Description,
+    DateOnly ExpenseDate);
+
 public record FinancialDashboardDto(
     DateTime From,
     DateTime To,
@@ -52,10 +58,13 @@ public interface IAccountingService
     Task<IReadOnlyList<ExpenseCategoryDto>> GetCategoriesAsync(CancellationToken ct = default);
     Task<ExpenseCategoryDto> CreateCategoryAsync(CreateExpenseCategoryRequest request, CancellationToken ct = default);
     Task<ExpenseCategoryDto> UpdateCategoryAsync(Guid id, UpdateExpenseCategoryRequest request, CancellationToken ct = default);
+    Task SoftDeleteCategoryAsync(Guid id, CancellationToken ct = default);
 
     Task<PlayHub.Application.Common.PagedResult<ExpenseDto>> GetExpensesAsync(
         DateTime? from = null, DateTime? to = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
     Task<ExpenseDto> CreateExpenseAsync(CreateExpenseRequest request, CancellationToken ct = default);
+    Task<ExpenseDto> UpdateExpenseAsync(Guid id, UpdateExpenseRequest request, CancellationToken ct = default);
+    Task SoftDeleteExpenseAsync(Guid id, CancellationToken ct = default);
 
     Task<FinancialDashboardDto> GetDashboardAsync(DateTime from, DateTime to, Guid? branchId = null, CancellationToken ct = default);
 }

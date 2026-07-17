@@ -56,5 +56,6 @@ public interface IUserService
     Task<IReadOnlyList<PermissionDto>> GetPermissionsAsync(CancellationToken ct = default);
     Task<ManagedUserDto> CreateAsync(CreateUserRequest request, CancellationToken ct = default);
     Task<ManagedUserDto> UpdateAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default);
+    Task SoftDeleteAsync(Guid id, CancellationToken ct = default);
     Task ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default);
 }

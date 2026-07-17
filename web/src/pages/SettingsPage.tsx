@@ -7,7 +7,7 @@ import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import { SessionMode, TimeUnit, WatchingBilling, PaymentAccountType, NotificationChannel } from '@/types';
-import type { BranchPaymentAccount, PricingPlan, Room } from '@/types';
+import type { BranchDetail, BranchPaymentAccount, Device, PricingPlan, Room, VenueAssetType } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Icon, type IconName } from '@/components/ui/Icons';
@@ -30,10 +30,12 @@ export function SettingsPage() {
   const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : 'rooms');
 
   const [branchOpen, setBranchOpen] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<BranchDetail | null>(null);
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
   const [branchPhone, setBranchPhone] = useState('');
   const [branchPrefix, setBranchPrefix] = useState('');
+  const [branchIsActive, setBranchIsActive] = useState(true);
 
   type DraftAccount = { key: string; accountType: number; label: string; accountNumber: string };
   const [draftAccounts, setDraftAccounts] = useState<DraftAccount[]>([]);
@@ -53,9 +55,11 @@ export function SettingsPage() {
   const [roomVipSurcharge, setRoomVipSurcharge] = useState('0');
 
   const [deviceOpen, setDeviceOpen] = useState(false);
+  const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [deviceName, setDeviceName] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [deviceRoomId, setDeviceRoomId] = useState('');
+  const [deviceIsActive, setDeviceIsActive] = useState(true);
   const [ctrlTypeId, setCtrlTypeId] = useState('');
   const [ctrlQty, setCtrlQty] = useState('2');
 
@@ -74,6 +78,7 @@ export function SettingsPage() {
   const [error, setError] = useState('');
 
   const [assetTypeOpen, setAssetTypeOpen] = useState(false);
+  const [editingAssetType, setEditingAssetType] = useState<VenueAssetType | null>(null);
   const [assetTypeName, setAssetTypeName] = useState('');
   const [roomAssetTypeId, setRoomAssetTypeId] = useState('');
   const [roomAssetQty, setRoomAssetQty] = useState('2');
@@ -308,6 +313,15 @@ export function SettingsPage() {
 
   const branchMutation = useMutation({
     mutationFn: async () => {
+      if (editingBranch) {
+        return branchesApi.update(editingBranch.id, {
+          name: branchName.trim(),
+          address: branchAddress.trim() || undefined,
+          phone: branchPhone.trim() || undefined,
+          invoicePrefix: branchPrefix.trim() || undefined,
+          isActive: branchIsActive,
+        });
+      }
       const created = await branchesApi.create({
         name: branchName.trim(),
         address: branchAddress.trim() || undefined,
@@ -325,10 +339,20 @@ export function SettingsPage() {
     },
     onSuccess: () => {
       setBranchOpen(false);
+      setEditingBranch(null);
       setBranchName('');
       setBranchAddress('');
       setBranchPhone('');
       setBranchPrefix('');
+      setBranchIsActive(true);
+      queryClient.invalidateQueries({ queryKey: ['branches'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteBranchMutation = useMutation({
+    mutationFn: (id: string) => branchesApi.delete(id),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['branches'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -361,11 +385,35 @@ export function SettingsPage() {
   });
 
   const assetTypeMutation = useMutation({
-    mutationFn: () => assetsApi.createVenueAssetType({ name: assetTypeName }),
+    mutationFn: () =>
+      editingAssetType
+        ? assetsApi.updateVenueAssetType(editingAssetType.id, {
+            name: assetTypeName,
+            isActive: editingAssetType.isActive,
+          })
+        : assetsApi.createVenueAssetType({ name: assetTypeName }),
     onSuccess: () => {
       setAssetTypeOpen(false);
+      setEditingAssetType(null);
       setAssetTypeName('');
       queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteAssetTypeMutation = useMutation({
+    mutationFn: (id: string) => assetsApi.deleteVenueAssetType(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteRoomMutation = useMutation({
+    mutationFn: (id: string) => assetsApi.deleteRoom(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -436,19 +484,49 @@ export function SettingsPage() {
     mutationFn: async () => {
       const typeId = await ensureCtrlType();
       const qty = Number(ctrlQty) || 2;
+      const controllers = [{ controllerTypeId: typeId, quantity: qty, workingCount: qty }];
+      if (editingDevice) {
+        return assetsApi.updateDevice(editingDevice.id, {
+          roomId: deviceRoomId || null,
+          identifier: deviceId,
+          name: deviceName,
+          isActive: deviceIsActive,
+          controllers,
+        });
+      }
       return assetsApi.createDevice({
         roomId: deviceRoomId || null,
         identifier: deviceId,
         name: deviceName,
-        controllers: [{ controllerTypeId: typeId, quantity: qty, workingCount: qty }],
+        controllers,
       });
     },
     onSuccess: () => {
       setDeviceOpen(false);
+      setEditingDevice(null);
       setDeviceName('');
       setDeviceId('');
+      setDeviceIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteDeviceMutation = useMutation({
+    mutationFn: (id: string) => assetsApi.deleteDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deletePlanMutation = useMutation({
+    mutationFn: (id: string) => pricingApi.deletePlan(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all-plans'] });
+      queryClient.invalidateQueries({ queryKey: ['plans'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -556,6 +634,12 @@ export function SettingsPage() {
           <Button
             onClick={() => {
               setError('');
+              setEditingBranch(null);
+              setBranchName('');
+              setBranchAddress('');
+              setBranchPhone('');
+              setBranchPrefix('');
+              setBranchIsActive(true);
               setBranchOpen(true);
             }}
           >
@@ -569,7 +653,7 @@ export function SettingsPage() {
                   <span className="rounded-lg bg-primary/15 p-2 text-primary">
                     <Icon name="branch" className="h-5 w-5" />
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium">{b.name}</p>
                     <p className="text-xs text-muted">
                       {b.ownerName
@@ -582,6 +666,36 @@ export function SettingsPage() {
                       {!b.isActive ? ` · ${t('users.inactive')}` : ''}
                       {b.id === activeBranchId ? ` · ${t('branch.active')}` : ''}
                     </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setError('');
+                        setEditingBranch(b);
+                        setBranchName(b.name);
+                        setBranchAddress(b.address ?? '');
+                        setBranchPhone(b.phone ?? '');
+                        setBranchPrefix(b.invoicePrefix);
+                        setBranchIsActive(b.isActive);
+                        setBranchOpen(true);
+                      }}
+                    >
+                      {t('users.edit')}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      loading={deleteBranchMutation.isPending}
+                      onClick={() => {
+                        if (window.confirm(t('common.confirmDelete'))) {
+                          deleteBranchMutation.mutate(b.id);
+                        }
+                      }}
+                    >
+                      {t('common.delete')}
+                    </Button>
                   </div>
                 </div>
               </Card>
@@ -630,28 +744,42 @@ export function SettingsPage() {
                     )}
                   </div>
                   {canManageAssets && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setError('');
-                        setEditingRoom(r);
-                        setRoomName(r.name);
-                        setRoomNumber(r.roomNumber ?? '');
-                        setRoomCapacity(String(r.maxWatchingCapacity));
-                        setRoomVipSurcharge(String(r.vipSurchargePerHour ?? 0));
-                        setDraftRoomAssets(
-                          (r.assets ?? []).map((a) => ({
-                            venueAssetTypeId: a.venueAssetTypeId,
-                            quantity: a.quantity,
-                            workingCount: a.workingCount,
-                          }))
-                        );
-                        setRoomOpen(true);
-                      }}
-                    >
-                      {t('users.edit')}
-                    </Button>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setError('');
+                          setEditingRoom(r);
+                          setRoomName(r.name);
+                          setRoomNumber(r.roomNumber ?? '');
+                          setRoomCapacity(String(r.maxWatchingCapacity));
+                          setRoomVipSurcharge(String(r.vipSurchargePerHour ?? 0));
+                          setDraftRoomAssets(
+                            (r.assets ?? []).map((a) => ({
+                              venueAssetTypeId: a.venueAssetTypeId,
+                              quantity: a.quantity,
+                              workingCount: a.workingCount,
+                            }))
+                          );
+                          setRoomOpen(true);
+                        }}
+                      >
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={deleteRoomMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deleteRoomMutation.mutate(r.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </Card>
@@ -664,7 +792,14 @@ export function SettingsPage() {
       {tab === 'venueAssets' && (
         <section className="space-y-4">
           {canManageAssets && (
-            <Button onClick={() => { setError(''); setAssetTypeOpen(true); }}>
+            <Button
+              onClick={() => {
+                setError('');
+                setEditingAssetType(null);
+                setAssetTypeName('');
+                setAssetTypeOpen(true);
+              }}
+            >
               <Icon name="plus" className="h-4 w-4" />
               {t('settings.addAssetType')}
             </Button>
@@ -672,8 +807,41 @@ export function SettingsPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {venueAssetTypes.map((a) => (
               <Card key={a.id}>
-                <p className="font-medium">{a.name}</p>
-                {a.description && <p className="text-xs text-muted">{a.description}</p>}
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{a.name}</p>
+                    {a.description && <p className="text-xs text-muted">{a.description}</p>}
+                    {!a.isActive && <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>}
+                  </div>
+                  {canManageAssets && (
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setError('');
+                          setEditingAssetType(a);
+                          setAssetTypeName(a.name);
+                          setAssetTypeOpen(true);
+                        }}
+                      >
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={deleteAssetTypeMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deleteAssetTypeMutation.mutate(a.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </Card>
             ))}
             {venueAssetTypes.length === 0 && <p className="text-muted">{t('settings.noAssetTypes')}</p>}
@@ -687,8 +855,13 @@ export function SettingsPage() {
             <Button
               onClick={() => {
                 setError('');
+                setEditingDevice(null);
+                setDeviceName('');
+                setDeviceId('');
+                setDeviceIsActive(true);
                 setDeviceRoomId(rooms[0]?.id ?? '');
                 setCtrlTypeId(ctrlTypes[0]?.id ?? '');
+                setCtrlQty('2');
                 setDeviceOpen(true);
               }}
             >
@@ -703,13 +876,47 @@ export function SettingsPage() {
                   <span className="rounded-lg bg-accent/15 p-2 text-accent">
                     <Icon name="gaming" className="h-5 w-5" />
                   </span>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium">{d.name}</p>
                     <p className="text-xs text-muted">
                       {d.identifier}
                       {d.roomName ? ` · ${d.roomName}` : ` · ${t('settings.noRoom')}`}
+                      {!d.isActive ? ` · ${t('common.inactive')}` : ''}
                     </p>
                   </div>
+                  {canManageAssets && (
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setError('');
+                          setEditingDevice(d);
+                          setDeviceName(d.name);
+                          setDeviceId(d.identifier);
+                          setDeviceRoomId(d.roomId ?? '');
+                          setDeviceIsActive(d.isActive);
+                          setCtrlTypeId(ctrlTypes[0]?.id ?? '');
+                          setCtrlQty(String(d.maxGamingPlayers || 2));
+                          setDeviceOpen(true);
+                        }}
+                      >
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={deleteDeviceMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deleteDeviceMutation.mutate(d.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </Card>
             ))}
@@ -776,34 +983,48 @@ export function SettingsPage() {
                     )}
                   </div>
                   {canManageSettings && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setError('');
-                        setEditingPlan(p);
-                        setPlanName(p.name);
-                        setPlanMode(p.sessionMode);
-                        setPlanUnit(p.timeUnit);
-                        setPlanWatchingBilling(p.watchingBilling);
-                        setPlanRate(
-                          String(
-                            p.sessionMode === SessionMode.Gaming
-                              ? p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.gamingRates[0]?.rate ?? 0
-                              : p.watchingRates[0]?.ratePerPerson ?? 0
-                          )
-                        );
-                        setPlanCoupleRate(String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0));
-                        const isPkg = p.packagePrice != null && p.packageDurationMinutes != null;
-                        setPlanIsPackage(isPkg);
-                        setPlanPackageHours(isPkg ? String(Math.round(((p.packageDurationMinutes ?? 0) / 60) * 10) / 10) : '5');
-                        setPlanPackagePrice(isPkg ? String(p.packagePrice) : '');
-                        setPlanIsActive(p.isActive);
-                        setPlanOpen(true);
-                      }}
-                    >
-                      {t('users.edit')}
-                    </Button>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setError('');
+                          setEditingPlan(p);
+                          setPlanName(p.name);
+                          setPlanMode(p.sessionMode);
+                          setPlanUnit(p.timeUnit);
+                          setPlanWatchingBilling(p.watchingBilling);
+                          setPlanRate(
+                            String(
+                              p.sessionMode === SessionMode.Gaming
+                                ? p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.gamingRates[0]?.rate ?? 0
+                                : p.watchingRates[0]?.ratePerPerson ?? 0
+                            )
+                          );
+                          setPlanCoupleRate(String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0));
+                          const isPkg = p.packagePrice != null && p.packageDurationMinutes != null;
+                          setPlanIsPackage(isPkg);
+                          setPlanPackageHours(isPkg ? String(Math.round(((p.packageDurationMinutes ?? 0) / 60) * 10) / 10) : '5');
+                          setPlanPackagePrice(isPkg ? String(p.packagePrice) : '');
+                          setPlanIsActive(p.isActive);
+                          setPlanOpen(true);
+                        }}
+                      >
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={deletePlanMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deletePlanMutation.mutate(p.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </Card>
@@ -1131,12 +1352,29 @@ export function SettingsPage() {
         </section>
       )}
 
-      <Modal open={branchOpen} onClose={() => setBranchOpen(false)} title={t('settings.addBranch')}>
+      <Modal
+        open={branchOpen}
+        onClose={() => {
+          setBranchOpen(false);
+          setEditingBranch(null);
+        }}
+        title={editingBranch ? t('users.edit') : t('settings.addBranch')}
+      >
         <div className="space-y-3">
           <Input label={t('settings.branchName')} value={branchName} onChange={(e) => setBranchName(e.target.value)} />
           <Input label={t('settings.branchAddress')} value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} />
           <Input label={t('settings.branchPhone')} value={branchPhone} onChange={(e) => setBranchPhone(e.target.value)} />
           <Input label={t('settings.invoicePrefix')} value={branchPrefix} onChange={(e) => setBranchPrefix(e.target.value)} placeholder="INV" />
+          {editingBranch && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={branchIsActive}
+                onChange={(e) => setBranchIsActive(e.target.checked)}
+              />
+              {t('common.active')}
+            </label>
+          )}
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"
@@ -1245,7 +1483,14 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal open={assetTypeOpen} onClose={() => setAssetTypeOpen(false)} title={t('settings.addAssetType')}>
+      <Modal
+        open={assetTypeOpen}
+        onClose={() => {
+          setAssetTypeOpen(false);
+          setEditingAssetType(null);
+        }}
+        title={editingAssetType ? t('users.edit') : t('settings.addAssetType')}
+      >
         <div className="space-y-3">
           <Input label={t('settings.assetTypeName')} value={assetTypeName} onChange={(e) => setAssetTypeName(e.target.value)} />
           {error && <p className="text-sm text-danger">{error}</p>}
@@ -1260,7 +1505,14 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal open={deviceOpen} onClose={() => setDeviceOpen(false)} title={t('settings.addDevice')}>
+      <Modal
+        open={deviceOpen}
+        onClose={() => {
+          setDeviceOpen(false);
+          setEditingDevice(null);
+        }}
+        title={editingDevice ? t('users.edit') : t('settings.addDevice')}
+      >
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-sm text-muted">{t('settings.room')}</label>
@@ -1279,6 +1531,16 @@ export function SettingsPage() {
           <Input label={t('settings.deviceName')} value={deviceName} onChange={(e) => setDeviceName(e.target.value)} />
           <Input label={t('settings.deviceId')} value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="PS5-01" />
           <Input label={t('dashboard.controllers')} type="number" value={ctrlQty} onChange={(e) => setCtrlQty(e.target.value)} />
+          {editingDevice && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={deviceIsActive}
+                onChange={(e) => setDeviceIsActive(e.target.checked)}
+              />
+              {t('common.active')}
+            </label>
+          )}
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"

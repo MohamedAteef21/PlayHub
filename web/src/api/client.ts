@@ -271,6 +271,7 @@ export const assetsApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  deleteRoom: (id: string) => apiFetch<void>(`/assets/rooms/${id}`, { method: 'DELETE' }),
   getDevices: (roomId?: string) =>
     apiFetch<import('@/types').Device[]>(
       `/assets/devices${roomId ? `?roomId=${roomId}` : ''}`
@@ -286,6 +287,22 @@ export const assetsApi = {
       method: 'POST',
       body: JSON.stringify({ ...data, roomId: data.roomId || null }),
     }),
+  updateDevice: (
+    id: string,
+    data: {
+      roomId?: string | null;
+      identifier: string;
+      name: string;
+      isActive: boolean;
+      controllers?: { controllerTypeId: string; quantity: number; workingCount: number }[];
+      screen?: { count: number; workingCount: number; notes?: string };
+    }
+  ) =>
+    apiFetch<import('@/types').Device>(`/assets/devices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...data, roomId: data.roomId || null }),
+    }),
+  deleteDevice: (id: string) => apiFetch<void>(`/assets/devices/${id}`, { method: 'DELETE' }),
   getControllerTypes: () =>
     apiFetch<import('@/types').ControllerType[]>('/assets/controller-types'),
   createControllerType: (data: { name: string; description?: string }) =>
@@ -293,6 +310,13 @@ export const assetsApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateControllerType: (id: string, data: { name: string; description?: string; isActive: boolean }) =>
+    apiFetch<import('@/types').ControllerType>(`/assets/controller-types/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteControllerType: (id: string) =>
+    apiFetch<void>(`/assets/controller-types/${id}`, { method: 'DELETE' }),
   getVenueAssetTypes: () =>
     apiFetch<import('@/types').VenueAssetType[]>('/assets/venue-asset-types'),
   createVenueAssetType: (data: { name: string; description?: string }) =>
@@ -305,6 +329,8 @@ export const assetsApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  deleteVenueAssetType: (id: string) =>
+    apiFetch<void>(`/assets/venue-asset-types/${id}`, { method: 'DELETE' }),
 };
 
 export const pricingApi = {
@@ -343,6 +369,7 @@ export const pricingApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  deletePlan: (id: string) => apiFetch<void>(`/pricing/plans/${id}`, { method: 'DELETE' }),
 };
 
 export const notificationsApi = {
@@ -470,6 +497,13 @@ export const accountingApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateCategory: (id: string, data: { name: string; nameAr?: string; isActive: boolean }) =>
+    apiFetch<import('@/types').ExpenseCategory>(`/accounting/categories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteCategory: (id: string) =>
+    apiFetch<void>(`/accounting/categories/${id}`, { method: 'DELETE' }),
   getExpenses: (from?: string, to?: string, page = 1, pageSize = 20) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
@@ -485,6 +519,16 @@ export const accountingApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateExpense: (
+    id: string,
+    data: { categoryId: string; amount: number; description: string; expenseDate: string }
+  ) =>
+    apiFetch<import('@/types').Expense>(`/accounting/expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteExpense: (id: string) =>
+    apiFetch<void>(`/accounting/expenses/${id}`, { method: 'DELETE' }),
   getDashboard: (from: string, to: string, branchId?: string) => {
     const params = new URLSearchParams({ from, to });
     if (branchId) params.set('branchId', branchId);
@@ -565,6 +609,7 @@ export const usersApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  delete: (id: string) => apiFetch<void>(`/users/${id}`, { method: 'DELETE' }),
   resetPassword: (id: string, newPassword: string) =>
     apiFetch<void>(`/users/${id}/reset-password`, {
       method: 'POST',
@@ -668,6 +713,7 @@ export const branchesApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  delete: (id: string) => apiFetch<void>(`/branches/${id}`, { method: 'DELETE' }),
 };
 
 export const uploadsApi = {

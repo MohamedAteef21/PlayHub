@@ -47,6 +47,30 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _userService.UpdateAsync(id, request, ct));
 
+    [HttpDelete("{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.UsersManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _userService.SoftDeleteAsync(id, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+    }
+
     [HttpPost("{id:guid}/reset-password")]
     [Authorize(Policy = PermissionPolicies.UsersManage)]
     public async Task<IActionResult> ResetPassword(Guid id, [FromBody] ResetPasswordRequest request, CancellationToken ct)
