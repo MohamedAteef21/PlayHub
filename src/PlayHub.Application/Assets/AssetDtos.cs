@@ -91,18 +91,18 @@ public record DeviceDto(
 
 public record CreateDeviceRequest(
     Guid? RoomId,
-    string Identifier,
     string Name,
-    IReadOnlyList<UpsertDeviceControllerRequest>? Controllers,
-    UpsertScreenRequest? Screen);
+    string? Identifier = null,
+    IReadOnlyList<UpsertDeviceControllerRequest>? Controllers = null,
+    UpsertScreenRequest? Screen = null);
 
 public record UpdateDeviceRequest(
     Guid? RoomId,
-    string Identifier,
     string Name,
     bool IsActive,
-    IReadOnlyList<UpsertDeviceControllerRequest>? Controllers,
-    UpsertScreenRequest? Screen);
+    string? Identifier = null,
+    IReadOnlyList<UpsertDeviceControllerRequest>? Controllers = null,
+    UpsertScreenRequest? Screen = null);
 
 public record AssetDashboardRoomDto(
     Guid Id,

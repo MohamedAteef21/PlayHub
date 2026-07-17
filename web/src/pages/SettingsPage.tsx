@@ -56,7 +56,6 @@ export function SettingsPage() {
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [deviceName, setDeviceName] = useState('');
-  const [deviceId, setDeviceId] = useState('');
   const [deviceRoomId, setDeviceRoomId] = useState('');
   const [deviceIsActive, setDeviceIsActive] = useState(true);
   const [ctrlTypeId, setCtrlTypeId] = useState('');
@@ -523,19 +522,18 @@ export function SettingsPage() {
       const typeId = await ensureCtrlType();
       const qty = Number(ctrlQty) || 2;
       const controllers = [{ controllerTypeId: typeId, quantity: qty, workingCount: qty }];
+      const name = deviceName.trim();
       if (editingDevice) {
         return assetsApi.updateDevice(editingDevice.id, {
           roomId: deviceRoomId || null,
-          identifier: deviceId,
-          name: deviceName,
+          name,
           isActive: deviceIsActive,
           controllers,
         });
       }
       return assetsApi.createDevice({
         roomId: deviceRoomId || null,
-        identifier: deviceId,
-        name: deviceName,
+        name,
         controllers,
       });
     },
@@ -543,7 +541,6 @@ export function SettingsPage() {
       setDeviceOpen(false);
       setEditingDevice(null);
       setDeviceName('');
-      setDeviceId('');
       setDeviceIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -933,7 +930,6 @@ export function SettingsPage() {
                 setError('');
                 setEditingDevice(null);
                 setDeviceName('');
-                setDeviceId('');
                 setDeviceIsActive(true);
                 setDeviceRoomId(rooms[0]?.id ?? '');
                 setCtrlTypeId(ctrlTypes[0]?.id ?? '');
@@ -955,8 +951,7 @@ export function SettingsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{d.name}</p>
                     <p className="text-xs text-muted">
-                      {d.identifier}
-                      {d.roomName ? ` · ${d.roomName}` : ` · ${t('settings.noRoom')}`}
+                      {d.roomName ? d.roomName : t('settings.noRoom')}
                       {!d.isActive ? ` · ${t('common.inactive')}` : ''}
                     </p>
                   </div>
@@ -969,7 +964,6 @@ export function SettingsPage() {
                           setError('');
                           setEditingDevice(d);
                           setDeviceName(d.name);
-                          setDeviceId(d.identifier);
                           setDeviceRoomId(d.roomId ?? '');
                           setDeviceIsActive(d.isActive);
                           setCtrlTypeId(ctrlTypes[0]?.id ?? '');
@@ -1305,7 +1299,7 @@ export function SettingsPage() {
             {openMaintenance.map((m) => (
               <Card key={m.id} className="space-y-2">
                 <p className="font-medium">{m.deviceName}</p>
-                <p className="text-xs text-muted">{m.deviceIdentifier} · {m.roomName}</p>
+                <p className="text-xs text-muted">{m.roomName || t('settings.noRoom')}</p>
                 <p className="text-sm">{m.reason}</p>
                 <p className="text-xs text-warning">{t('settings.daysInMaintenance', { days: m.daysOpen })}</p>
                 <Button size="sm" variant="secondary" loading={completeMaintMutation.isPending} onClick={() => completeMaintMutation.mutate(m.id)}>
@@ -1575,7 +1569,7 @@ export function SettingsPage() {
               onChange={(e) => setMaintDeviceId(e.target.value)}
             >
               {devices.filter((d) => d.isActive).map((d) => (
-                <option key={d.id} value={d.id}>{d.name} ({d.identifier})</option>
+                <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
           </div>
@@ -1652,7 +1646,6 @@ export function SettingsPage() {
             <p className="mt-1 text-xs text-muted">{t('settings.deviceRoomOptional')}</p>
           </div>
           <Input label={t('settings.deviceName')} value={deviceName} onChange={(e) => setDeviceName(e.target.value)} />
-          <Input label={t('settings.deviceId')} value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="PS5-01" />
           <Input label={t('dashboard.controllers')} type="number" value={ctrlQty} onChange={(e) => setCtrlQty(e.target.value)} />
           {editingDevice && (
             <label className="flex items-center gap-2 text-sm">
@@ -1668,7 +1661,7 @@ export function SettingsPage() {
           <Button
             className="w-full"
             loading={deviceMutation.isPending}
-            disabled={!deviceName.trim() || !deviceId.trim()}
+            disabled={!deviceName.trim()}
             onClick={() => deviceMutation.mutate()}
           >
             {t('common.save')}

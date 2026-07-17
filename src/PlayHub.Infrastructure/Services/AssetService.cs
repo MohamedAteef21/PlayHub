@@ -350,16 +350,23 @@ public class AssetService : IAssetService
                 ?? throw new KeyNotFoundException("Room not found.");
         }
 
-        if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == request.Identifier.Trim(), ct))
-            throw new InvalidOperationException("A device with this identifier already exists in this branch.");
+        var name = request.Name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("Device name is required.");
+
+        // Identifier is internal — default to the display name so users only enter Name.
+        var identifier = string.IsNullOrWhiteSpace(request.Identifier) ? name : request.Identifier.Trim();
+
+        if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == identifier, ct))
+            throw new InvalidOperationException("A device with this name already exists in this branch.");
 
         var device = new Device
         {
             TenantId = _tenantContext.TenantId,
             BranchId = branchId,
             RoomId = room?.Id,
-            Identifier = request.Identifier.Trim(),
-            Name = request.Name.Trim()
+            Identifier = identifier,
+            Name = name
         };
 
         _db.Devices.Add(device);
@@ -394,12 +401,18 @@ public class AssetService : IAssetService
                 ?? throw new KeyNotFoundException("Room not found.");
         }
 
-        if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == request.Identifier.Trim() && d.Id != id, ct))
-            throw new InvalidOperationException("A device with this identifier already exists in this branch.");
+        var name = request.Name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException("Device name is required.");
+
+        var identifier = string.IsNullOrWhiteSpace(request.Identifier) ? name : request.Identifier.Trim();
+
+        if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == identifier && d.Id != id, ct))
+            throw new InvalidOperationException("A device with this name already exists in this branch.");
 
         device.RoomId = room?.Id;
-        device.Identifier = request.Identifier.Trim();
-        device.Name = request.Name.Trim();
+        device.Identifier = identifier;
+        device.Name = name;
         device.IsActive = request.IsActive;
 
         if (request.Controllers is not null)

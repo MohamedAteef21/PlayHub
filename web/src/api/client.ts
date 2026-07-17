@@ -276,8 +276,8 @@ export const assetsApi = {
     ),
   createDevice: (data: {
     roomId?: string | null;
-    identifier: string;
     name: string;
+    identifier?: string;
     controllers?: { controllerTypeId: string; quantity: number; workingCount: number }[];
     screen?: { count: number; workingCount: number; notes?: string };
   }) =>
@@ -289,9 +289,9 @@ export const assetsApi = {
     id: string,
     data: {
       roomId?: string | null;
-      identifier: string;
       name: string;
       isActive: boolean;
+      identifier?: string;
       controllers?: { controllerTypeId: string; quantity: number; workingCount: number }[];
       screen?: { count: number; workingCount: number; notes?: string };
     }

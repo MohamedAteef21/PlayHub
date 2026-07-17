@@ -287,10 +287,7 @@ export function ReportsPage() {
           <DataTable headers={[t('reports.device'), t('reports.room'), t('reports.hours'), t('reports.sessions')]}>
             {deviceUsage.map((d) => (
               <tr key={d.deviceId} className="hover:bg-surface-hover">
-                <td className="px-4 py-3">
-                  <div>{d.deviceName}</div>
-                  <div className="text-xs text-muted">{d.deviceIdentifier}</div>
-                </td>
+                <td className="px-4 py-3">{d.deviceName}</td>
                 <td className="px-4 py-3">{d.roomName}</td>
                 <td className="px-4 py-3">{d.totalHours.toFixed(1)}h</td>
                 <td className="px-4 py-3">{d.sessionCount}</td>

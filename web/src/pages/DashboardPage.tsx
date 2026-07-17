@@ -66,7 +66,7 @@ function DeviceCard({
       <CardHeader>
         <div>
           <CardTitle className="text-base">{device.name}</CardTitle>
-          <p className="text-xs text-muted">{device.identifier} · {roomName}</p>
+          <p className="text-xs text-muted">{roomName}</p>
         </div>
         <Badge status={statusKey(liveStatus)} pulse={liveStatus === 'Gaming' || liveStatus === 'Watching'}>
           {t(`dashboard.${statusKey(liveStatus)}`, { defaultValue: liveStatus })}
