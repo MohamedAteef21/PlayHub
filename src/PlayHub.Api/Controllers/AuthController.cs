@@ -108,7 +108,7 @@ public class AuthController : ControllerBase
     public IActionResult Me()
     {
         var isMaster = bool.Parse(User.FindFirst("is_master")?.Value ?? "false");
-        var roleClaim = User.FindFirst("role")?.Value;
+        var roleClaim = User.FindFirst(ClaimTypes.Role)?.Value ?? User.FindFirst("role")?.Value;
         var role = int.TryParse(roleClaim, out var roleInt)
             ? (UserRole)roleInt
             : isMaster ? UserRole.SuperAdmin : UserRole.Staff;

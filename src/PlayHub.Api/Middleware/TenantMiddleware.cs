@@ -30,7 +30,9 @@ public class TenantMiddleware
                 tenantContext.UserId = userId;
 
             tenantContext.IsMaster = bool.TryParse(isMasterClaim, out var isMaster) && isMaster;
-            var roleClaim = context.User.FindFirst("role")?.Value;
+            // JWT handler maps "role" to ClaimTypes.Role — check both.
+            var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value
+                ?? context.User.FindFirst("role")?.Value;
             tenantContext.Role = int.TryParse(roleClaim, out var roleInt) && Enum.IsDefined(typeof(UserRole), (short)roleInt)
                 ? (UserRole)roleInt
                 : tenantContext.IsMaster ? UserRole.SuperAdmin : UserRole.Staff;

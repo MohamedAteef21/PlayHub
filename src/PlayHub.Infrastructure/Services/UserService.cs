@@ -32,8 +32,8 @@ public class UserService : IUserService
             .Include(u => u.UserBranches).ThenInclude(ub => ub.Branch)
             .Where(u => u.TenantId == _tenantContext.TenantId && !u.IsDeleted);
 
-        // Master Admin only sees themselves + staff they created
-        if (_tenantContext.Role == UserRole.MasterAdmin)
+        // Only Super Admin sees everyone; everyone else sees themselves + staff they created.
+        if (!_tenantContext.IsSuperAdmin)
             query = query.Where(u => u.Id == _tenantContext.UserId || u.ParentUserId == _tenantContext.UserId);
 
         var total = await query.CountAsync(ct);
@@ -112,6 +112,15 @@ public class UserService : IUserService
                     ?? (NotificationChannel.Email | NotificationChannel.WhatsApp);
             }
         }
+        else if (role == UserRole.Staff)
+        {
+            // Staff belong to their master: they inherit the master's subscription end date.
+            user.SubscriptionExpiresAt = await _db.Users
+                .IgnoreQueryFilters()
+                .Where(u => u.Id == _tenantContext.UserId)
+                .Select(u => u.SubscriptionExpiresAt)
+                .FirstOrDefaultAsync(ct);
+        }
 
         _db.Users.Add(user);
 
@@ -170,12 +179,45 @@ public class UserService : IUserService
 
             if ((role is UserRole.MasterAdmin or UserRole.SuperAdmin) && request.AllowedNotificationChannels.HasValue)
                 user.AllowedNotificationChannels = request.AllowedNotificationChannels.Value;
+
+            // Staff belong to their master: cascade the master's expiry (and unlock) to their staff.
+            if (role == UserRole.MasterAdmin)
+            {
+                var staff = await _db.Users
+                    .IgnoreQueryFilters()
+                    .Where(u => u.ParentUserId == user.Id && !u.IsDeleted)
+                    .ToListAsync(ct);
+
+                foreach (var s in staff)
+                {
+                    s.SubscriptionExpiresAt = user.SubscriptionExpiresAt;
+                    if (user.IsActive && s.SubscriptionLockedAt != null && !IsSubscriptionExpired(s.SubscriptionExpiresAt))
+                    {
+                        s.IsActive = true;
+                        s.SubscriptionLockedAt = null;
+                    }
+                    else if (!user.IsActive)
+                    {
+                        s.IsActive = false;
+                        s.SubscriptionLockedAt ??= user.SubscriptionLockedAt ?? DateTime.UtcNow;
+                    }
+                }
+            }
         }
         else
         {
             // Master Admin can activate/deactivate their staff only
             if (role == UserRole.Staff)
+            {
                 user.IsActive = request.IsActive;
+
+                // Keep staff expiry in sync with their master's subscription.
+                user.SubscriptionExpiresAt = await _db.Users
+                    .IgnoreQueryFilters()
+                    .Where(u => u.Id == _tenantContext.UserId)
+                    .Select(u => u.SubscriptionExpiresAt)
+                    .FirstOrDefaultAsync(ct);
+            }
         }
 
         _db.UserPermissions.RemoveRange(user.UserPermissions);
