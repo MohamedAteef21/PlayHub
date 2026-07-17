@@ -369,6 +369,7 @@ export const pricingApi = {
     id: string,
     data: {
       name: string;
+      sessionMode: number;
       timeUnit: number;
       watchingBilling?: number;
       vipSurchargePerHour?: number;

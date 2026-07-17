@@ -96,17 +96,22 @@ public class SessionCostCalculator : ISessionCostCalculator
         return rate * units;
     }
 
-    /// <summary>Package plans: flat price covers the package window; extra time billed at the normal rate.</summary>
+    /// <summary>Package plans: flat single/couple price covers the whole package — no hourly overage.</summary>
     private decimal CalculatePackageCost(RateSnapshot snapshot, int? controllerCount, int elapsedSeconds, bool billingRoundUp)
     {
-        var packageSeconds = snapshot.PackageDurationMinutes!.Value * 60;
-        var overageSeconds = Math.Max(0, elapsedSeconds - packageSeconds);
+        _ = elapsedSeconds;
+        _ = billingRoundUp;
 
-        if (overageSeconds == 0)
-            return snapshot.PackagePrice!.Value;
+        var tier = GamingRateTier(controllerCount ?? 1);
+        var packagePrice = snapshot.GamingRates
+            .Where(r => r.ControllerCount == tier)
+            .Select(r => r.Rate)
+            .FirstOrDefault();
 
-        var overageUnits = GetBillableUnits(snapshot.TimeUnit, overageSeconds, billingRoundUp);
-        return snapshot.PackagePrice!.Value + CalculateGamingCost(snapshot, controllerCount, overageUnits);
+        if (packagePrice <= 0)
+            packagePrice = snapshot.PackagePrice ?? 0;
+
+        return packagePrice > 0 ? packagePrice : 0;
     }
 
     private static decimal CalculateWatchingCost(RateSnapshot snapshot, int? watcherCount, decimal units)

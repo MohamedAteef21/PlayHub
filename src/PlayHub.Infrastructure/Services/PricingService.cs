@@ -65,7 +65,7 @@ public class PricingService : IPricingService
             BranchId = request.BranchId ?? branchId,
             Name = request.Name.Trim(),
             SessionMode = request.SessionMode,
-            TimeUnit = request.TimeUnit,
+            TimeUnit = request.TimeUnit == TimeUnit.PerMinute ? TimeUnit.PerHour : request.TimeUnit,
             WatchingBilling = request.SessionMode == SessionMode.Watching
                 ? request.WatchingBilling
                 : WatchingBilling.PerPerson,
@@ -92,16 +92,24 @@ public class PricingService : IPricingService
             .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct)
             ?? throw new KeyNotFoundException("Pricing plan not found.");
 
-        ValidatePlan(plan.SessionMode, request.TimeUnit, request.WatchingBilling, request.GamingRates, request.WatchingRates,
+        if (request.SessionMode != plan.SessionMode &&
+            await _db.Sessions.AnyAsync(s => s.PricingPlanId == id && s.Status != SessionStatus.Closed, ct))
+        {
+            throw new InvalidOperationException(
+                "Cannot change play/watching mode while this plan is used by an open session. Close the session first.");
+        }
+
+        ValidatePlan(request.SessionMode, request.TimeUnit, request.WatchingBilling, request.GamingRates, request.WatchingRates,
             request.PackageDurationMinutes, request.PackagePrice);
 
         plan.Name = request.Name.Trim();
-        plan.TimeUnit = request.TimeUnit;
-        plan.WatchingBilling = plan.SessionMode == SessionMode.Watching
+        plan.SessionMode = request.SessionMode;
+        plan.TimeUnit = request.TimeUnit == TimeUnit.PerMinute ? TimeUnit.PerHour : request.TimeUnit;
+        plan.WatchingBilling = request.SessionMode == SessionMode.Watching
             ? request.WatchingBilling
             : WatchingBilling.PerPerson;
-        plan.PackageDurationMinutes = plan.SessionMode == SessionMode.Gaming ? request.PackageDurationMinutes : null;
-        plan.PackagePrice = plan.SessionMode == SessionMode.Gaming ? request.PackagePrice : null;
+        plan.PackageDurationMinutes = request.SessionMode == SessionMode.Gaming ? request.PackageDurationMinutes : null;
+        plan.PackagePrice = request.SessionMode == SessionMode.Gaming ? request.PackagePrice : null;
         plan.VipSurchargePerHour = Math.Max(0, request.VipSurchargePerHour);
         plan.IsActive = request.IsActive;
 
@@ -112,7 +120,7 @@ public class PricingService : IPricingService
         ApplyRates(plan, request.GamingRates, request.WatchingRates);
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("PricingPlan.Updated", "PricingPlan", plan.Id, new { plan.Name, plan.IsActive }, ct: ct);
+        await _audit.LogAsync("PricingPlan.Updated", "PricingPlan", plan.Id, new { plan.Name, plan.SessionMode, plan.IsActive }, ct: ct);
 
         return MapPlan(plan);
     }
@@ -142,24 +150,37 @@ public class PricingService : IPricingService
         int? packageDurationMinutes = null,
         decimal? packagePrice = null)
     {
-        if (timeUnit is not (TimeUnit.PerMinute or TimeUnit.PerHour or TimeUnit.PerGame))
-            throw new InvalidOperationException("Invalid time unit.");
+        // Per-minute billing is retired — keep enum for legacy snapshots only.
+        if (timeUnit == TimeUnit.PerMinute)
+            timeUnit = TimeUnit.PerHour;
 
-        // Package = flat price for a time window; only meaningful for timed gaming plans
-        if (packageDurationMinutes.HasValue || packagePrice.HasValue)
+        if (timeUnit is not (TimeUnit.PerHour or TimeUnit.PerGame))
+            throw new InvalidOperationException("Invalid time unit. Use per hour or per game.");
+
+        var isPackage = packageDurationMinutes.HasValue || packagePrice.HasValue;
+        if (isPackage)
         {
             if (mode != SessionMode.Gaming)
                 throw new InvalidOperationException("Packages are only supported on gaming plans.");
             if (timeUnit == TimeUnit.PerGame)
-                throw new InvalidOperationException("Package plans must use per hour or per minute (overage rate).");
+                throw new InvalidOperationException("Package plans cannot use per-game billing.");
             if (packageDurationMinutes is null or < 15)
                 throw new InvalidOperationException("Package duration must be at least 15 minutes.");
             if (packagePrice is null or <= 0)
-                throw new InvalidOperationException("Package price must be greater than zero.");
-        }
+                throw new InvalidOperationException("Package single (individual) price must be greater than zero.");
 
-        if (mode == SessionMode.Gaming && (gamingRates is null || gamingRates.Count == 0))
-            throw new InvalidOperationException("Gaming plans require at least one controller-count rate tier.");
+            // For packages, gaming rates hold flat individual/couple package prices (not hourly).
+            var single = gamingRates?.FirstOrDefault(r => r.ControllerCount == 1)?.Rate ?? 0;
+            var couple = gamingRates?.FirstOrDefault(r => r.ControllerCount == 2)?.Rate ?? 0;
+            if (single <= 0)
+                throw new InvalidOperationException("Package individual price is required.");
+            if (couple <= 0)
+                throw new InvalidOperationException("Package couple price is required.");
+        }
+        else if (mode == SessionMode.Gaming && (gamingRates is null || gamingRates.Count == 0))
+        {
+            throw new InvalidOperationException("Gaming plans require individual and couple rates.");
+        }
 
         if (mode == SessionMode.Watching && (watchingRates is null || watchingRates.Count == 0))
             throw new InvalidOperationException("Watching plans require a rate.");
@@ -168,16 +189,10 @@ public class PricingService : IPricingService
             watchingBilling is not (WatchingBilling.PerPerson or WatchingBilling.PerScreen))
             throw new InvalidOperationException("Invalid watching billing mode.");
 
-        // Per-person watching is a flat ticket (no time). Screen watching is timed.
-        if (mode == SessionMode.Watching &&
-            watchingBilling == WatchingBilling.PerPerson &&
-            timeUnit is not (TimeUnit.PerMinute or TimeUnit.PerHour or TimeUnit.PerGame))
-            throw new InvalidOperationException("Invalid time unit for watching plan.");
-
         if (mode == SessionMode.Watching &&
             watchingBilling == WatchingBilling.PerScreen &&
             timeUnit == TimeUnit.PerGame)
-            throw new InvalidOperationException("Screen watching plans must use per hour or per minute (not per game).");
+            throw new InvalidOperationException("Screen watching plans must use per hour (not per game).");
     }
 
     private static void ApplyRates(

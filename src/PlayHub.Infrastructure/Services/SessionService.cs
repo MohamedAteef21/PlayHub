@@ -404,7 +404,9 @@ public class SessionService : ISessionService
             ?? throw new KeyNotFoundException("Gaming pricing plan not found.");
 
         var rateTier = SessionCostCalculator.GamingRateTier(request.ControllerCount);
-        if (!plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0))
+        var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
+        var hasRate = plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0);
+        if (!hasRate && !hasPackage)
             throw new InvalidOperationException($"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
 
         // End any active pause and accrue watching segment cost

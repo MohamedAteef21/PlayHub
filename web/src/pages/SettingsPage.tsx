@@ -74,6 +74,7 @@ export function SettingsPage() {
   const [planIsPackage, setPlanIsPackage] = useState(false);
   const [planPackageHours, setPlanPackageHours] = useState('5');
   const [planPackagePrice, setPlanPackagePrice] = useState('');
+  const [planPackageCouplePrice, setPlanPackageCouplePrice] = useState('');
   const [planVipSurcharge, setPlanVipSurcharge] = useState('0');
   const [error, setError] = useState('');
 
@@ -580,33 +581,40 @@ export function SettingsPage() {
 
   const planMutation = useMutation({
     mutationFn: () => {
+      const isPkg = planMode === SessionMode.Gaming && planIsPackage;
+      const unit = planUnit === TimeUnit.PerMinute ? TimeUnit.PerHour : planUnit;
       const data = {
         name: planName,
-        timeUnit: planUnit,
+        sessionMode: planMode,
+        timeUnit: isPkg ? TimeUnit.PerHour : unit,
         watchingBilling:
           planMode === SessionMode.Watching ? planWatchingBilling : WatchingBilling.PerPerson,
         vipSurchargePerHour: Number(planVipSurcharge) || 0,
         gamingRates:
           planMode === SessionMode.Gaming
-            ? [
-                { controllerCount: 1, rate: Number(planRate) },
-                { controllerCount: 2, rate: Number(planCoupleRate) || Number(planRate) * 1.5 },
-              ]
+            ? isPkg
+              ? [
+                  { controllerCount: 1, rate: Number(planPackagePrice) },
+                  {
+                    controllerCount: 2,
+                    rate: Number(planPackageCouplePrice) || Number(planPackagePrice),
+                  },
+                ]
+              : [
+                  { controllerCount: 1, rate: Number(planRate) },
+                  { controllerCount: 2, rate: Number(planCoupleRate) || Number(planRate) * 1.5 },
+                ]
             : undefined,
         watchingRates:
           planMode === SessionMode.Watching
             ? [{ ratePerPerson: Number(planRate) }]
             : undefined,
-        packageDurationMinutes:
-          planMode === SessionMode.Gaming && planIsPackage
-            ? Math.round(Number(planPackageHours) * 60)
-            : undefined,
-        packagePrice:
-          planMode === SessionMode.Gaming && planIsPackage ? Number(planPackagePrice) : undefined,
+        packageDurationMinutes: isPkg ? Math.round(Number(planPackageHours) * 60) : null,
+        packagePrice: isPkg ? Number(planPackagePrice) : null,
       };
       return editingPlan
         ? pricingApi.updatePlan(editingPlan.id, { ...data, isActive: planIsActive })
-        : pricingApi.createPlan({ ...data, sessionMode: planMode });
+        : pricingApi.createPlan(data);
     },
     onSuccess: () => {
       setPlanOpen(false);
@@ -616,6 +624,7 @@ export function SettingsPage() {
       setPlanWatchingBilling(WatchingBilling.PerPerson);
       setPlanIsPackage(false);
       setPlanPackagePrice('');
+      setPlanPackageCouplePrice('');
       setPlanVipSurcharge('0');
       setPlanIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
@@ -1008,6 +1017,7 @@ export function SettingsPage() {
                 setPlanIsPackage(false);
                 setPlanPackageHours('5');
                 setPlanPackagePrice('');
+                setPlanPackageCouplePrice('');
                 setPlanVipSurcharge('0');
                 setPlanIsActive(true);
                 setPlanOpen(true);
@@ -1038,12 +1048,14 @@ export function SettingsPage() {
                     </p>
                     <p className="mt-1 text-sm text-accent">
                       {p.sessionMode === SessionMode.Gaming
-                        ? `${t('settings.individual')}: ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.gamingRates[0]?.rate ?? 0)} · ${t('settings.couple')}: ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0)}`
+                        ? p.packagePrice != null && p.packageDurationMinutes != null
+                          ? `${t('settings.packageBadge')}: ${t('settings.individual')} ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.packagePrice)} · ${t('settings.couple')} ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? p.packagePrice)}`
+                          : `${t('settings.individual')}: ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.gamingRates[0]?.rate ?? 0)} · ${t('settings.couple')}: ${formatCurrency(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0)}`
                         : formatCurrency(p.watchingRates[0]?.ratePerPerson ?? 0)}
                     </p>
                     {p.packagePrice != null && p.packageDurationMinutes != null && (
                       <p className="mt-1 text-xs font-medium text-primary">
-                        {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')} = {formatCurrency(p.packagePrice)}
+                        {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')}
                       </p>
                     )}
                     {(p.vipSurchargePerHour ?? 0) > 0 && (
@@ -1065,8 +1077,9 @@ export function SettingsPage() {
                           setEditingPlan(p);
                           setPlanName(p.name);
                           setPlanMode(p.sessionMode);
-                          setPlanUnit(p.timeUnit);
+                          setPlanUnit(p.timeUnit === TimeUnit.PerMinute ? TimeUnit.PerHour : p.timeUnit);
                           setPlanWatchingBilling(p.watchingBilling);
+                          const isPkg = p.packagePrice != null && p.packageDurationMinutes != null;
                           setPlanRate(
                             String(
                               p.sessionMode === SessionMode.Gaming
@@ -1075,10 +1088,18 @@ export function SettingsPage() {
                             )
                           );
                           setPlanCoupleRate(String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? 0));
-                          const isPkg = p.packagePrice != null && p.packageDurationMinutes != null;
                           setPlanIsPackage(isPkg);
                           setPlanPackageHours(isPkg ? String(Math.round(((p.packageDurationMinutes ?? 0) / 60) * 10) / 10) : '5');
-                          setPlanPackagePrice(isPkg ? String(p.packagePrice) : '');
+                          setPlanPackagePrice(
+                            isPkg
+                              ? String(p.gamingRates.find((r) => r.controllerCount === 1)?.rate ?? p.packagePrice ?? '')
+                              : ''
+                          );
+                          setPlanPackageCouplePrice(
+                            isPkg
+                              ? String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? p.packagePrice ?? '')
+                              : ''
+                          );
                           setPlanVipSurcharge(String(p.vipSurchargePerHour ?? 0));
                           setPlanIsActive(p.isActive);
                           setPlanOpen(true);
@@ -1667,20 +1688,24 @@ export function SettingsPage() {
           <Input label={t('settings.planName')} value={planName} onChange={(e) => setPlanName(e.target.value)} />
 
           <div className="flex gap-2">
-            <Button size="sm" disabled={!!editingPlan} variant={planMode === SessionMode.Gaming ? 'primary' : 'secondary'} onClick={() => {
+            <Button size="sm" variant={planMode === SessionMode.Gaming ? 'primary' : 'secondary'} onClick={() => {
               setPlanMode(SessionMode.Gaming);
               setPlanWatchingBilling(WatchingBilling.PerPerson);
             }}>
               {t('session.gaming')}
             </Button>
-            <Button size="sm" disabled={!!editingPlan} variant={planMode === SessionMode.Watching ? 'primary' : 'secondary'} onClick={() => {
+            <Button size="sm" variant={planMode === SessionMode.Watching ? 'primary' : 'secondary'} onClick={() => {
               setPlanMode(SessionMode.Watching);
               setPlanWatchingBilling(WatchingBilling.PerPerson);
               setPlanUnit(TimeUnit.PerHour);
+              setPlanIsPackage(false);
             }}>
               {t('session.watching')}
             </Button>
           </div>
+          {editingPlan && (
+            <p className="text-xs text-muted">{t('settings.planModeEditHint')}</p>
+          )}
 
           {planMode === SessionMode.Watching && (
             <div className="space-y-2">
@@ -1708,39 +1733,78 @@ export function SettingsPage() {
             <p className="text-xs text-muted">{t('settings.pricingHintGaming')}</p>
           )}
 
-          {planMode === SessionMode.Gaming ? (
+          {planMode === SessionMode.Gaming && !planIsPackage ? (
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant={planUnit === TimeUnit.PerHour ? 'primary' : 'secondary'} onClick={() => setPlanUnit(TimeUnit.PerHour)}>
                 {t('settings.perHour')}
               </Button>
-              <Button size="sm" variant={planUnit === TimeUnit.PerMinute ? 'primary' : 'secondary'} onClick={() => setPlanUnit(TimeUnit.PerMinute)}>
-                {t('settings.perMinute')}
-              </Button>
-              <Button size="sm" variant={planUnit === TimeUnit.PerGame ? 'primary' : 'secondary'} onClick={() => setPlanUnit(TimeUnit.PerGame)}>
+              <Button size="sm" variant={planUnit === TimeUnit.PerGame ? 'primary' : 'secondary'} onClick={() => {
+                setPlanUnit(TimeUnit.PerGame);
+                setPlanIsPackage(false);
+              }}>
                 {t('settings.perGame')}
               </Button>
             </div>
-          ) : planWatchingBilling === WatchingBilling.PerScreen ? (
+          ) : planMode === SessionMode.Watching && planWatchingBilling === WatchingBilling.PerScreen ? (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant={planUnit === TimeUnit.PerHour ? 'primary' : 'secondary'} onClick={() => setPlanUnit(TimeUnit.PerHour)}>
+              <Button size="sm" variant="primary">
                 {t('settings.perHour')}
               </Button>
-              <Button size="sm" variant={planUnit === TimeUnit.PerMinute ? 'primary' : 'secondary'} onClick={() => setPlanUnit(TimeUnit.PerMinute)}>
-                {t('settings.perMinute')}
-              </Button>
             </div>
-          ) : (
+          ) : planMode === SessionMode.Watching ? (
             <p className="text-xs text-muted">{t('settings.watchingFlatHint')}</p>
+          ) : null}
+
+          {planMode === SessionMode.Gaming && planUnit !== TimeUnit.PerGame && (
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={planIsPackage}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setPlanIsPackage(on);
+                    if (on) setPlanUnit(TimeUnit.PerHour);
+                  }}
+                />
+                {t('settings.packageEnable')}
+              </label>
+              {planIsPackage && (
+                <>
+                  <Input
+                    label={t('settings.packageDurationHours')}
+                    type="number"
+                    value={planPackageHours}
+                    onChange={(e) => setPlanPackageHours(e.target.value)}
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input
+                      label={t('settings.packageIndividualPrice')}
+                      type="number"
+                      value={planPackagePrice}
+                      onChange={(e) => setPlanPackagePrice(e.target.value)}
+                    />
+                    <Input
+                      label={t('settings.packageCouplePrice')}
+                      type="number"
+                      value={planPackageCouplePrice}
+                      onChange={(e) => setPlanPackageCouplePrice(e.target.value)}
+                    />
+                  </div>
+                  <p className="text-xs text-muted">{t('settings.packageHint')}</p>
+                </>
+              )}
+            </div>
           )}
 
-          {planMode === SessionMode.Gaming ? (
+          {planMode === SessionMode.Gaming && !planIsPackage ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label={t('settings.individualRate')} type="number" value={planRate} onChange={(e) => setPlanRate(e.target.value)} />
               <Input label={t('settings.coupleRate')} type="number" value={planCoupleRate} onChange={(e) => setPlanCoupleRate(e.target.value)} />
             </div>
-          ) : (
+          ) : planMode === SessionMode.Watching ? (
             <Input label={planRateLabel()} type="number" value={planRate} onChange={(e) => setPlanRate(e.target.value)} />
-          )}
+          ) : null}
 
           <div>
             <Input
@@ -1751,28 +1815,6 @@ export function SettingsPage() {
             />
             <p className="mt-1 text-xs text-muted">{t('settings.vipSurchargeHint')}</p>
           </div>
-
-          {planMode === SessionMode.Gaming && planUnit !== TimeUnit.PerGame && (
-            <div className="space-y-2 rounded-lg border border-border p-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={planIsPackage}
-                  onChange={(e) => setPlanIsPackage(e.target.checked)}
-                />
-                {t('settings.packageEnable')}
-              </label>
-              {planIsPackage && (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Input label={t('settings.packageDurationHours')} type="number" value={planPackageHours} onChange={(e) => setPlanPackageHours(e.target.value)} />
-                    <Input label={t('settings.packagePrice')} type="number" value={planPackagePrice} onChange={(e) => setPlanPackagePrice(e.target.value)} />
-                  </div>
-                  <p className="text-xs text-muted">{t('settings.packageHint')}</p>
-                </>
-              )}
-            </div>
-          )}
 
           {editingPlan && (
             <label className="flex items-center gap-2 text-sm">
@@ -1791,10 +1833,11 @@ export function SettingsPage() {
             loading={planMutation.isPending}
             disabled={
               !planName.trim() ||
-              !planRate ||
-              (planMode === SessionMode.Gaming &&
-                planIsPackage &&
-                (!(Number(planPackageHours) > 0) || !(Number(planPackagePrice) > 0)))
+              (planMode === SessionMode.Gaming && planIsPackage
+                ? !(Number(planPackageHours) > 0) ||
+                  !(Number(planPackagePrice) > 0) ||
+                  !(Number(planPackageCouplePrice) > 0)
+                : !planRate)
             }
             onClick={() => planMutation.mutate()}
           >

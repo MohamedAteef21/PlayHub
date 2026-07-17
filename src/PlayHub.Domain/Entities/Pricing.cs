@@ -12,9 +12,9 @@ public class PricingPlan : BaseEntity, ITenantEntity, ISoftDelete
     public TimeUnit TimeUnit { get; set; }
     /// <summary>Only used for watching plans. PerPerson = flat per watcher; PerScreen = timed per person added to the room.</summary>
     public WatchingBilling WatchingBilling { get; set; } = WatchingBilling.PerPerson;
-    /// <summary>Package/bundle: flat price covering this many minutes. Overage billed at the plan's normal rate.</summary>
+    /// <summary>Package/bundle: flat individual/couple prices covering this many minutes (no hourly overage).</summary>
     public int? PackageDurationMinutes { get; set; }
-    /// <summary>Flat package price (usually cheaper than duration × hourly rate).</summary>
+    /// <summary>Flat package price for individual (tier 1). Couple price lives in GamingRates ControllerCount=2 when package is enabled.</summary>
     public decimal? PackagePrice { get; set; }
     /// <summary>Extra VIP amount added per billable hour when this plan is used (0 = none).</summary>
     public decimal VipSurchargePerHour { get; set; }

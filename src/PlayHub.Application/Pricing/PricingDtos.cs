@@ -39,6 +39,7 @@ public record CreatePricingPlanRequest(
 
 public record UpdatePricingPlanRequest(
     string Name,
+    SessionMode SessionMode,
     TimeUnit TimeUnit,
     WatchingBilling WatchingBilling,
     bool IsActive,
