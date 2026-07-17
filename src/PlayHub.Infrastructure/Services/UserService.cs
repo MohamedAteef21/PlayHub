@@ -317,16 +317,18 @@ public class UserService : IUserService
         if (validBranchIds.Count == 0)
             throw new InvalidOperationException("No valid branches selected.");
 
-        // Master Admin can only assign branches they themselves have access to
+        // Master Admin can only assign branches they own (or are assigned to).
         if (_tenantContext.Role == UserRole.MasterAdmin)
         {
-            var myBranchIds = await _db.UserBranches
-                .Where(ub => ub.UserId == _tenantContext.UserId)
-                .Select(ub => ub.BranchId)
+            var myBranchIds = await _db.Branches.IgnoreQueryFilters()
+                .Where(b => b.TenantId == _tenantContext.TenantId
+                            && !b.IsDeleted
+                            && (b.OwnerUserId == _tenantContext.UserId
+                                || _db.UserBranches.Any(ub => ub.UserId == _tenantContext.UserId && ub.BranchId == b.Id)))
+                .Select(b => b.Id)
                 .ToListAsync(ct);
 
-            if (myBranchIds.Count > 0)
-                validBranchIds = validBranchIds.Where(id => myBranchIds.Contains(id)).ToList();
+            validBranchIds = validBranchIds.Where(id => myBranchIds.Contains(id)).ToList();
 
             if (validBranchIds.Count == 0)
                 throw new InvalidOperationException("You can only assign branches you have access to.");

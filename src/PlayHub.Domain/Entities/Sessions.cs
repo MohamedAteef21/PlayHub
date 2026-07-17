@@ -70,8 +70,14 @@ public class SessionCafeteriaLine : BaseEntity
 {
     public Guid SessionId { get; set; }
     public Guid CafeteriaItemId { get; set; }
+    public Guid? VariantId { get; set; }
+    public string? VariantName { get; set; }
+    /// <summary>Number of variant portions sold (drives price).</summary>
     public int Quantity { get; set; }
+    /// <summary>Stock deducted from the parent product for this line.</summary>
+    public int StockDeductQuantity { get; set; }
     public int ReturnedQuantity { get; set; }
+    public int ReturnedStockQuantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
     public string? CustomerName { get; set; }
@@ -80,6 +86,7 @@ public class SessionCafeteriaLine : BaseEntity
 
     public Session Session { get; set; } = null!;
     public CafeteriaItem CafeteriaItem { get; set; } = null!;
+    public CafeteriaItemVariant? Variant { get; set; }
     public User AddedByUser { get; set; } = null!;
     public ICollection<SessionCafeteriaReturn> Returns { get; set; } = [];
 }

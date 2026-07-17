@@ -11,12 +11,22 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { formatCurrency, formatDuration, parseServerUtc, useLiveTimer, useSessionHub } from '@/hooks/useSessions';
 import { playTimeUpSound } from '@/lib/timeUpSound';
-import { formatStockDisplay, hasLargeUnit, maxSellQuantity } from '@/lib/itemUnits';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
-import type { AssetDashboardDevice, CafeteriaItem, Customer, PricingPlan, SessionDetail, SessionLive } from '@/types';
-import { InventoryUnitKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import type { AssetDashboardDevice, CafeteriaItem, CafeteriaItemVariant, Customer, PricingPlan, SessionDetail, SessionLive } from '@/types';
+import { PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+
+type CafCartLine = {
+  itemId: string;
+  itemName: string;
+  variantId: string;
+  variantName: string;
+  price: number;
+  quantity: number;
+  stockDeduct: number;
+  stockAvailable: number;
+};
 
 type GuestType = 'none' | 'registered' | 'quick';
 
@@ -218,8 +228,11 @@ export function DashboardPage() {
   const [convertError, setConvertError] = useState('');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
-  const [cafQty, setCafQty] = useState<Record<string, number>>({});
-  const [cafUnit, setCafUnit] = useState<Record<string, InventoryUnitKind>>({});
+  const [cafCart, setCafCart] = useState<CafCartLine[]>([]);
+  const [cafPickItem, setCafPickItem] = useState<CafeteriaItem | null>(null);
+  const [cafPickVariantId, setCafPickVariantId] = useState('');
+  const [cafPickQty, setCafPickQty] = useState('1');
+  const [cafPickStock, setCafPickStock] = useState('1');
   const [cafCustomerName, setCafCustomerName] = useState('');
   const [cafSearch, setCafSearch] = useState('');
   const [returnLineId, setReturnLineId] = useState('');
@@ -601,8 +614,7 @@ export function DashboardPage() {
 
   async function handleAddCafeteriaToSession() {
     if (!cafSession) return;
-    const lines = Object.entries(cafQty).filter(([, q]) => q > 0);
-    if (lines.length === 0) {
+    if (cafCart.length === 0) {
       setCafError(t('cafeteria.emptyCart'));
       return;
     }
@@ -610,19 +622,20 @@ export function DashboardPage() {
     setCafError('');
     try {
       let last: SessionLive | null = null;
-      for (const [itemId, quantity] of lines) {
+      for (const line of cafCart) {
         last = await sessionsApi.addCafeteria(
           cafSession.id,
-          itemId,
-          quantity,
-          cafCustomerName.trim() || undefined,
-          cafUnit[itemId] ?? InventoryUnitKind.Base
+          line.itemId,
+          line.variantId,
+          line.quantity,
+          line.stockDeduct,
+          cafCustomerName.trim() || undefined
         );
       }
       if (last) onUpdate(last);
       setCafSession(null);
-      setCafQty({});
-      setCafUnit({});
+      setCafCart([]);
+      setCafPickItem(null);
       setCafCustomerName('');
       setCafSearch('');
       setReturnLineId('');
@@ -635,6 +648,49 @@ export function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function confirmCafPick() {
+    if (!cafPickItem) return;
+    const variant = (cafPickItem.variants ?? []).find((v: CafeteriaItemVariant) => v.id === cafPickVariantId);
+    if (!variant) return;
+    const quantity = Math.max(1, Number(cafPickQty) || 1);
+    const stockDeduct = Math.max(1, Number(cafPickStock) || 1);
+    if (stockDeduct > cafPickItem.currentQuantity) {
+      setCafError(t('inventory.insufficientStock', { defaultValue: 'Insufficient stock.' }));
+      return;
+    }
+    setCafCart((prev) => {
+      const existing = prev.find((l) => l.variantId === variant.id);
+      if (existing) {
+        return prev.map((l) =>
+          l.variantId === variant.id
+            ? {
+                ...l,
+                quantity: l.quantity + quantity,
+                stockDeduct: l.stockDeduct + stockDeduct,
+                stockAvailable: cafPickItem.currentQuantity,
+              }
+            : l
+        );
+      }
+      return [
+        ...prev,
+        {
+          itemId: cafPickItem.id,
+          itemName: cafPickItem.name,
+          variantId: variant.id,
+          variantName: variant.name,
+          price: variant.sellPrice,
+          quantity,
+          stockDeduct,
+          stockAvailable: cafPickItem.currentQuantity,
+        },
+      ];
+    });
+    setCafPickItem(null);
+    setCafSearch('');
+    setCafError('');
   }
 
   async function handleReturnCafeteria() {
@@ -699,8 +755,7 @@ export function DashboardPage() {
                 variant="secondary"
                 onClick={() => {
                   setCafSession(s);
-                  setCafQty({});
-                  setCafUnit({});
+                  setCafCart([]);
                   setCafCustomerName('');
                   setCafSearch('');
                   setReturnLineId('');
@@ -792,8 +847,7 @@ export function DashboardPage() {
                     onAddCafeteria={() => {
                       if (!session) return;
                       setCafSession(session);
-                      setCafQty({});
-                      setCafUnit({});
+                      setCafCart([]);
                       setCafCustomerName('');
                       setCafSearch('');
                       setReturnLineId('');
@@ -859,8 +913,7 @@ export function DashboardPage() {
                     onAddCafeteria={() => {
                       if (!session) return;
                       setCafSession(session);
-                      setCafQty({});
-                      setCafUnit({});
+                      setCafCart([]);
                       setCafCustomerName('');
                       setCafSearch('');
                       setReturnLineId('');
@@ -933,6 +986,10 @@ export function DashboardPage() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted">{t('session.device')}</span>
                 <span>{invoiceResult.deviceName}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted">{t('session.pricingPlan', { defaultValue: 'Pricing plan' })}</span>
+                <span>{invoiceResult.pricingPlanName}</span>
               </div>
               {(invoiceResult.customerName || invoiceResult.quickGuestName) && (
                 <div className="flex justify-between text-sm">
@@ -1349,6 +1406,10 @@ export function DashboardPage() {
           {closeModal && (
             <div className="space-y-1 rounded-xl border border-border bg-surface p-3">
               <div className="flex justify-between text-sm text-muted">
+                <span>{t('session.pricingPlan', { defaultValue: 'Pricing plan' })}</span>
+                <span>{closeModal.pricingPlanName}</span>
+              </div>
+              <div className="flex justify-between text-sm text-muted">
                 <span>{t('session.timeCost')}</span>
                 <span>{formatCurrency(closeModal.currentTimeCost)}</span>
               </div>
@@ -1515,23 +1576,14 @@ export function DashboardPage() {
           />
           {(() => {
             const activeItems = cafItems.filter((i: CafeteriaItem) => i.isActive);
-            const selectedIds = Object.keys(cafQty).filter((id) => (cafQty[id] ?? 0) > 0);
-            const selectedItems = selectedIds
-              .map((id) => activeItems.find((i) => i.id === id))
-              .filter((i): i is CafeteriaItem => !!i);
             const query = cafSearch.trim().toLowerCase();
             const results = activeItems.filter(
               (i) =>
-                !selectedIds.includes(i.id) &&
-                (query === '' ||
-                  i.name.toLowerCase().includes(query) ||
-                  (i.nameAr ?? '').toLowerCase().includes(query))
+                query === '' ||
+                i.name.toLowerCase().includes(query) ||
+                (i.nameAr ?? '').toLowerCase().includes(query)
             );
-            const cartTotal = selectedItems.reduce((sum, item) => {
-              const unit = cafUnit[item.id] ?? InventoryUnitKind.Base;
-              const baseQty = (cafQty[item.id] ?? 0) * (unit === InventoryUnitKind.Large ? item.unitsPerLarge : 1);
-              return sum + baseQty * item.sellPrice;
-            }, 0);
+            const cartTotal = cafCart.reduce((sum, l) => sum + l.price * l.quantity, 0);
             return (
               <>
                 <Input
@@ -1542,7 +1594,8 @@ export function DashboardPage() {
                 />
                 <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border p-1">
                   {results.map((item: CafeteriaItem) => {
-                    const outOfStock = maxSellQuantity(item, InventoryUnitKind.Base) <= 0;
+                    const outOfStock = item.currentQuantity <= 0;
+                    const variantCount = (item.variants ?? []).filter((v) => v.isActive).length;
                     return (
                       <button
                         key={item.id}
@@ -1550,16 +1603,24 @@ export function DashboardPage() {
                         disabled={outOfStock}
                         className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-start hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
-                          setCafQty((prev) => ({ ...prev, [item.id]: 1 }));
-                          setCafSearch('');
+                          const variants = (item.variants ?? []).filter((v) => v.isActive);
+                          if (variants.length === 0) {
+                            setCafError(t('inventory.noVariants', { defaultValue: 'No variants for this item.' }));
+                            return;
+                          }
+                          setCafPickItem(item);
+                          setCafPickVariantId(variants[0].id);
+                          setCafPickQty('1');
+                          setCafPickStock('1');
+                          setCafError('');
                         }}
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-medium">{item.name}</span>
                           <span className="block text-xs text-muted">
-                            {formatCurrency(item.sellPrice)} / {item.baseUnitName}
+                            {variantCount} {t('inventory.variants', { defaultValue: 'variants' })}
                             {' · '}
-                            {t('cafeteria.stock')}: {formatStockDisplay(item)}
+                            {t('cafeteria.stock')}: {item.currentQuantity}
                           </span>
                         </span>
                         <span className="text-xs font-medium text-primary">+ {t('cafeteria.addToCart')}</span>
@@ -1573,89 +1634,64 @@ export function DashboardPage() {
                   )}
                 </div>
 
-                {selectedItems.length > 0 && (
+                {cafCart.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-sm font-medium">{t('cafeteria.cart')}</p>
-                    {selectedItems.map((item) => {
-                      const unit = cafUnit[item.id] ?? InventoryUnitKind.Base;
-                      const max = maxSellQuantity(item, unit);
-                      const qty = cafQty[item.id] ?? 0;
-                      return (
-                        <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{item.name}</p>
-                            <p className="text-xs text-muted">
-                              {formatCurrency(item.sellPrice)} / {item.baseUnitName}
-                              {' · '}
-                              {t('cafeteria.stock')}: {formatStockDisplay(item)}
-                            </p>
-                          </div>
-                          {hasLargeUnit(item) && (
-                            <select
-                              className="rounded border border-border bg-surface-elevated px-2 py-1 text-xs"
-                              value={unit}
-                              onChange={(e) => {
-                                const next = Number(e.target.value) as InventoryUnitKind;
-                                setCafUnit((prev) => ({ ...prev, [item.id]: next }));
-                                setCafQty((prev) => ({
-                                  ...prev,
-                                  [item.id]: Math.max(1, Math.min(prev[item.id] ?? 1, maxSellQuantity(item, next))),
-                                }));
-                              }}
-                            >
-                              <option value={InventoryUnitKind.Base}>{item.baseUnitName}</option>
-                              <option value={InventoryUnitKind.Large}>{item.largeUnitName}</option>
-                            </select>
-                          )}
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() =>
-                                setCafQty((prev) => ({ ...prev, [item.id]: Math.max(1, (prev[item.id] ?? 1) - 1) }))
-                              }
-                            >
-                              −
-                            </Button>
-                            <Input
-                              type="number"
-                              min={1}
-                              max={max}
-                              className="w-16 text-center"
-                              value={qty}
-                              onChange={(e) =>
-                                setCafQty((prev) => ({
-                                  ...prev,
-                                  [item.id]: Math.max(1, Math.min(max, Number(e.target.value) || 1)),
-                                }))
-                              }
-                            />
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() =>
-                                setCafQty((prev) => ({ ...prev, [item.id]: Math.min(max, (prev[item.id] ?? 0) + 1) }))
-                              }
-                            >
-                              +
-                            </Button>
-                          </div>
+                    {cafCart.map((line) => (
+                      <div key={line.variantId} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {line.itemName} — {line.variantName}
+                          </p>
+                          <p className="text-xs text-muted">
+                            {formatCurrency(line.price)} · {t('inventory.stockDeduct', { defaultValue: 'Stock' })}{' '}
+                            {line.stockDeduct}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
                           <Button
-                            variant="ghost"
+                            variant="secondary"
                             size="sm"
                             onClick={() =>
-                              setCafQty((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              })
+                              setCafCart((prev) =>
+                                prev
+                                  .map((l) =>
+                                    l.variantId === line.variantId
+                                      ? { ...l, quantity: Math.max(0, l.quantity - 1), stockDeduct: Math.max(0, l.stockDeduct - 1) }
+                                      : l
+                                  )
+                                  .filter((l) => l.quantity > 0)
+                              )
                             }
                           >
-                            ✕
+                            −
+                          </Button>
+                          <span className="w-8 text-center text-sm">{line.quantity}</span>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              setCafCart((prev) =>
+                                prev.map((l) =>
+                                  l.variantId === line.variantId
+                                    ? { ...l, quantity: l.quantity + 1, stockDeduct: l.stockDeduct + 1 }
+                                    : l
+                                )
+                              )
+                            }
+                          >
+                            +
                           </Button>
                         </div>
-                      );
-                    })}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setCafCart((prev) => prev.filter((l) => l.variantId !== line.variantId))}
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                    ))}
                     <div className="flex items-center justify-between rounded-lg bg-surface-elevated px-3 py-2 text-sm font-medium">
                       <span>{t('cafeteria.total')}</span>
                       <span>{formatCurrency(cartTotal)}</span>
@@ -1713,6 +1749,62 @@ export function DashboardPage() {
 
           {cafError && <p className="text-sm text-danger">{cafError}</p>}
         </div>
+      </Modal>
+
+      <Modal
+        open={!!cafPickItem}
+        onClose={() => setCafPickItem(null)}
+        title={cafPickItem?.name ?? t('inventory.variant', { defaultValue: 'Variant' })}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCafPickItem(null)}>
+              {t('session.cancel')}
+            </Button>
+            <Button onClick={confirmCafPick}>{t('cafeteria.addToCart')}</Button>
+          </>
+        }
+      >
+        {cafPickItem && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm text-muted">
+                {t('inventory.variant', { defaultValue: 'Variant' })}
+              </label>
+              <select
+                className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                value={cafPickVariantId}
+                onChange={(e) => setCafPickVariantId(e.target.value)}
+              >
+                {(cafPickItem.variants ?? [])
+                  .filter((v) => v.isActive)
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} — {formatCurrency(v.sellPrice)}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <Input
+              label={t('inventory.sellQty', { defaultValue: 'Sell quantity' })}
+              type="number"
+              min={1}
+              value={cafPickQty}
+              onChange={(e) => setCafPickQty(e.target.value)}
+            />
+            <Input
+              label={t('inventory.askStockDeduct', {
+                defaultValue: 'How much stock to deduct?',
+              })}
+              type="number"
+              min={1}
+              value={cafPickStock}
+              onChange={(e) => setCafPickStock(e.target.value)}
+            />
+            <p className="text-xs text-muted">
+              {t('inventory.stockAvailable', { defaultValue: 'Available' })}: {cafPickItem.currentQuantity}
+            </p>
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -3,17 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cafeteriaApi, sessionsApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
-import {
-  formatStockDisplay,
-  hasLargeUnit,
-  lineUnitPrice,
-  maxSellQuantity,
-  unitLabel,
-} from '@/lib/itemUnits';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import type { CafeteriaItem } from '@/types';
-import { InventoryUnitKind, PaymentMethod } from '@/types';
+import type { CafeteriaItem, CafeteriaItemVariant } from '@/types';
+import { PaymentMethod } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -24,14 +17,15 @@ import { PageHeader } from '@/components/ui/PageHelpers';
 
 interface CartLine {
   item: CafeteriaItem;
+  variant: CafeteriaItemVariant;
   quantity: number;
-  unit: InventoryUnitKind;
+  stockDeduct: number;
 }
 
 type SaleMode = 'walkin' | 'session';
 
-function cartKey(itemId: string, unit: InventoryUnitKind) {
-  return `${itemId}:${unit}`;
+function cartKey(itemId: string, variantId: string) {
+  return `${itemId}:${variantId}`;
 }
 
 export function CafeteriaPage() {
@@ -49,7 +43,10 @@ export function CafeteriaPage() {
   const [debtorName, setDebtorName] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [error, setError] = useState('');
-  const [pickUnitItem, setPickUnitItem] = useState<CafeteriaItem | null>(null);
+  const [pickItem, setPickItem] = useState<CafeteriaItem | null>(null);
+  const [pickVariantId, setPickVariantId] = useState('');
+  const [stockDeduct, setStockDeduct] = useState('1');
+  const [sellQty, setSellQty] = useState('1');
 
   const { data: items = [], isLoading } = useQuery({
     queryKey: ['cafeteria-items', user?.id, activeBranchId],
@@ -65,47 +62,74 @@ export function CafeteriaPage() {
   });
 
   const activeItems = useMemo(() => items.filter((i) => i.isActive), [items]);
-  const cartTotal = cart.reduce((sum, l) => sum + lineUnitPrice(l.item, l.unit) * l.quantity, 0);
+  const cartTotal = cart.reduce((sum, l) => sum + l.variant.sellPrice * l.quantity, 0);
 
   function itemLabel(item: CafeteriaItem) {
     return i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
   }
 
-  function addToCart(item: CafeteriaItem, unit: InventoryUnitKind) {
-    if (!canSell) return;
-    const max = maxSellQuantity(item, unit);
-    if (max <= 0) return;
-    const key = cartKey(item.id, unit);
-    setCart((prev) => {
-      const existing = prev.find((l) => cartKey(l.item.id, l.unit) === key);
-      if (existing) {
-        const nextQty = Math.min(existing.quantity + 1, max);
-        return prev.map((l) =>
-          cartKey(l.item.id, l.unit) === key ? { ...l, quantity: nextQty, item } : l
-        );
-      }
-      return [...prev, { item, quantity: 1, unit }];
-    });
-    setPickUnitItem(null);
+  function lineLabel(line: CartLine) {
+    return `${itemLabel(line.item)} — ${line.variant.name}`;
   }
 
-  function handleAddClick(item: CafeteriaItem) {
+  function openPick(item: CafeteriaItem) {
     if (!canSell || item.currentQuantity <= 0) return;
-    if (hasLargeUnit(item)) {
-      setPickUnitItem(item);
+    const variants = (item.variants ?? []).filter((v) => v.isActive);
+    if (variants.length === 0) {
+      setError(t('inventory.noVariants', { defaultValue: 'No variants for this item.' }));
       return;
     }
-    addToCart(item, InventoryUnitKind.Base);
+    setPickItem(item);
+    setPickVariantId(variants[0].id);
+    setStockDeduct('1');
+    setSellQty('1');
+    setError('');
   }
 
-  function updateQty(itemId: string, unit: InventoryUnitKind, delta: number) {
+  function confirmPick() {
+    if (!pickItem) return;
+    const variant = (pickItem.variants ?? []).find((v) => v.id === pickVariantId);
+    if (!variant) return;
+    const qty = Math.max(1, Number(sellQty) || 1);
+    const deduct = Math.max(1, Number(stockDeduct) || 1);
+    if (deduct > pickItem.currentQuantity) {
+      setError(t('inventory.insufficientStock', { defaultValue: 'Insufficient stock.' }));
+      return;
+    }
+    const key = cartKey(pickItem.id, variant.id);
+    setCart((prev) => {
+      const existing = prev.find((l) => cartKey(l.item.id, l.variant.id) === key);
+      if (existing) {
+        return prev.map((l) =>
+          cartKey(l.item.id, l.variant.id) === key
+            ? {
+                ...l,
+                quantity: l.quantity + qty,
+                stockDeduct: l.stockDeduct + deduct,
+                item: pickItem,
+                variant,
+              }
+            : l
+        );
+      }
+      return [...prev, { item: pickItem, variant, quantity: qty, stockDeduct: deduct }];
+    });
+    setPickItem(null);
+    setError('');
+  }
+
+  function updateQty(itemId: string, variantId: string, delta: number) {
     setCart((prev) =>
       prev
         .map((l) => {
-          if (l.item.id !== itemId || l.unit !== unit) return l;
-          const max = maxSellQuantity(l.item, l.unit);
-          const next = Math.max(0, Math.min(l.quantity + delta, max));
-          return { ...l, quantity: next };
+          if (l.item.id !== itemId || l.variant.id !== variantId) return l;
+          const next = Math.max(0, l.quantity + delta);
+          const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
+          return {
+            ...l,
+            quantity: next,
+            stockDeduct: Math.max(next > 0 ? Math.round(deductPer * next) : 0, next > 0 ? 1 : 0),
+          };
         })
         .filter((l) => l.quantity > 0)
     );
@@ -119,15 +143,21 @@ export function CafeteriaPage() {
           await sessionsApi.addCafeteria(
             sessionId,
             line.item.id,
+            line.variant.id,
             line.quantity,
-            customerName.trim() || undefined,
-            line.unit
+            line.stockDeduct,
+            customerName.trim() || undefined
           );
         }
         return;
       }
       await cafeteriaApi.createSale(
-        cart.map((l) => ({ cafeteriaItemId: l.item.id, quantity: l.quantity, unit: l.unit })),
+        cart.map((l) => ({
+          cafeteriaItemId: l.item.id,
+          variantId: l.variant.id,
+          quantity: l.quantity,
+          stockDeductQuantity: l.stockDeduct,
+        })),
         {
           paymentMethod,
           debtorName: paymentMethod === PaymentMethod.Deferred ? debtorName : undefined,
@@ -150,6 +180,8 @@ export function CafeteriaPage() {
   if (isLoading) {
     return <p className="text-muted">{t('common.loading')}</p>;
   }
+
+  const pickVariants = (pickItem?.variants ?? []).filter((v) => v.isActive);
 
   return (
     <div>
@@ -196,177 +228,160 @@ export function CafeteriaPage() {
         </div>
       )}
 
+      {error && <p className="mb-3 text-sm text-danger">{error}</p>}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {activeItems.length === 0 ? (
-            <p className="col-span-full text-muted">{t('cafeteria.noItems')}</p>
-          ) : (
-            activeItems.map((item) => (
-              <Card key={item.id} className="flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium">{itemLabel(item)}</p>
-                    <p className="text-lg font-bold text-accent">
-                      {formatCurrency(item.sellPrice)}
-                      <span className="ms-1 text-xs font-normal text-muted">/ {item.baseUnitName}</span>
-                    </p>
-                    {hasLargeUnit(item) && (
-                      <p className="text-xs text-muted">
-                        {formatCurrency(item.sellPrice * item.unitsPerLarge)} / {item.largeUnitName}
-                      </p>
-                    )}
-                  </div>
-                  {item.isLowStock && <Badge status="paused">{t('cafeteria.lowStock')}</Badge>}
+          {activeItems.map((item) => (
+            <Card key={item.id} className="cursor-pointer" onClick={() => openPick(item)}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-medium">{itemLabel(item)}</p>
+                  <p className="text-xs text-muted">
+                    {(item.variants ?? []).filter((v) => v.isActive).length}{' '}
+                    {t('inventory.variants', { defaultValue: 'variants' })}
+                  </p>
                 </div>
-                <p className="text-sm text-muted">
-                  {t('cafeteria.stock')}: {formatStockDisplay(item)}
-                </p>
-                {canSell && (
-                  <Button
-                    size="sm"
-                    disabled={item.currentQuantity <= 0}
-                    onClick={() => handleAddClick(item)}
-                  >
-                    {t('cafeteria.addToCart')}
-                  </Button>
-                )}
-              </Card>
-            ))
-          )}
+                {item.isLowStock && <Badge status="inactive">{t('inventory.lowStock')}</Badge>}
+              </div>
+              <p className="mt-2 text-sm text-muted">
+                {t('inventory.qty')}: {item.currentQuantity}
+              </p>
+            </Card>
+          ))}
         </div>
 
-        <Card className="sticky top-4 h-fit space-y-4">
-          <h2 className="text-lg font-semibold">{t('cafeteria.cart')}</h2>
-          <p className="text-xs text-muted">
-            {saleMode === 'session' ? t('cafeteria.willChargeSession') : t('cafeteria.willPayNow')}
-          </p>
+        <Card className="h-fit">
+          <p className="mb-3 font-medium">{t('cafeteria.cart')}</p>
           {cart.length === 0 ? (
-            <p className="text-sm text-muted">{t('cafeteria.emptyCart')}</p>
+            <p className="text-sm text-muted">{t('cafeteria.cartEmpty')}</p>
           ) : (
-            <ul className="space-y-3">
-              {cart.map((line) => (
-                <li key={cartKey(line.item.id, line.unit)} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="flex-1 truncate">
-                    {itemLabel(line.item)}
-                    <span className="ms-1 text-xs text-muted">({unitLabel(line.item, line.unit)})</span>
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => updateQty(line.item.id, line.unit, -1)}>−</Button>
-                    <span className="w-6 text-center">{line.quantity}</span>
-                    <Button variant="ghost" size="sm" onClick={() => updateQty(line.item.id, line.unit, 1)}>+</Button>
+            <div className="space-y-3">
+              {cart.map((l) => (
+                <div key={cartKey(l.item.id, l.variant.id)} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{lineLabel(l)}</p>
+                    <p className="text-xs text-muted">
+                      {formatCurrency(l.variant.sellPrice)} · {t('inventory.stockDeduct', { defaultValue: 'Stock' })}{' '}
+                      {l.stockDeduct}
+                    </p>
                   </div>
-                  <span className="w-16 text-end font-medium">
-                    {formatCurrency(lineUnitPrice(line.item, line.unit) * line.quantity)}
-                  </span>
-                </li>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, -1)}>
+                      -
+                    </Button>
+                    <span className="w-6 text-center text-sm">{l.quantity}</span>
+                    <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, 1)}>
+                      +
+                    </Button>
+                  </div>
+                </div>
               ))}
-            </ul>
-          )}
-          <div className="border-t border-border pt-3">
-            <Input
-              label={t('cafeteria.customerName')}
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder={t('cafeteria.customerNameOptional')}
-            />
-            <div className="mt-3 flex justify-between font-semibold">
-              <span>{t('cafeteria.total')}</span>
-              <span className="text-success">{formatCurrency(cartTotal)}</span>
-            </div>
-            {canSell && (
-              <Button
-                className="mt-3 w-full"
-                disabled={cart.length === 0 || (saleMode === 'session' && !sessionId)}
-                onClick={() => {
-                  setError('');
-                  if (saleMode === 'session') {
-                    saleMutation.mutate();
-                  } else {
-                    setCheckoutOpen(true);
-                  }
-                }}
-                loading={saleMode === 'session' && saleMutation.isPending}
-              >
-                {saleMode === 'session' ? t('cafeteria.addToSessionBill') : t('cafeteria.checkout')}
+              <div className="flex items-center justify-between border-t border-border pt-3">
+                <span className="font-medium">{t('common.total')}</span>
+                <span className="font-semibold">{formatCurrency(cartTotal)}</span>
+              </div>
+              <Button className="w-full" disabled={!canSell} onClick={() => setCheckoutOpen(true)}>
+                {t('cafeteria.checkout')}
               </Button>
-            )}
-            {error && saleMode === 'session' && <p className="mt-2 text-sm text-danger">{error}</p>}
-          </div>
+            </div>
+          )}
         </Card>
       </div>
 
+      <Modal
+        open={!!pickItem}
+        onClose={() => setPickItem(null)}
+        title={pickItem ? itemLabel(pickItem) : ''}
+      >
+        {pickItem && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm text-muted">
+                {t('inventory.variant', { defaultValue: 'Variant' })}
+              </label>
+              <select
+                className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                value={pickVariantId}
+                onChange={(e) => setPickVariantId(e.target.value)}
+              >
+                {pickVariants.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} — {formatCurrency(v.sellPrice)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Input
+              label={t('inventory.sellQty', { defaultValue: 'Sell quantity' })}
+              type="number"
+              min={1}
+              value={sellQty}
+              onChange={(e) => setSellQty(e.target.value)}
+            />
+            <Input
+              label={t('inventory.askStockDeduct', {
+                defaultValue: 'How much stock to deduct?',
+              })}
+              type="number"
+              min={1}
+              value={stockDeduct}
+              onChange={(e) => setStockDeduct(e.target.value)}
+            />
+            <p className="text-xs text-muted">
+              {t('inventory.stockAvailable', { defaultValue: 'Available' })}: {pickItem.currentQuantity}
+            </p>
+            {error && <p className="text-sm text-danger">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setPickItem(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button onClick={confirmPick}>{t('common.add')}</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} title={t('cafeteria.checkout')}>
-        <div className="space-y-4">
-          <p className="text-2xl font-bold text-success">{formatCurrency(cartTotal)}</p>
+        <div className="space-y-3">
           <Input
             label={t('cafeteria.customerName')}
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
-            placeholder={t('cafeteria.customerNameOptional')}
           />
-          <div>
-            <label className="mb-1 block text-sm text-muted">{t('session.paymentMethod')}</label>
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(Number(e.target.value))}
-              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
-            >
-              <option value={PaymentMethod.Cash}>{t('session.cash')}</option>
-              <option value={PaymentMethod.Deferred}>{t('session.deferred')}</option>
-            </select>
-          </div>
-          {paymentMethod === PaymentMethod.Deferred && (
-            <Input
-              label={t('session.debtorName')}
-              value={debtorName}
-              onChange={(e) => setDebtorName(e.target.value)}
-            />
+          {saleMode === 'walkin' && (
+            <>
+              <label className="mb-1 block text-sm text-muted">{t('common.paymentMethod')}</label>
+              <select
+                className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(Number(e.target.value))}
+              >
+                <option value={PaymentMethod.Cash}>{t('payment.cash')}</option>
+                <option value={PaymentMethod.BankTransfer}>{t('payment.transfer')}</option>
+                <option value={PaymentMethod.DigitalWallet}>{t('payment.wallet')}</option>
+                <option value={PaymentMethod.Deferred}>{t('payment.deferred')}</option>
+              </select>
+              {paymentMethod === PaymentMethod.Deferred && (
+                <Input
+                  label={t('cafeteria.debtorName')}
+                  value={debtorName}
+                  onChange={(e) => setDebtorName(e.target.value)}
+                />
+              )}
+            </>
           )}
+          <p className="text-lg font-semibold">{formatCurrency(cartTotal)}</p>
           {error && <p className="text-sm text-danger">{error}</p>}
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" onClick={() => setCheckoutOpen(false)}>
-              {t('session.cancel')}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCheckoutOpen(false)}>
+              {t('common.cancel')}
             </Button>
-            <Button
-              className="flex-1"
-              loading={saleMutation.isPending}
-              onClick={() => saleMutation.mutate()}
-            >
-              {t('session.confirm')}
+            <Button loading={saleMutation.isPending} onClick={() => saleMutation.mutate()}>
+              {t('common.confirm')}
             </Button>
           </div>
         </div>
-      </Modal>
-
-      <Modal
-        open={!!pickUnitItem}
-        onClose={() => setPickUnitItem(null)}
-        title={pickUnitItem ? itemLabel(pickUnitItem) : t('cafeteria.sellUnit')}
-      >
-        {pickUnitItem && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted">{t('cafeteria.sellUnit')}</p>
-            <Button
-              className="w-full"
-              disabled={maxSellQuantity(pickUnitItem, InventoryUnitKind.Base) <= 0}
-              onClick={() => addToCart(pickUnitItem, InventoryUnitKind.Base)}
-            >
-              {pickUnitItem.baseUnitName}
-              {' — '}
-              {formatCurrency(pickUnitItem.sellPrice)}
-            </Button>
-            <Button
-              className="w-full"
-              variant="secondary"
-              disabled={maxSellQuantity(pickUnitItem, InventoryUnitKind.Large) <= 0}
-              onClick={() => addToCart(pickUnitItem, InventoryUnitKind.Large)}
-            >
-              {pickUnitItem.largeUnitName}
-              {' — '}
-              {formatCurrency(pickUnitItem.sellPrice * pickUnitItem.unitsPerLarge)}
-            </Button>
-          </div>
-        )}
       </Modal>
     </div>
   );

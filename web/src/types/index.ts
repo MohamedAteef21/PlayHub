@@ -78,7 +78,10 @@ export interface SessionCafeteriaLine {
   id: string;
   cafeteriaItemId: string;
   itemName: string;
+  variantId: string | null;
+  variantName: string | null;
   quantity: number;
+  stockDeductQuantity: number;
   returnedQuantity: number;
   unitPrice: number;
   lineTotal: number;
@@ -351,6 +354,14 @@ export interface StockVoucher {
   lines: StockVoucherLine[];
 }
 
+export interface CafeteriaItemVariant {
+  id: string;
+  name: string;
+  sellPrice: number;
+  isActive: boolean;
+  sortOrder: number;
+}
+
 export interface CafeteriaItem {
   id: string;
   branchId: string;
@@ -365,6 +376,7 @@ export interface CafeteriaItem {
   largeUnitName: string | null;
   unitsPerLarge: number;
   createdAt: string;
+  variants: CafeteriaItemVariant[];
 }
 
 /** Matches backend InventoryUnitKind */
@@ -378,7 +390,10 @@ export interface CafeteriaSaleLine {
   id: string;
   cafeteriaItemId: string;
   itemName: string;
+  variantId: string | null;
+  variantName: string | null;
   quantity: number;
+  stockDeductQuantity: number;
   returnedQuantity: number;
   unitPrice: number;
   lineTotal: number;

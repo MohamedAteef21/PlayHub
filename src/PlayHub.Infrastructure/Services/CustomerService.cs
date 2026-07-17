@@ -123,8 +123,7 @@ public class CustomerService : ICustomerService
 
     public async Task<CustomerDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken ct = default)
     {
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Customer not found.");
+        var customer = await RequireAccessibleCustomerAsync(id, ct);
 
         var name = request.Name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name))
@@ -156,8 +155,7 @@ public class CustomerService : ICustomerService
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id, ct)
-            ?? throw new KeyNotFoundException("Customer not found.");
+        var customer = await RequireAccessibleCustomerAsync(id, ct);
 
         customer.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         customer.IsActive = false;
@@ -179,8 +177,9 @@ public class CustomerService : ICustomerService
         if (bonus < 0)
             throw new InvalidOperationException("Bonus cannot be negative.");
 
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id && c.IsActive, ct)
-            ?? throw new KeyNotFoundException("Customer not found.");
+        var customer = await RequireAccessibleCustomerAsync(id, ct);
+        if (!customer.IsActive)
+            throw new KeyNotFoundException("Customer not found.");
 
         var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
 
@@ -227,8 +226,7 @@ public class CustomerService : ICustomerService
     public async Task<PagedResult<WalletTransactionDto>> GetWalletTransactionsAsync(
         Guid id, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        if (!await _db.Customers.AnyAsync(c => c.Id == id, ct))
-            throw new KeyNotFoundException("Customer not found.");
+        _ = await RequireAccessibleCustomerAsync(id, ct);
 
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
         var query = _db.WalletTransactions.AsNoTracking().Where(t => t.CustomerId == id);
@@ -243,6 +241,26 @@ public class CustomerService : ICustomerService
             .ToListAsync(ct);
 
         return new PagedResult<WalletTransactionDto>(items, total, p, size);
+    }
+
+    private async Task<Customer> RequireAccessibleCustomerAsync(Guid id, CancellationToken ct)
+    {
+        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id, ct)
+            ?? throw new KeyNotFoundException("Customer not found.");
+
+        if (_tenantContext.IsSuperAdmin)
+            return customer;
+
+        var userId = _tenantContext.UserId;
+        var allowed = _tenantContext.AllowedBranchIds;
+        var isMine = customer.CreatedByUserId == userId
+            || (customer.BranchId != null && allowed.Contains(customer.BranchId.Value))
+            || await _db.Users.IgnoreQueryFilters().AnyAsync(
+                u => u.Id == customer.CreatedByUserId && u.ParentUserId == userId && !u.IsDeleted, ct);
+        if (!isMine)
+            throw new KeyNotFoundException("Customer not found.");
+
+        return customer;
     }
 
     private static CustomerDto Map(Customer c) =>

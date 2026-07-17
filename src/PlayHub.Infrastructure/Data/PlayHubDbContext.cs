@@ -66,6 +66,7 @@ public class PlayHubDbContext : DbContext
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<CustomerOffer> CustomerOffers => Set<CustomerOffer>();
     public DbSet<CafeteriaItem> CafeteriaItems => Set<CafeteriaItem>();
+    public DbSet<CafeteriaItemVariant> CafeteriaItemVariants => Set<CafeteriaItemVariant>();
     public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
     public DbSet<ItemUnitConversionLog> ItemUnitConversionLogs => Set<ItemUnitConversionLog>();
     public DbSet<CafeteriaSale> CafeteriaSales => Set<CafeteriaSale>();

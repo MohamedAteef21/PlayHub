@@ -30,7 +30,7 @@ public class InventoryService : IInventoryService
     public async Task<PagedResult<InventoryMovementDto>> GetMovementsAsync(
         Guid? itemId = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
 
         var query = _db.InventoryMovements
@@ -67,7 +67,7 @@ public class InventoryService : IInventoryService
         if (string.IsNullOrWhiteSpace(request.Reason))
             throw new InvalidOperationException("Adjustment reason is required.");
 
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == itemId && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
 
@@ -92,7 +92,7 @@ public class InventoryService : IInventoryService
     public async Task<PagedResult<StockVoucherDto>> GetVouchersAsync(
         StockVoucherType? type = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
 
         var query = _db.StockVouchers
@@ -111,7 +111,7 @@ public class InventoryService : IInventoryService
 
     public async Task<StockVoucherDto?> GetVoucherAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var voucher = await _db.StockVouchers
             .Include(v => v.Lines).ThenInclude(l => l.CafeteriaItem)
             .Include(v => v.CreatedByUser)
@@ -122,7 +122,7 @@ public class InventoryService : IInventoryService
 
     public async Task<StockVoucherDto> CreateVoucherAsync(CreateStockVoucherRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         if (request.Lines is null || request.Lines.Count == 0)
             throw new InvalidOperationException("At least one voucher line is required.");
@@ -236,7 +236,7 @@ public class InventoryService : IInventoryService
 
     public async Task<StockVoucherDto> CreateSettlementFromCountAsync(Guid countVoucherId, string? notes = null, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var count = await _db.StockVouchers
             .Include(v => v.Lines)
             .FirstOrDefaultAsync(v =>
@@ -265,7 +265,7 @@ public class InventoryService : IInventoryService
 
     public async Task<StockVoucherDto> PostVoucherAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var voucher = await _db.StockVouchers
             .Include(v => v.Lines).ThenInclude(l => l.CafeteriaItem)
             .Include(v => v.CreatedByUser)
@@ -378,5 +378,10 @@ public class InventoryService : IInventoryService
     private static CafeteriaItemDto MapItem(CafeteriaItem i) =>
         new(i.Id, i.BranchId, i.Name, i.NameAr, i.SellPrice, i.CurrentQuantity, i.MinThreshold,
             i.CurrentQuantity <= i.MinThreshold, i.IsActive,
-            i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge, i.CreatedAt);
+            i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge, i.CreatedAt,
+            (i.Variants ?? [])
+                .OrderBy(v => v.SortOrder)
+                .ThenBy(v => v.Name)
+                .Select(v => new CafeteriaItemVariantDto(v.Id, v.Name, v.SellPrice, v.IsActive, v.SortOrder))
+                .ToList());
 }

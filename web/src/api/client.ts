@@ -222,17 +222,19 @@ export const sessionsApi = {
   addCafeteria: (
     sessionId: string,
     cafeteriaItemId: string,
+    variantId: string,
     quantity: number,
-    customerName?: string,
-    unit?: number
+    stockDeductQuantity: number,
+    customerName?: string
   ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${sessionId}/cafeteria`, {
       method: 'POST',
       body: JSON.stringify({
         cafeteriaItemId,
+        variantId,
         quantity,
+        stockDeductQuantity,
         customerName: customerName || undefined,
-        unit: unit ?? 0,
       }),
     }),
   returnCafeteria: (sessionId: string, sessionCafeteriaLineId: string, quantity: number, reason: string) =>
@@ -396,13 +398,9 @@ export const cafeteriaApi = {
   createItem: (data: {
     name: string;
     nameAr?: string;
-    sellPrice: number;
     currentQuantity: number;
     minThreshold: number;
-    baseUnitId: string;
-    largeUnitId?: string | null;
-    unitsPerLarge?: number;
-    initialStockUnit?: number;
+    variants: { id?: string; name: string; sellPrice: number; isActive?: boolean; sortOrder?: number }[];
   }) =>
     apiFetch<import('@/types').CafeteriaItem>('/cafeteria/items', {
       method: 'POST',
@@ -413,12 +411,9 @@ export const cafeteriaApi = {
     data: {
       name: string;
       nameAr?: string;
-      sellPrice: number;
       minThreshold: number;
       isActive: boolean;
-      baseUnitId: string;
-      largeUnitId?: string | null;
-      unitsPerLarge?: number;
+      variants: { id?: string; name: string; sellPrice: number; isActive?: boolean; sortOrder?: number }[];
     }
   ) =>
     apiFetch<import('@/types').CafeteriaItem>(`/cafeteria/items/${id}`, {
@@ -435,7 +430,12 @@ export const cafeteriaApi = {
     return apiFetch<import('@/types').CafeteriaSale[]>(`/cafeteria/sales${q ? `?${q}` : ''}`);
   },
   createSale: (
-    lines: { cafeteriaItemId: string; quantity: number; unit?: number }[],
+    lines: {
+      cafeteriaItemId: string;
+      variantId: string;
+      quantity: number;
+      stockDeductQuantity: number;
+    }[],
     payment: import('@/types').PaymentRequest,
     customerName?: string
   ) =>

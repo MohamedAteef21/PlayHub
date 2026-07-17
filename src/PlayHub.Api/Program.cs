@@ -406,6 +406,18 @@ using (var scope = app.Services.CreateScope())
           AND b.OwnerUserId IS NOT NULL
           AND b.OwnerUserId <> u.Id
         """);
+    // Staff must not keep branches owned by a different master than their parent.
+    await db.Database.ExecuteSqlRawAsync("""
+        DELETE ub
+        FROM UserBranches ub
+        INNER JOIN users u ON u.Id = ub.UserId
+        INNER JOIN branches b ON b.Id = ub.BranchId
+        WHERE u.Role = 0
+          AND u.IsDeleted = 0
+          AND u.ParentUserId IS NOT NULL
+          AND b.OwnerUserId IS NOT NULL
+          AND b.OwnerUserId <> u.ParentUserId
+        """);
     await DatabaseSeeder.SeedAsync(db, app.Configuration);
 }
 

@@ -23,7 +23,7 @@ public class PricingService : IPricingService
 
     public async Task<IReadOnlyList<PricingPlanDto>> GetPlansAsync(SessionMode? mode = null, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var query = _db.PricingPlans
             .Include(p => p.GamingRates)
@@ -39,7 +39,7 @@ public class PricingService : IPricingService
 
     public async Task<PricingPlanDto?> GetPlanByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
@@ -51,7 +51,7 @@ public class PricingService : IPricingService
 
     public async Task<PricingPlanDto> CreatePlanAsync(CreatePricingPlanRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         if (request.BranchId.HasValue && request.BranchId.Value != branchId)
             throw new InvalidOperationException("Pricing plan branch must match the active branch.");
@@ -84,7 +84,7 @@ public class PricingService : IPricingService
 
     public async Task<PricingPlanDto> UpdatePlanAsync(Guid id, UpdatePricingPlanRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
@@ -127,7 +127,7 @@ public class PricingService : IPricingService
 
     public async Task SoftDeletePlanAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var plan = await _db.PricingPlans
             .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct)
             ?? throw new KeyNotFoundException("Pricing plan not found.");

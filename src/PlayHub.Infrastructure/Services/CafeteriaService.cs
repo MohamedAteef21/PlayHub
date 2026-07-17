@@ -32,56 +32,60 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<IReadOnlyList<CafeteriaItemDto>> GetItemsAsync(CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
-        return await _db.CafeteriaItems
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var items = await _db.CafeteriaItems
+            .Include(i => i.Variants)
             .Where(i => i.BranchId == branchId)
             .OrderBy(i => i.Name)
-            .Select(i => MapItem(i))
             .ToListAsync(ct);
+        return items.Select(MapItem).ToList();
     }
 
     public async Task<CafeteriaItemDto?> GetItemByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
-        var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var item = await _db.CafeteriaItems
+            .Include(i => i.Variants)
+            .FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct);
         return item is null ? null : MapItem(item);
     }
 
     public async Task<CafeteriaItemDto> CreateItemAsync(CreateCafeteriaItemRequest request, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var variants = NormalizeVariants(request.Variants);
 
-        var (baseUnit, largeUnit, unitsPerLarge) = await ResolveUnitsAsync(
-            request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct);
-
-        var tempItem = new CafeteriaItem
-        {
-            Name = request.Name.Trim(),
-            LargeUnitName = largeUnit,
-            UnitsPerLarge = unitsPerLarge,
-            SellPrice = request.SellPrice
-        };
-        var stockInBase = request.CurrentQuantity <= 0
-            ? 0
-            : ItemUnitHelper.ToBaseQuantity(tempItem, request.CurrentQuantity, request.InitialStockUnit);
+        var stock = Math.Max(0, request.CurrentQuantity);
+        var minPrice = variants.Min(v => v.SellPrice);
 
         var item = new CafeteriaItem
         {
             TenantId = _tenantContext.TenantId,
             BranchId = branchId,
             Name = request.Name.Trim(),
-            NameAr = request.NameAr?.Trim(),
-            SellPrice = request.SellPrice,
-            CurrentQuantity = stockInBase,
-            MinThreshold = request.MinThreshold,
-            BaseUnitName = baseUnit,
-            LargeUnitName = largeUnit,
-            UnitsPerLarge = unitsPerLarge
+            NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
+            SellPrice = minPrice,
+            CurrentQuantity = stock,
+            MinThreshold = Math.Max(0, request.MinThreshold),
+            BaseUnitName = "قطعة",
+            LargeUnitName = null,
+            UnitsPerLarge = 1
         };
+
+        foreach (var v in variants)
+        {
+            item.Variants.Add(new CafeteriaItemVariant
+            {
+                Name = v.Name,
+                SellPrice = v.SellPrice,
+                IsActive = v.IsActive,
+                SortOrder = v.SortOrder
+            });
+        }
 
         _db.CafeteriaItems.Add(item);
 
-        if (stockInBase > 0)
+        if (stock > 0)
         {
             _db.InventoryMovements.Add(new InventoryMovement
             {
@@ -89,18 +93,17 @@ public class CafeteriaService : ICafeteriaService
                 BranchId = branchId,
                 CafeteriaItemId = item.Id,
                 MovementType = InventoryMovementType.InitialStock,
-                QuantityChange = stockInBase,
+                QuantityChange = stock,
                 ReferenceType = "CafeteriaItem",
                 ReferenceId = item.Id,
-                Notes = request.InitialStockUnit == InventoryUnitKind.Large && largeUnit is not null
-                    ? $"Initial stock: {request.CurrentQuantity} {largeUnit} (= {stockInBase} {baseUnit})"
-                    : "Initial stock",
+                Notes = "Initial stock",
                 PerformedByUserId = _tenantContext.UserId
             });
         }
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("CafeteriaItem.Created", "CafeteriaItem", item.Id, new { item.Name, item.BaseUnitName, item.LargeUnitName, item.UnitsPerLarge }, ct: ct);
+        await _audit.LogAsync("CafeteriaItem.Created", "CafeteriaItem", item.Id,
+            new { item.Name, VariantCount = item.Variants.Count, stock }, ct: ct);
         await _lowStock.CheckAndNotifyAsync(item, ct);
         await _db.SaveChangesAsync(ct);
 
@@ -109,118 +112,37 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaItemDto> UpdateItemAsync(Guid id, UpdateCafeteriaItemRequest request, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
-
-        var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var item = await _db.CafeteriaItems
+            .Include(i => i.Variants)
+            .FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
 
-        var oldBase = item.BaseUnitName;
-        var oldLarge = item.LargeUnitName;
-        var oldFactor = item.UnitsPerLarge;
-
-        var (baseUnit, largeUnit, unitsPerLarge) = await ResolveUnitsAsync(
-            request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct);
+        var variants = NormalizeVariants(request.Variants);
 
         item.Name = request.Name.Trim();
-        item.NameAr = request.NameAr?.Trim();
-        item.SellPrice = request.SellPrice;
-        item.MinThreshold = request.MinThreshold;
+        item.NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+        item.MinThreshold = Math.Max(0, request.MinThreshold);
         item.IsActive = request.IsActive;
-        item.BaseUnitName = baseUnit;
-        item.LargeUnitName = largeUnit;
-        item.UnitsPerLarge = unitsPerLarge;
+        item.SellPrice = variants.Min(v => v.SellPrice);
+        item.BaseUnitName = "قطعة";
+        item.LargeUnitName = null;
+        item.UnitsPerLarge = 1;
 
-        var unitsChanged =
-            !string.Equals(oldBase, baseUnit, StringComparison.Ordinal) ||
-            !string.Equals(oldLarge, largeUnit, StringComparison.Ordinal) ||
-            oldFactor != unitsPerLarge;
-
-        if (unitsChanged)
-        {
-            _db.ItemUnitConversionLogs.Add(new ItemUnitConversionLog
-            {
-                TenantId = _tenantContext.TenantId,
-                BranchId = branchId,
-                CafeteriaItemId = item.Id,
-                OldBaseUnitName = oldBase,
-                NewBaseUnitName = baseUnit,
-                OldLargeUnitName = oldLarge,
-                NewLargeUnitName = largeUnit,
-                OldUnitsPerLarge = oldFactor,
-                NewUnitsPerLarge = unitsPerLarge,
-                ChangedByUserId = _tenantContext.UserId
-            });
-        }
+        ReplaceVariants(item, variants);
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("CafeteriaItem.Updated", "CafeteriaItem", item.Id, new
-        {
-            item.Name,
-            item.IsActive,
-            UnitsChanged = unitsChanged,
-            Old = new { Base = oldBase, Large = oldLarge, Factor = oldFactor },
-            New = new { Base = baseUnit, Large = largeUnit, Factor = unitsPerLarge }
-        }, ct: ct);
+        await _audit.LogAsync("CafeteriaItem.Updated", "CafeteriaItem", item.Id,
+            new { item.Name, item.IsActive, VariantCount = item.Variants.Count }, ct: ct);
         await _lowStock.CheckAndNotifyAsync(item, ct);
         await _db.SaveChangesAsync(ct);
 
         return MapItem(item);
     }
 
-    private async Task<(string BaseUnit, string? LargeUnit, int UnitsPerLarge)> ResolveUnitsAsync(
-        Guid baseUnitId,
-        Guid? largeUnitId,
-        int unitsPerLarge,
-        CancellationToken ct)
-    {
-        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
-
-        var baseUnit = await _db.InventoryUnits.FirstOrDefaultAsync(
-            u => u.Id == baseUnitId && u.IsActive && u.OwnerUserId == ownerId, ct)
-            ?? throw new InvalidOperationException("Base unit not found. Add it from Inventory → Units first.");
-
-        string? largeName = null;
-        if (largeUnitId.HasValue)
-        {
-            if (largeUnitId.Value == baseUnitId)
-                throw new InvalidOperationException("Large unit must be different from the base unit.");
-
-            var large = await _db.InventoryUnits.FirstOrDefaultAsync(
-                u => u.Id == largeUnitId.Value && u.IsActive && u.OwnerUserId == ownerId, ct)
-                ?? throw new InvalidOperationException("Large unit not found.");
-            largeName = large.Name;
-        }
-
-        var baseName = baseUnit.Name;
-        ItemUnitHelper.NormalizeUnits(ref baseName, ref largeName, ref unitsPerLarge);
-        return (baseName, largeName, unitsPerLarge);
-    }
-
-    /// <summary>
-    /// Branch must be selected and, for non-SuperAdmin, belong to the business owner
-    /// (blocks masters from reading another master's items via a stray UserBranch).
-    /// </summary>
-    private async Task<Guid> RequireOwnedBranchIdAsync(CancellationToken ct)
-    {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
-        if (_tenantContext.IsSuperAdmin)
-            return branchId;
-
-        var businessOwnerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-        var branchOwnerId = await _db.Branches.AsNoTracking()
-            .Where(b => b.Id == branchId)
-            .Select(b => b.OwnerUserId)
-            .FirstOrDefaultAsync(ct);
-
-        if (branchOwnerId.HasValue && branchOwnerId.Value != businessOwnerId)
-            throw new UnauthorizedAccessException("You do not have access to this branch.");
-
-        return branchId;
-    }
-
     public async Task SoftDeleteItemAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
@@ -234,7 +156,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<IReadOnlyList<CafeteriaSaleDto>> GetSalesAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var query = _db.CafeteriaSales
             .Include(s => s.Lines).ThenInclude(l => l.CafeteriaItem)
@@ -242,8 +164,10 @@ public class CafeteriaService : ICafeteriaService
             .Include(s => s.Invoice).ThenInclude(i => i!.Payments)
             .Where(s => s.BranchId == branchId && s.SessionId == null);
 
-        if (from.HasValue) query = query.Where(s => s.SoldAt >= from.Value);
-        if (to.HasValue) query = query.Where(s => s.SoldAt <= to.Value);
+        if (from.HasValue)
+            query = query.Where(s => s.SoldAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(s => s.SoldAt <= to.Value);
 
         var sales = await query.OrderByDescending(s => s.SoldAt).ToListAsync(ct);
         return sales.Select(MapSale).ToList();
@@ -251,7 +175,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaSaleDto?> GetSaleByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var sale = await _db.CafeteriaSales
             .Include(s => s.Lines).ThenInclude(l => l.CafeteriaItem)
@@ -264,7 +188,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaSaleDto> CreateStandaloneSaleAsync(CreateCafeteriaSaleRequest request, CancellationToken ct = default)
     {
-        var branchId = await RequireOwnedBranchIdAsync(ct);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         if (request.Lines is null || request.Lines.Count == 0)
             throw new InvalidOperationException("At least one sale line is required.");
@@ -281,25 +205,22 @@ public class CafeteriaService : ICafeteriaService
         decimal total = 0;
         foreach (var line in request.Lines)
         {
-            var item = await _db.CafeteriaItems.FirstOrDefaultAsync(
-                i => i.Id == line.CafeteriaItemId && i.BranchId == branchId && i.IsActive, ct)
-                ?? throw new KeyNotFoundException($"Cafeteria item {line.CafeteriaItemId} not found.");
+            var (item, variant, qty, stockDeduct) = await ResolveSaleLineAsync(branchId, line.CafeteriaItemId, line.VariantId, line.Quantity, line.StockDeductQuantity, ct);
 
-            var baseQty = ItemUnitHelper.ToBaseQuantity(item, line.Quantity, line.Unit);
-            if (item.CurrentQuantity < baseQty)
-                throw new InvalidOperationException($"Insufficient stock for {item.Name}.");
-
-            var unitPrice = item.SellPrice;
-            var lineTotal = unitPrice * baseQty;
+            var unitPrice = variant.SellPrice;
+            var lineTotal = unitPrice * qty;
             sale.Lines.Add(new CafeteriaSaleLine
             {
                 CafeteriaItemId = item.Id,
-                Quantity = baseQty,
+                VariantId = variant.Id,
+                VariantName = variant.Name,
+                Quantity = qty,
+                StockDeductQuantity = stockDeduct,
                 UnitPrice = unitPrice,
                 LineTotal = lineTotal
             });
 
-            item.CurrentQuantity -= baseQty;
+            item.CurrentQuantity -= stockDeduct;
             total += lineTotal;
 
             _db.InventoryMovements.Add(new InventoryMovement
@@ -308,12 +229,10 @@ public class CafeteriaService : ICafeteriaService
                 BranchId = branchId,
                 CafeteriaItemId = item.Id,
                 MovementType = InventoryMovementType.Sale,
-                QuantityChange = -baseQty,
+                QuantityChange = -stockDeduct,
                 ReferenceType = "CafeteriaSale",
                 ReferenceId = sale.Id,
-                Notes = line.Unit == InventoryUnitKind.Large
-                    ? $"Sold {line.Quantity} {item.LargeUnitName}"
-                    : null,
+                Notes = $"{item.Name} — {variant.Name}; sold {qty}, stock -{stockDeduct}",
                 PerformedByUserId = _tenantContext.UserId
             });
 
@@ -337,7 +256,7 @@ public class CafeteriaService : ICafeteriaService
         return MapSale(sale);
     }
 
-    public async Task<CafeteriaReturnDto> ReturnItemAsync(Guid saleId, ReturnCafeteriaItemRequest request, CancellationToken ct = default)
+    public Task<CafeteriaReturnDto> ReturnItemAsync(Guid saleId, ReturnCafeteriaItemRequest request, CancellationToken ct = default)
     {
         _ = saleId;
         _ = request;
@@ -346,10 +265,116 @@ public class CafeteriaService : ICafeteriaService
             "Walk-in cafeteria sales cannot be returned. Returns are only allowed for open session customers.");
     }
 
+    internal async Task<(CafeteriaItem Item, CafeteriaItemVariant Variant, int Quantity, int StockDeduct)> ResolveSaleLineAsync(
+        Guid branchId,
+        Guid itemId,
+        Guid variantId,
+        int quantity,
+        int stockDeduct,
+        CancellationToken ct)
+    {
+        if (quantity <= 0)
+            throw new InvalidOperationException("Quantity must be at least 1.");
+        if (stockDeduct <= 0)
+            throw new InvalidOperationException("Stock deduct quantity must be at least 1.");
+
+        var item = await _db.CafeteriaItems
+            .Include(i => i.Variants)
+            .FirstOrDefaultAsync(i => i.Id == itemId && i.BranchId == branchId && i.IsActive, ct)
+            ?? throw new KeyNotFoundException("Cafeteria item not found.");
+
+        var variant = item.Variants.FirstOrDefault(v => v.Id == variantId && v.IsActive)
+            ?? throw new KeyNotFoundException("Variant not found for this item.");
+
+        if (item.CurrentQuantity < stockDeduct)
+            throw new InvalidOperationException($"Insufficient stock for {item.Name}. Available: {item.CurrentQuantity}.");
+
+        return (item, variant, quantity, stockDeduct);
+    }
+
+    private static List<UpsertCafeteriaItemVariantRequest> NormalizeVariants(IReadOnlyList<UpsertCafeteriaItemVariantRequest>? variants)
+    {
+        if (variants is null || variants.Count == 0)
+            throw new InvalidOperationException("At least one variant (name + price) is required.");
+
+        var list = new List<UpsertCafeteriaItemVariantRequest>();
+        var order = 0;
+        foreach (var v in variants)
+        {
+            var name = v.Name?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidOperationException("Variant name is required.");
+            if (v.SellPrice < 0)
+                throw new InvalidOperationException("Variant price cannot be negative.");
+
+            list.Add(new UpsertCafeteriaItemVariantRequest(v.Id, name, v.SellPrice, v.IsActive, order++));
+        }
+
+        return list;
+    }
+
+    private void ReplaceVariants(CafeteriaItem item, List<UpsertCafeteriaItemVariantRequest> variants)
+    {
+        var keepIds = variants.Where(v => v.Id.HasValue).Select(v => v.Id!.Value).ToHashSet();
+        foreach (var orphan in item.Variants.Where(v => !keepIds.Contains(v.Id)))
+            orphan.IsActive = false;
+
+        foreach (var v in variants)
+        {
+            if (v.Id.HasValue)
+            {
+                var existing = item.Variants.FirstOrDefault(x => x.Id == v.Id.Value);
+                if (existing is null)
+                {
+                    item.Variants.Add(new CafeteriaItemVariant
+                    {
+                        Name = v.Name,
+                        SellPrice = v.SellPrice,
+                        IsActive = v.IsActive,
+                        SortOrder = v.SortOrder
+                    });
+                }
+                else
+                {
+                    existing.Name = v.Name;
+                    existing.SellPrice = v.SellPrice;
+                    existing.IsActive = v.IsActive;
+                    existing.SortOrder = v.SortOrder;
+                }
+            }
+            else
+            {
+                item.Variants.Add(new CafeteriaItemVariant
+                {
+                    Name = v.Name,
+                    SellPrice = v.SellPrice,
+                    IsActive = v.IsActive,
+                    SortOrder = v.SortOrder
+                });
+            }
+        }
+    }
+
     private static CafeteriaItemDto MapItem(CafeteriaItem i) =>
-        new(i.Id, i.BranchId, i.Name, i.NameAr, i.SellPrice, i.CurrentQuantity, i.MinThreshold,
-            i.CurrentQuantity <= i.MinThreshold, i.IsActive,
-            i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge, i.CreatedAt);
+        new(
+            i.Id,
+            i.BranchId,
+            i.Name,
+            i.NameAr,
+            i.SellPrice,
+            i.CurrentQuantity,
+            i.MinThreshold,
+            i.CurrentQuantity <= i.MinThreshold,
+            i.IsActive,
+            i.BaseUnitName,
+            i.LargeUnitName,
+            i.UnitsPerLarge,
+            i.CreatedAt,
+            i.Variants
+                .OrderBy(v => v.SortOrder)
+                .ThenBy(v => v.Name)
+                .Select(v => new CafeteriaItemVariantDto(v.Id, v.Name, v.SellPrice, v.IsActive, v.SortOrder))
+                .ToList());
 
     private static CafeteriaSaleDto MapSale(CafeteriaSale s)
     {
@@ -375,8 +400,16 @@ public class CafeteriaService : ICafeteriaService
             s.SoldAt,
             s.SoldByUser.FullName,
             s.Lines.Select(l => new CafeteriaSaleLineDto(
-                l.Id, l.CafeteriaItemId, l.CafeteriaItem.Name, l.Quantity, l.ReturnedQuantity,
-                l.UnitPrice, l.LineTotal)).ToList(),
+                l.Id,
+                l.CafeteriaItemId,
+                l.VariantName is null ? l.CafeteriaItem.Name : $"{l.CafeteriaItem.Name} — {l.VariantName}",
+                l.VariantId,
+                l.VariantName,
+                l.Quantity,
+                l.StockDeductQuantity > 0 ? l.StockDeductQuantity : l.Quantity,
+                l.ReturnedQuantity,
+                l.UnitPrice,
+                l.LineTotal)).ToList(),
             invoiceDto);
     }
 }

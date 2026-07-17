@@ -9,22 +9,34 @@ public class CafeteriaItem : BaseEntity, IBranchEntity, ISoftDelete
     public Guid BranchId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? NameAr { get; set; }
+    /// <summary>Legacy / min variant price for display. Selling uses variant prices.</summary>
     public decimal SellPrice { get; set; }
-    /// <summary>On-hand stock always stored in base (small) units.</summary>
+    /// <summary>On-hand stock on the parent product (shared across variants).</summary>
     public int CurrentQuantity { get; set; }
     public int MinThreshold { get; set; }
     public bool IsActive { get; set; } = true;
-    /// <summary>Small / base unit name (e.g. piece).</summary>
+    /// <summary>Kept for compatibility; units UI removed — always piece.</summary>
     public string BaseUnitName { get; set; } = "قطعة";
-    /// <summary>Optional large unit name (e.g. carton). Null = base-only.</summary>
     public string? LargeUnitName { get; set; }
-    /// <summary>How many base units equal one large unit. Must be &gt;= 2 when large unit is set.</summary>
     public int UnitsPerLarge { get; set; } = 1;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }
     public Guid? DeletedByUserId { get; set; }
 
     public Branch Branch { get; set; } = null!;
+    public ICollection<CafeteriaItemVariant> Variants { get; set; } = [];
+}
+
+/// <summary>Priced option under a product (e.g. قهوة → سنجل / دبل). Stock lives on the parent item.</summary>
+public class CafeteriaItemVariant : BaseEntity
+{
+    public Guid CafeteriaItemId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal SellPrice { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+
+    public CafeteriaItem CafeteriaItem { get; set; } = null!;
 }
 
 /// <summary>Per-master unit names (piece, carton, …) picked when creating items.</summary>
@@ -88,13 +100,20 @@ public class CafeteriaSaleLine : BaseEntity
 {
     public Guid SaleId { get; set; }
     public Guid CafeteriaItemId { get; set; }
+    public Guid? VariantId { get; set; }
+    public string? VariantName { get; set; }
+    /// <summary>Number of variant portions sold (drives price).</summary>
     public int Quantity { get; set; }
+    /// <summary>Stock deducted from the parent product for this line.</summary>
+    public int StockDeductQuantity { get; set; }
     public int ReturnedQuantity { get; set; }
+    public int ReturnedStockQuantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
 
     public CafeteriaSale Sale { get; set; } = null!;
     public CafeteriaItem CafeteriaItem { get; set; } = null!;
+    public CafeteriaItemVariant? Variant { get; set; }
 }
 
 public class CafeteriaReturn : BaseEntity

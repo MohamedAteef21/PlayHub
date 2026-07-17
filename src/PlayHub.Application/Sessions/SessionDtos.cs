@@ -75,7 +75,10 @@ public record CloseSessionRequest(
 
 public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
+    Guid VariantId,
     int Quantity,
+    /// <summary>How much stock to deduct from the parent product.</summary>
+    int StockDeductQuantity,
     string? CustomerName = null,
     InventoryUnitKind Unit = InventoryUnitKind.Base);
 
@@ -136,7 +139,10 @@ public record SessionCafeteriaLineDto(
     Guid Id,
     Guid CafeteriaItemId,
     string ItemName,
+    Guid? VariantId,
+    string? VariantName,
     int Quantity,
+    int StockDeductQuantity,
     int ReturnedQuantity,
     decimal UnitPrice,
     decimal LineTotal,
