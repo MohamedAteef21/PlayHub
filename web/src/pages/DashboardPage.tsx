@@ -698,7 +698,7 @@ export function DashboardPage() {
         </Card>
       )}
 
-      {!dashboard?.rooms.length ? (
+      {!dashboard?.rooms.length && !(dashboard?.unassignedDevices?.length) ? (
         <Card className="space-y-4 py-12 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
             <Icon name="clock" className="h-7 w-7" />
@@ -713,7 +713,8 @@ export function DashboardPage() {
           </Link>
         </Card>
       ) : (
-        dashboard.rooms.map((room) => (
+        <>
+        {dashboard.rooms.map((room) => (
           <section key={room.id}>
             <h2 className="mb-3 text-lg font-semibold text-muted">
               {room.name}{room.roomNumber ? ` · ${room.roomNumber}` : ''}
@@ -786,7 +787,75 @@ export function DashboardPage() {
               })}
             </div>
           </section>
-        ))
+        ))}
+        {(dashboard.unassignedDevices?.length ?? 0) > 0 && (
+          <section>
+            <h2 className="mb-3 text-lg font-semibold text-muted">{t('dashboard.unassignedDevices')}</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {dashboard.unassignedDevices.map((device) => {
+                const session = sessionMap.get(device.id);
+                return (
+                  <DeviceCard
+                    key={device.id}
+                    device={device}
+                    roomName={t('settings.noRoom')}
+                    session={session}
+                    onOpen={() => {
+                      setOpenModal(device);
+                      setPlanId('');
+                      setBookingMode('open');
+                      setDurationHours(2);
+                      setControllerCount(2);
+                      setOpenError('');
+                    }}
+                    onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
+                    onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
+                    onExtend={(mins) => session && sessionsApi.extend(session.id, mins).then(onUpdate)}
+                    onWatchersChange={(count) =>
+                      session &&
+                      sessionsApi
+                        .updateWatchers(session.id, count)
+                        .then(onUpdate)
+                        .catch((e: Error) => window.alert(e.message))
+                    }
+                    onConvert={() => {
+                      if (!session) return;
+                      setConvertModal(session);
+                      setConvertPlanId('');
+                      setConvertControllers(2);
+                      setConvertError('');
+                    }}
+                    onClose={() => {
+                      if (!session) return;
+                      setCloseModal(session);
+                      setDiscountAmount('');
+                      setDiscountReason('');
+                      setDebtorName('');
+                      setPaymentMethod(PaymentMethod.Cash);
+                      setWalletPayAmount('');
+                      setProofFile(null);
+                      setCafError('');
+                    }}
+                    onAddCafeteria={() => {
+                      if (!session) return;
+                      setCafSession(session);
+                      setCafQty({});
+                      setCafUnit({});
+                      setCafCustomerName('');
+                      setCafSearch('');
+                      setReturnLineId('');
+                      setReturnQty('1');
+                      setReturnReason('');
+                      setCafError('');
+                    }}
+                    canAddCafeteria={canSellCafeteria}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
+        </>
       )}
 
       <Modal

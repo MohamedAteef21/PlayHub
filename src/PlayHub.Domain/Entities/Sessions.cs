@@ -8,7 +8,8 @@ public class Session : BaseEntity, IBranchEntity, ISoftDelete
     public Guid TenantId { get; set; }
     public Guid BranchId { get; set; }
     public Guid DeviceId { get; set; }
-    public Guid RoomId { get; set; }
+    /// <summary>Optional — null when the device has no room.</summary>
+    public Guid? RoomId { get; set; }
     public SessionMode SessionMode { get; set; }
     public Guid PricingPlanId { get; set; }
     public int? ControllerCount { get; set; }
@@ -43,7 +44,7 @@ public class Session : BaseEntity, IBranchEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Device Device { get; set; } = null!;
-    public Room Room { get; set; } = null!;
+    public Room? Room { get; set; }
     public Branch Branch { get; set; } = null!;
     public PricingPlan PricingPlan { get; set; } = null!;
     public User OpenedByUser { get; set; } = null!;

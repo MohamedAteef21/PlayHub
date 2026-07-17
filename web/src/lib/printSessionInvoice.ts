@@ -127,7 +127,7 @@ export function printSessionInvoice(
     <div><span>${escapeHtml(labels.invoiceNumber)}</span><span>${escapeHtml(invoiceNo)}</span></div>
     <div><span>${escapeHtml(labels.date)}</span><span>${closedAt.toLocaleString()}</span></div>
     <div><span>${escapeHtml(labels.device)}</span><span>${escapeHtml(detail.deviceName)}</span></div>
-    <div><span>${escapeHtml(labels.room)}</span><span>${escapeHtml(detail.roomName)}</span></div>
+    <div><span>${escapeHtml(labels.room)}</span><span>${escapeHtml(detail.roomName ?? '—')}</span></div>
     <div><span>${escapeHtml(labels.mode)}</span><span>${escapeHtml(modeLabel)}</span></div>
     <div><span>${escapeHtml(labels.plan)}</span><span>${escapeHtml(detail.pricingPlanName)}</span></div>
     <div><span>${escapeHtml(labels.started)}</span><span>${startedAt.toLocaleString()}</span></div>

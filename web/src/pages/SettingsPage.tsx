@@ -437,7 +437,7 @@ export function SettingsPage() {
       const typeId = await ensureCtrlType();
       const qty = Number(ctrlQty) || 2;
       return assetsApi.createDevice({
-        roomId: deviceRoomId,
+        roomId: deviceRoomId || null,
         identifier: deviceId,
         name: deviceName,
         controllers: [{ controllerTypeId: typeId, quantity: qty, workingCount: qty }],
@@ -691,14 +691,10 @@ export function SettingsPage() {
                 setCtrlTypeId(ctrlTypes[0]?.id ?? '');
                 setDeviceOpen(true);
               }}
-              disabled={rooms.length === 0}
             >
               <Icon name="plus" className="h-4 w-4" />
               {t('settings.addDevice')}
             </Button>
-          )}
-          {rooms.length === 0 && (
-            <p className="text-sm text-warning">{t('settings.needRoomFirst')}</p>
           )}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((d) => (
@@ -709,7 +705,10 @@ export function SettingsPage() {
                   </span>
                   <div>
                     <p className="font-medium">{d.name}</p>
-                    <p className="text-xs text-muted">{d.identifier} · {d.roomName}</p>
+                    <p className="text-xs text-muted">
+                      {d.identifier}
+                      {d.roomName ? ` · ${d.roomName}` : ` · ${t('settings.noRoom')}`}
+                    </p>
                   </div>
                 </div>
               </Card>
@@ -1270,10 +1269,12 @@ export function SettingsPage() {
               value={deviceRoomId}
               onChange={(e) => setDeviceRoomId(e.target.value)}
             >
+              <option value="">{t('settings.noRoom')}</option>
               {rooms.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-muted">{t('settings.deviceRoomOptional')}</p>
           </div>
           <Input label={t('settings.deviceName')} value={deviceName} onChange={(e) => setDeviceName(e.target.value)} />
           <Input label={t('settings.deviceId')} value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="PS5-01" />
@@ -1282,7 +1283,7 @@ export function SettingsPage() {
           <Button
             className="w-full"
             loading={deviceMutation.isPending}
-            disabled={!deviceName.trim() || !deviceId.trim() || !deviceRoomId}
+            disabled={!deviceName.trim() || !deviceId.trim()}
             onClick={() => deviceMutation.mutate()}
           >
             {t('common.save')}

@@ -36,7 +36,7 @@ public record DeviceMaintenanceDto(
     Guid DeviceId,
     string DeviceName,
     string DeviceIdentifier,
-    string RoomName,
+    string? RoomName,
     string Reason,
     string? Notes,
     DateTime StartedAt,

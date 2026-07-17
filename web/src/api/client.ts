@@ -276,7 +276,7 @@ export const assetsApi = {
       `/assets/devices${roomId ? `?roomId=${roomId}` : ''}`
     ),
   createDevice: (data: {
-    roomId: string;
+    roomId?: string | null;
     identifier: string;
     name: string;
     controllers?: { controllerTypeId: string; quantity: number; workingCount: number }[];
@@ -284,7 +284,7 @@ export const assetsApi = {
   }) =>
     apiFetch<import('@/types').Device>('/assets/devices', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, roomId: data.roomId || null }),
     }),
   getControllerTypes: () =>
     apiFetch<import('@/types').ControllerType[]>('/assets/controller-types'),

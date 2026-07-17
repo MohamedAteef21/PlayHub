@@ -27,7 +27,7 @@ public class PricingService : IPricingService
         var query = _db.PricingPlans
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
-            .Where(p => p.IsActive && (p.BranchId == null || p.BranchId == branchId));
+            .Where(p => p.IsActive && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)));
 
         if (mode.HasValue)
             query = query.Where(p => p.SessionMode == mode.Value);
@@ -43,7 +43,7 @@ public class PricingService : IPricingService
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
-            .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == null || p.BranchId == branchId), ct);
+            .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct);
 
         return plan is null ? null : MapPlan(plan);
     }
@@ -87,7 +87,7 @@ public class PricingService : IPricingService
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
-            .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == null || p.BranchId == branchId), ct)
+            .FirstOrDefaultAsync(p => p.Id == id && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct)
             ?? throw new KeyNotFoundException("Pricing plan not found.");
 
         ValidatePlan(plan.SessionMode, request.TimeUnit, request.WatchingBilling, request.GamingRates, request.WatchingRates,

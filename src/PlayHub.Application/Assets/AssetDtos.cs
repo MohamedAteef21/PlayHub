@@ -64,8 +64,8 @@ public record UpsertScreenRequest(int Count, int WorkingCount, string? Notes);
 public record DeviceDto(
     Guid Id,
     Guid BranchId,
-    Guid RoomId,
-    string RoomName,
+    Guid? RoomId,
+    string? RoomName,
     string Identifier,
     string Name,
     bool IsActive,
@@ -77,14 +77,14 @@ public record DeviceDto(
     DateTime CreatedAt);
 
 public record CreateDeviceRequest(
-    Guid RoomId,
+    Guid? RoomId,
     string Identifier,
     string Name,
     IReadOnlyList<UpsertDeviceControllerRequest>? Controllers,
     UpsertScreenRequest? Screen);
 
 public record UpdateDeviceRequest(
-    Guid RoomId,
+    Guid? RoomId,
     string Identifier,
     string Name,
     bool IsActive,
@@ -114,4 +114,4 @@ public record AssetDashboardDto(
     Guid BranchId,
     string BranchName,
     IReadOnlyList<AssetDashboardRoomDto> Rooms,
-    IReadOnlyList<DeviceDto> UnassignedDevices);
+    IReadOnlyList<AssetDashboardDeviceDto> UnassignedDevices);

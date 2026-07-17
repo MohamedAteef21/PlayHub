@@ -138,7 +138,7 @@ public class DeviceMaintenanceService : IDeviceMaintenanceService
             m.DeviceId,
             m.Device.Name,
             m.Device.Identifier,
-            m.Device.Room.Name,
+            m.Device.Room?.Name,
             m.Reason,
             m.Notes,
             m.StartedAt,

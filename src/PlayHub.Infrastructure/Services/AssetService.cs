@@ -216,8 +216,12 @@ public class AssetService : IAssetService
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
 
-        var room = await _db.Rooms.FirstOrDefaultAsync(r => r.Id == request.RoomId && r.BranchId == branchId, ct)
-            ?? throw new KeyNotFoundException("Room not found.");
+        Room? room = null;
+        if (request.RoomId.HasValue)
+        {
+            room = await _db.Rooms.FirstOrDefaultAsync(r => r.Id == request.RoomId.Value && r.BranchId == branchId, ct)
+                ?? throw new KeyNotFoundException("Room not found.");
+        }
 
         if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == request.Identifier.Trim(), ct))
             throw new InvalidOperationException("A device with this identifier already exists in this branch.");
@@ -226,7 +230,7 @@ public class AssetService : IAssetService
         {
             TenantId = _tenantContext.TenantId,
             BranchId = branchId,
-            RoomId = room.Id,
+            RoomId = room?.Id,
             Identifier = request.Identifier.Trim(),
             Name = request.Name.Trim()
         };
@@ -235,7 +239,7 @@ public class AssetService : IAssetService
         await ApplyControllersAsync(device, request.Controllers, ct);
         await ApplyScreenAsync(device, request.Screen, ct);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Device.Created", "Device", device.Id, new { device.Identifier, DeviceName = device.Name, RoomName = room.Name }, ct: ct);
+        await _audit.LogAsync("Device.Created", "Device", device.Id, new { device.Identifier, DeviceName = device.Name, RoomName = room?.Name }, ct: ct);
 
         await _db.Entry(device).Reference(d => d.Room).LoadAsync(ct);
         await _db.Entry(device).Collection(d => d.DeviceControllers).Query().Include(dc => dc.ControllerType).LoadAsync(ct);
@@ -256,13 +260,17 @@ public class AssetService : IAssetService
             .FirstOrDefaultAsync(d => d.Id == id && d.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Device not found.");
 
-        var room = await _db.Rooms.FirstOrDefaultAsync(r => r.Id == request.RoomId && r.BranchId == branchId, ct)
-            ?? throw new KeyNotFoundException("Room not found.");
+        Room? room = null;
+        if (request.RoomId.HasValue)
+        {
+            room = await _db.Rooms.FirstOrDefaultAsync(r => r.Id == request.RoomId.Value && r.BranchId == branchId, ct)
+                ?? throw new KeyNotFoundException("Room not found.");
+        }
 
         if (await _db.Devices.AnyAsync(d => d.BranchId == branchId && d.Identifier == request.Identifier.Trim() && d.Id != id, ct))
             throw new InvalidOperationException("A device with this identifier already exists in this branch.");
 
-        device.RoomId = room.Id;
+        device.RoomId = room?.Id;
         device.Identifier = request.Identifier.Trim();
         device.Name = request.Name.Trim();
         device.IsActive = request.IsActive;
@@ -297,6 +305,8 @@ public class AssetService : IAssetService
         var rooms = await _db.Rooms
             .Include(r => r.Devices.Where(d => d.IsActive))
                 .ThenInclude(d => d.DeviceControllers)
+            .Include(r => r.Devices.Where(d => d.IsActive))
+                .ThenInclude(d => d.Screens)
             .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
             .Where(r => r.BranchId == branchId && r.IsActive)
             .OrderBy(r => r.Name)
@@ -311,7 +321,21 @@ public class AssetService : IAssetService
             r.Devices.Select(d => MapDashboardDevice(d, r.MaxWatchingCapacity, liveStatuses)).ToList()
         )).ToList();
 
-        return new AssetDashboardDto(branchId, branch.Name, roomDtos, []);
+        var unassigned = await _db.Devices
+            .Include(d => d.DeviceControllers).ThenInclude(c => c.ControllerType)
+            .Include(d => d.Screens)
+            .Where(d => d.BranchId == branchId && d.IsActive && d.RoomId == null)
+            .OrderBy(d => d.Name)
+            .ToListAsync(ct);
+
+        var unassignedDtos = unassigned
+            .Select(d => MapDashboardDevice(
+                d,
+                Math.Max(d.Screens.Sum(s => s.WorkingCount), 10),
+                liveStatuses))
+            .ToList();
+
+        return new AssetDashboardDto(branchId, branch.Name, roomDtos, unassignedDtos);
     }
 
     private async Task ReplaceRoomAssetsAsync(Room room, IReadOnlyList<UpsertRoomAssetRequest> assets, CancellationToken ct)
@@ -410,17 +434,19 @@ public class AssetService : IAssetService
     {
         var maxPlayers = device.DeviceControllers.Sum(c => c.WorkingCount);
         var liveStatus = liveStatuses.TryGetValue(device.Id, out var status) ? status : "Idle";
+        var maxWatching = device.Room?.MaxWatchingCapacity
+            ?? Math.Max(device.Screens.Sum(s => s.WorkingCount), 10);
 
         return new DeviceDto(
             device.Id,
             device.BranchId,
             device.RoomId,
-            device.Room.Name,
+            device.Room?.Name,
             device.Identifier,
             device.Name,
             device.IsActive,
             maxPlayers,
-            device.Room.MaxWatchingCapacity,
+            maxWatching,
             liveStatus,
             device.DeviceControllers.Select(c => new DeviceControllerDto(
                 c.Id, c.ControllerTypeId, c.ControllerType.Name, c.Quantity, c.WorkingCount)).ToList(),

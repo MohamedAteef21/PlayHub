@@ -22,17 +22,24 @@ public class BranchService : IBranchService
 
     public async Task<IReadOnlyList<BranchDetailDto>> GetAllAsync(CancellationToken ct = default)
     {
-        var branches = await _db.Branches
+        var query = _db.Branches
             .Include(b => b.PaymentAccounts)
             .Include(b => b.OwnerUser)
-            .OrderBy(b => b.Name)
-            .ToListAsync(ct);
+            .AsQueryable();
 
+        // SuperAdmin sees all; Master/Staff only their allowed branches.
+        if (!_tenantContext.IsSuperAdmin)
+            query = query.Where(b => _tenantContext.AllowedBranchIds.Contains(b.Id));
+
+        var branches = await query.OrderBy(b => b.Name).ToListAsync(ct);
         return branches.Select(ToDto).ToList();
     }
 
     public async Task<BranchDetailDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        if (!_tenantContext.IsSuperAdmin && !_tenantContext.AllowedBranchIds.Contains(id))
+            return null;
+
         var branch = await _db.Branches
             .Include(b => b.PaymentAccounts)
             .Include(b => b.OwnerUser)
@@ -87,6 +94,10 @@ public class BranchService : IBranchService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Branch.Created", "Branch", branch.Id, new { branch.Name }, ct: ct);
 
+        // So the rest of this request (and immediate UI refresh) can see the new branch.
+        if (!_tenantContext.AllowedBranchIds.Contains(branch.Id))
+            _tenantContext.AllowedBranchIds.Add(branch.Id);
+
         var created = await _db.Branches
             .AsNoTracking()
             .Include(b => b.PaymentAccounts)
@@ -98,6 +109,9 @@ public class BranchService : IBranchService
 
     public async Task<BranchDetailDto> UpdateAsync(Guid id, UpdateBranchRequest request, CancellationToken ct = default)
     {
+        if (!_tenantContext.IsSuperAdmin && !_tenantContext.AllowedBranchIds.Contains(id))
+            throw new UnauthorizedAccessException("You can only update your own branches.");
+
         var branch = await _db.Branches
             .Include(b => b.PaymentAccounts)
             .Include(b => b.OwnerUser)

@@ -73,7 +73,7 @@ public class InvoicePdfService : IInvoicePdfService
                 page.Content().PaddingVertical(12).Column(col =>
                 {
                     col.Spacing(4);
-                    col.Item().Text($"Device: {session.Device.Name} · {session.Room.Name}");
+                    col.Item().Text($"Device: {session.Device.Name} · {session.Room?.Name ?? "—"}");
                     col.Item().Text($"Mode: {(session.SessionMode == SessionMode.Gaming ? "Gaming" : "Watching")} · {session.PricingPlan.Name}");
                     if (!string.IsNullOrWhiteSpace(guest))
                         col.Item().Text($"Customer: {guest}");

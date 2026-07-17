@@ -5,6 +5,10 @@ namespace PlayHub.Domain.Entities;
 public class Customer : BaseEntity, ITenantEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
+    /// <summary>Branch where the customer was registered (null for legacy rows).</summary>
+    public Guid? BranchId { get; set; }
+    /// <summary>User who created the customer (null for legacy rows).</summary>
+    public Guid? CreatedByUserId { get; set; }
     /// <summary>Auto-generated code e.g. C00001.</summary>
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
@@ -19,6 +23,8 @@ public class Customer : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? DeletedByUserId { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
+    public Branch? Branch { get; set; }
+    public User? CreatedByUser { get; set; }
     public ICollection<Session> Sessions { get; set; } = [];
     public ICollection<WalletTransaction> WalletTransactions { get; set; } = [];
 }

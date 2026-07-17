@@ -26,6 +26,21 @@ public class CustomerService : ICustomerService
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
         var query = _db.Customers.AsNoTracking().AsQueryable();
 
+        // Non-SuperAdmin: only customers created by this user / their staff, or tagged to their branches.
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var userId = _tenantContext.UserId;
+            var allowedBranches = _tenantContext.AllowedBranchIds;
+            var creatorIds = await _db.Users.IgnoreQueryFilters()
+                .Where(u => !u.IsDeleted && (u.Id == userId || u.ParentUserId == userId))
+                .Select(u => u.Id)
+                .ToListAsync(ct);
+
+            query = query.Where(c =>
+                (c.CreatedByUserId != null && creatorIds.Contains(c.CreatedByUserId.Value))
+                || (c.BranchId != null && allowedBranches.Contains(c.BranchId.Value)));
+        }
+
         if (!string.IsNullOrWhiteSpace(q))
         {
             var term = q.Trim();
@@ -49,7 +64,20 @@ public class CustomerService : ICustomerService
     public async Task<CustomerDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var customer = await _db.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
-        return customer is null ? null : Map(customer);
+        if (customer is null) return null;
+
+        if (!_tenantContext.IsSuperAdmin)
+        {
+            var userId = _tenantContext.UserId;
+            var allowed = _tenantContext.AllowedBranchIds;
+            var isMine = customer.CreatedByUserId == userId
+                || (customer.BranchId != null && allowed.Contains(customer.BranchId.Value))
+                || await _db.Users.IgnoreQueryFilters().AnyAsync(
+                    u => u.Id == customer.CreatedByUserId && u.ParentUserId == userId && !u.IsDeleted, ct);
+            if (!isMine) return null;
+        }
+
+        return Map(customer);
     }
 
     public async Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct = default)
@@ -72,6 +100,8 @@ public class CustomerService : ICustomerService
         var customer = new Customer
         {
             TenantId = _tenantContext.TenantId,
+            BranchId = _tenantContext.BranchId,
+            CreatedByUserId = _tenantContext.UserId,
             Code = $"C{number:D5}",
             Name = name,
             Phone = phone,

@@ -6,7 +6,7 @@ public record DeviceUsageDto(
     Guid DeviceId,
     string DeviceIdentifier,
     string DeviceName,
-    string RoomName,
+    string? RoomName,
     double TotalHours,
     int SessionCount);
 

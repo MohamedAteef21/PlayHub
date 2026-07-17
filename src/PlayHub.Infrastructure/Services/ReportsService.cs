@@ -124,7 +124,7 @@ public class ReportsService : IReportsService
                     device.Id,
                     device.Identifier,
                     device.Name,
-                    device.Room.Name,
+                    device.Room?.Name ?? "—",
                     Math.Round(totalSeconds / 3600.0, 2),
                     g.Count());
             })

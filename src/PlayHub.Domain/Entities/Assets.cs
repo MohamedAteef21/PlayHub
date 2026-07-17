@@ -53,7 +53,8 @@ public class Device : BaseEntity, IBranchEntity, ISoftDelete
 {
     public Guid TenantId { get; set; }
     public Guid BranchId { get; set; }
-    public Guid RoomId { get; set; }
+    /// <summary>Optional — devices can stand alone without a room.</summary>
+    public Guid? RoomId { get; set; }
     public string Identifier { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
@@ -61,7 +62,7 @@ public class Device : BaseEntity, IBranchEntity, ISoftDelete
     public DateTime? DeletedAt { get; set; }
     public Guid? DeletedByUserId { get; set; }
 
-    public Room Room { get; set; } = null!;
+    public Room? Room { get; set; }
     public Branch Branch { get; set; } = null!;
     public ICollection<DeviceController> DeviceControllers { get; set; } = [];
     public ICollection<Screen> Screens { get; set; } = [];

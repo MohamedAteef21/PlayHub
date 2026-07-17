@@ -38,8 +38,47 @@ public class TenantMiddleware
                 : tenantContext.IsMaster ? UserRole.SuperAdmin : UserRole.Staff;
             tenantContext.Permissions = context.User.FindAll("permission").Select(c => c.Value).ToList();
 
+            if (tenantContext.UserId != Guid.Empty)
+            {
+                // Branches this user may access (assignments + owned for masters).
+                var assigned = await db.UserBranches.IgnoreQueryFilters()
+                    .Where(ub => ub.UserId == tenantContext.UserId)
+                    .Select(ub => ub.BranchId)
+                    .ToListAsync();
+
+                var owned = Array.Empty<Guid>();
+                if (tenantContext.IsMaster && !tenantContext.IsSuperAdmin)
+                {
+                    owned = await db.Branches.IgnoreQueryFilters()
+                        .Where(b => b.TenantId == tenantContext.TenantId
+                                    && b.OwnerUserId == tenantContext.UserId
+                                    && !b.IsDeleted)
+                        .Select(b => b.Id)
+                        .ToArrayAsync();
+                }
+
+                tenantContext.AllowedBranchIds = assigned.Concat(owned).Distinct().ToList();
+            }
+
             if (Guid.TryParse(branchIdClaim, out var branchId))
-                tenantContext.BranchId = branchId;
+            {
+                // Reject cross-branch access for non-SuperAdmin.
+                if (tenantContext.IsSuperAdmin
+                    || tenantContext.AllowedBranchIds.Contains(branchId))
+                {
+                    tenantContext.BranchId = branchId;
+                }
+                else
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        message = "You do not have access to this branch.",
+                        code = "BRANCH_FORBIDDEN"
+                    });
+                    return;
+                }
+            }
 
             // Block already-authenticated users when subscription day has passed
             if (tenantContext.UserId != Guid.Empty)

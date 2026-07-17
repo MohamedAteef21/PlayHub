@@ -97,6 +97,7 @@ public class SessionService : ISessionService
         var device = await _db.Devices
             .Include(d => d.Room)
             .Include(d => d.DeviceControllers)
+            .Include(d => d.Screens)
             .FirstOrDefaultAsync(d => d.Id == request.DeviceId && d.BranchId == branchId && d.IsActive, ct)
             ?? throw new KeyNotFoundException("Device not found.");
 
@@ -107,7 +108,7 @@ public class SessionService : ISessionService
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
             .FirstOrDefaultAsync(p => p.Id == request.PricingPlanId && p.IsActive && p.SessionMode == request.SessionMode
-                && (p.BranchId == null || p.BranchId == branchId), ct)
+                && (p.BranchId == branchId || (p.BranchId == null && _tenantContext.IsSuperAdmin)), ct)
             ?? throw new KeyNotFoundException("Pricing plan not found.");
 
         ValidateSessionCounts(request, device);
@@ -150,7 +151,7 @@ public class SessionService : ISessionService
             PricingPlanId = plan.Id,
             ControllerCount = request.ControllerCount,
             WatcherCount = request.WatcherCount,
-            RoomSurchargePerHour = device.Room.VipSurchargePerHour,
+            RoomSurchargePerHour = device.Room?.VipSurchargePerHour ?? 0m,
             RateSnapshot = snapshot,
             Status = SessionStatus.Open,
             OpenedByUserId = _tenantContext.UserId,
@@ -295,6 +296,7 @@ public class SessionService : ISessionService
             .Include(s => s.Pauses)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
             .Include(s => s.Device).ThenInclude(d => d.Room)
+            .Include(s => s.Device).ThenInclude(d => d.Screens)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
@@ -304,7 +306,7 @@ public class SessionService : ISessionService
         if (request.WatcherCount < 1)
             throw new InvalidOperationException("Watcher count must be at least 1.");
 
-        var maxCapacity = session.Device.Room.MaxWatchingCapacity;
+        var maxCapacity = GetMaxWatchingCapacity(session.Device);
         if (request.WatcherCount > maxCapacity)
             throw new InvalidOperationException($"This room supports at most {maxCapacity} watcher(s).");
 
@@ -384,6 +386,7 @@ public class SessionService : ISessionService
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
             .Include(s => s.Device).ThenInclude(d => d.DeviceControllers)
             .Include(s => s.Device).ThenInclude(d => d.Room)
+            .Include(s => s.Device).ThenInclude(d => d.Screens)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
@@ -831,10 +834,15 @@ public class SessionService : ISessionService
         {
             if (request.WatcherCount is null or <= 0)
                 throw new InvalidOperationException("Watcher count is required for watching sessions.");
-            if (request.WatcherCount > device.Room.MaxWatchingCapacity)
-                throw new InvalidOperationException($"This room supports at most {device.Room.MaxWatchingCapacity} watcher(s).");
+            var maxWatchers = GetMaxWatchingCapacity(device);
+            if (request.WatcherCount > maxWatchers)
+                throw new InvalidOperationException($"This device supports at most {maxWatchers} watcher(s).");
         }
     }
+
+    private static int GetMaxWatchingCapacity(Device device) =>
+        device.Room?.MaxWatchingCapacity
+        ?? Math.Max(device.Screens.Sum(s => s.WorkingCount), 10);
 
     /// <summary>Refuse to open a session the plan cannot bill — otherwise it gets stuck (cost calc would fail on every screen).</summary>
     private static void ValidatePlanRates(OpenSessionRequest request, PricingPlan plan)
@@ -914,7 +922,7 @@ public class SessionService : ISessionService
             session.Device.Name,
             session.Device.Identifier,
             session.RoomId,
-            session.Room.Name,
+            session.Room?.Name,
             session.SessionMode,
             session.Status,
             session.PricingPlanId,
@@ -963,7 +971,7 @@ public class SessionService : ISessionService
             session.Id,
             session.DeviceId,
             session.Device.Name,
-            session.Room.Name,
+            session.Room?.Name,
             session.SessionMode,
             session.Status,
             session.StartedAt,
@@ -1002,7 +1010,7 @@ public class SessionService : ISessionService
             session.DeviceId,
             session.Device.Name,
             session.RoomId,
-            session.Room.Name,
+            session.Room?.Name,
             session.SessionMode,
             session.Status,
             session.PricingPlanId,

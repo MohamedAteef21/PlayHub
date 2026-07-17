@@ -42,8 +42,8 @@ export interface SessionLive {
   deviceId: string;
   deviceName: string;
   deviceIdentifier: string;
-  roomId: string;
-  roomName: string;
+  roomId: string | null;
+  roomName: string | null;
   sessionMode: number;
   status: number;
   pricingPlanId: string;
@@ -99,8 +99,8 @@ export interface SessionDetail {
   branchId: string;
   deviceId: string;
   deviceName: string;
-  roomId: string;
-  roomName: string;
+  roomId: string | null;
+  roomName: string | null;
   sessionMode: number;
   status: number;
   pricingPlanId: string;
@@ -185,7 +185,7 @@ export interface SessionHistory {
   id: string;
   deviceId: string;
   deviceName: string;
-  roomName: string;
+  roomName: string | null;
   sessionMode: number;
   status: number;
   startedAt: string;
@@ -201,7 +201,7 @@ export interface AssetDashboard {
   branchId: string;
   branchName: string;
   rooms: AssetDashboardRoom[];
-  unassignedDevices: unknown[];
+  unassignedDevices: AssetDashboardDevice[];
 }
 
 export interface AssetDashboardRoom {
@@ -516,7 +516,7 @@ export interface DeviceUsage {
   deviceId: string;
   deviceIdentifier: string;
   deviceName: string;
-  roomName: string;
+  roomName: string | null;
   totalHours: number;
   sessionCount: number;
 }
@@ -544,8 +544,8 @@ export interface ControllerType {
 export interface Device {
   id: string;
   branchId: string;
-  roomId: string;
-  roomName: string;
+  roomId: string | null;
+  roomName: string | null;
   identifier: string;
   name: string;
   isActive: boolean;
