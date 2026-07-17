@@ -24,6 +24,7 @@ public class AssetService : IAssetService
     public async Task<IReadOnlyList<RoomDto>> GetRoomsAsync(CancellationToken ct = default)
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
         var rooms = await _db.Rooms
             .Include(r => r.Devices)
@@ -32,19 +33,20 @@ public class AssetService : IAssetService
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
 
-        return rooms.Select(MapRoom).ToList();
+        return rooms.Select(r => MapRoom(r, ownerFilter)).ToList();
     }
 
     public async Task<RoomDto?> GetRoomByIdAsync(Guid id, CancellationToken ct = default)
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
         var room = await _db.Rooms
             .Include(r => r.Devices)
             .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
             .FirstOrDefaultAsync(r => r.Id == id && r.BranchId == branchId, ct);
 
-        return room is null ? null : MapRoom(room);
+        return room is null ? null : MapRoom(room, ownerFilter);
     }
 
     public async Task<RoomDto> CreateRoomAsync(CreateRoomRequest request, CancellationToken ct = default)
@@ -71,7 +73,8 @@ public class AssetService : IAssetService
 
         await _db.Entry(room).Collection(r => r.RoomAssets).Query()
             .Include(a => a.VenueAssetType).LoadAsync(ct);
-        return MapRoom(room);
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        return MapRoom(room, ownerFilter);
     }
 
     public async Task<RoomDto> UpdateRoomAsync(Guid id, UpdateRoomRequest request, CancellationToken ct = default)
@@ -95,7 +98,8 @@ public class AssetService : IAssetService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Room.Updated", "Room", room.Id, new { room.Name, room.IsActive }, ct: ct);
 
-        return MapRoom(room);
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        return MapRoom(room, ownerFilter);
     }
 
     public async Task SoftDeleteRoomAsync(Guid id, CancellationToken ct = default)
@@ -123,16 +127,23 @@ public class AssetService : IAssetService
     public async Task<IReadOnlyList<VenueAssetTypeDto>> GetVenueAssetTypesAsync(CancellationToken ct = default)
     {
         var query = _db.VenueAssetTypes.AsQueryable();
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            query = query.Where(c => c.OwnerUserId == ownerId);
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue)
+            query = query.Where(c => c.OwnerUserId == ownerFilter.Value);
 
         var types = await query.OrderBy(c => c.Name).ToListAsync(ct);
         var typeIds = types.Select(t => t.Id).ToList();
-        var assigned = await _db.RoomAssets
-            .Where(a => typeIds.Contains(a.VenueAssetTypeId))
+
+        // Only count assignments on rooms belonging to this owner's branches (avoid cross-master stock).
+        var ownerBranchIds = ownerFilter.HasValue
+            ? await _db.Branches.Where(b => b.OwnerUserId == ownerFilter.Value).Select(b => b.Id).ToListAsync(ct)
+            : null;
+
+        var assignedQuery = _db.RoomAssets.Where(a => typeIds.Contains(a.VenueAssetTypeId));
+        if (ownerBranchIds is not null)
+            assignedQuery = assignedQuery.Where(a => ownerBranchIds.Contains(a.Room.BranchId));
+
+        var assigned = await assignedQuery
             .GroupBy(a => a.VenueAssetTypeId)
             .Select(g => new { TypeId = g.Key, Qty = g.Sum(x => x.Quantity) })
             .ToDictionaryAsync(x => x.TypeId, x => x.Qty, ct);
@@ -157,7 +168,7 @@ public class AssetService : IAssetService
         if (request.WorkingCount > request.TotalQuantity)
             throw new InvalidOperationException("Working count cannot exceed total quantity.");
 
-        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         var type = new VenueAssetType
         {
             TenantId = _tenantContext.TenantId,
@@ -219,11 +230,9 @@ public class AssetService : IAssetService
     public async Task<IReadOnlyList<ControllerTypeDto>> GetControllerTypesAsync(CancellationToken ct = default)
     {
         var query = _db.ControllerTypes.AsQueryable();
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            query = query.Where(c => c.OwnerUserId == ownerId);
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue)
+            query = query.Where(c => c.OwnerUserId == ownerFilter.Value);
 
         return await query
             .OrderBy(c => c.Name)
@@ -233,7 +242,7 @@ public class AssetService : IAssetService
 
     public async Task<ControllerTypeDto> CreateControllerTypeAsync(CreateControllerTypeRequest request, CancellationToken ct = default)
     {
-        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         var type = new ControllerType
         {
             TenantId = _tenantContext.TenantId,
@@ -282,12 +291,9 @@ public class AssetService : IAssetService
         var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new KeyNotFoundException("Venue asset type not found.");
 
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            if (!OwnerScope.CanAccess(type.OwnerUserId, ownerId, false))
-                throw new KeyNotFoundException("Venue asset type not found.");
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue && !OwnerScope.CanAccess(type.OwnerUserId, ownerFilter.Value, false))
+            throw new KeyNotFoundException("Venue asset type not found.");
 
         return type;
     }
@@ -297,12 +303,9 @@ public class AssetService : IAssetService
         var type = await _db.ControllerTypes.FirstOrDefaultAsync(c => c.Id == id, ct)
             ?? throw new KeyNotFoundException("Controller type not found.");
 
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            if (!OwnerScope.CanAccess(type.OwnerUserId, ownerId, false))
-                throw new KeyNotFoundException("Controller type not found.");
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue && !OwnerScope.CanAccess(type.OwnerUserId, ownerFilter.Value, false))
+            throw new KeyNotFoundException("Controller type not found.");
 
         return type;
     }
@@ -465,28 +468,34 @@ public class AssetService : IAssetService
         var liveStatuses = await GetLiveStatusMapAsync(branchId, ct);
 
         var rooms = await _db.Rooms
-            .Include(r => r.Devices.Where(d => d.IsActive))
+            .Include(r => r.Devices)
                 .ThenInclude(d => d.DeviceControllers)
-            .Include(r => r.Devices.Where(d => d.IsActive))
+            .Include(r => r.Devices)
                 .ThenInclude(d => d.Screens)
             .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
             .Where(r => r.BranchId == branchId && r.IsActive)
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
 
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+
         var roomDtos = rooms.Select(r => new AssetDashboardRoomDto(
             r.Id,
             r.Name,
             r.RoomNumber,
             r.MaxWatchingCapacity,
-            r.RoomAssets.Where(a => a.VenueAssetType is { IsDeleted: false }).Select(MapRoomAsset).ToList(),
-            r.Devices.Select(d => MapDashboardDevice(d, r.MaxWatchingCapacity, liveStatuses)).ToList()
+            r.RoomAssets
+                .Where(a => a.VenueAssetType is { IsDeleted: false }
+                    && (!ownerFilter.HasValue || a.VenueAssetType.OwnerUserId == ownerFilter.Value))
+                .Select(MapRoomAsset)
+                .ToList(),
+            r.Devices.OrderBy(d => d.Name).Select(d => MapDashboardDevice(d, r.MaxWatchingCapacity, liveStatuses)).ToList()
         )).ToList();
 
         var unassigned = await _db.Devices
             .Include(d => d.DeviceControllers).ThenInclude(c => c.ControllerType)
             .Include(d => d.Screens)
-            .Where(d => d.BranchId == branchId && d.IsActive && d.RoomId == null)
+            .Where(d => d.BranchId == branchId && d.RoomId == null)
             .OrderBy(d => d.Name)
             .ToListAsync(ct);
 
@@ -507,11 +516,13 @@ public class AssetService : IAssetService
         {
             var typeId = group.Key;
             var requestQty = group.Sum(a => a.Quantity);
-            var type = await _db.VenueAssetTypes.FirstOrDefaultAsync(t => t.Id == typeId && t.IsActive, ct)
-                ?? throw new KeyNotFoundException($"Venue asset type {typeId} not found.");
+            var type = await RequireOwnedVenueAssetTypeAsync(typeId, ct);
+            if (!type.IsActive)
+                throw new KeyNotFoundException($"Venue asset type {typeId} not found.");
 
             var assignedElsewhere = await _db.RoomAssets
-                .Where(a => a.VenueAssetTypeId == typeId && a.RoomId != room.Id)
+                .Where(a => a.VenueAssetTypeId == typeId && a.RoomId != room.Id
+                    && a.Room.Branch.OwnerUserId == type.OwnerUserId)
                 .SumAsync(a => (int?)a.Quantity, ct) ?? 0;
 
             if (assignedElsewhere + requestQty > type.TotalQuantity)
@@ -532,9 +543,7 @@ public class AssetService : IAssetService
             if (a.WorkingCount > a.Quantity)
                 throw new InvalidOperationException("Working count cannot exceed quantity.");
 
-            var typeExists = await _db.VenueAssetTypes.AnyAsync(t => t.Id == a.VenueAssetTypeId && t.IsActive, ct);
-            if (!typeExists)
-                throw new KeyNotFoundException($"Venue asset type {a.VenueAssetTypeId} not found.");
+            await RequireOwnedVenueAssetTypeAsync(a.VenueAssetTypeId, ct);
 
             room.RoomAssets.Add(new RoomAsset
             {
@@ -602,10 +611,14 @@ public class AssetService : IAssetService
                 : s.SessionMode == SessionMode.Gaming ? "Gaming" : "Watching");
     }
 
-    private static RoomDto MapRoom(Room room) =>
+    private static RoomDto MapRoom(Room room, Guid? ownerFilter = null) =>
         new(room.Id, room.BranchId, room.Name, room.RoomNumber, room.MaxWatchingCapacity,
             room.IsActive, room.Devices.Count(d => d.IsActive && !d.IsDeleted),
-            room.RoomAssets.Where(a => a.VenueAssetType is { IsDeleted: false }).Select(MapRoomAsset).ToList(),
+            room.RoomAssets
+                .Where(a => a.VenueAssetType is { IsDeleted: false }
+                    && (!ownerFilter.HasValue || a.VenueAssetType.OwnerUserId == ownerFilter.Value))
+                .Select(MapRoomAsset)
+                .ToList(),
             room.CreatedAt);
 
     private static RoomAssetDto MapRoomAsset(RoomAsset a) =>

@@ -276,6 +276,92 @@ using (var scope = app.Services.CreateScope())
         FROM branches b
         WHERE b.OwnerUserId IS NULL
         """);
+    // Infer catalog owners from room/device usage so masters don't see each other's stock.
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE vat
+        SET OwnerUserId = (
+            SELECT TOP 1 b.OwnerUserId
+            FROM RoomAssets ra
+            INNER JOIN Rooms r ON r.Id = ra.RoomId
+            INNER JOIN Branches b ON b.Id = r.BranchId
+            WHERE ra.VenueAssetTypeId = vat.Id
+              AND b.OwnerUserId IS NOT NULL
+            ORDER BY b.CreatedAt
+        )
+        FROM VenueAssetTypes vat
+        WHERE vat.OwnerUserId IS NULL
+        """);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE ct
+        SET OwnerUserId = (
+            SELECT TOP 1 b.OwnerUserId
+            FROM Devices d
+            INNER JOIN DeviceControllers dc ON dc.DeviceId = d.Id
+            INNER JOIN Branches b ON b.Id = d.BranchId
+            WHERE dc.ControllerTypeId = ct.Id
+              AND b.OwnerUserId IS NOT NULL
+            ORDER BY b.CreatedAt
+        )
+        FROM ControllerTypes ct
+        WHERE ct.OwnerUserId IS NULL
+        """);
+    // Fix catalogs used only on one master's branches (wrong OwnerUserId from earlier leaks).
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE vat
+        SET OwnerUserId = owners.OwnerUserId
+        FROM VenueAssetTypes vat
+        INNER JOIN (
+            SELECT ra.VenueAssetTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
+            FROM RoomAssets ra
+            INNER JOIN Rooms r ON r.Id = ra.RoomId
+            INNER JOIN Branches b ON b.Id = r.BranchId
+            WHERE b.OwnerUserId IS NOT NULL
+            GROUP BY ra.VenueAssetTypeId
+            HAVING COUNT(DISTINCT b.OwnerUserId) = 1
+        ) owners ON owners.Id = vat.Id
+        WHERE vat.OwnerUserId IS NULL OR vat.OwnerUserId <> owners.OwnerUserId
+        """);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE ct
+        SET OwnerUserId = owners.OwnerUserId
+        FROM ControllerTypes ct
+        INNER JOIN (
+            SELECT dc.ControllerTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
+            FROM DeviceControllers dc
+            INNER JOIN Devices d ON d.Id = dc.DeviceId
+            INNER JOIN Branches b ON b.Id = d.BranchId
+            WHERE b.OwnerUserId IS NOT NULL
+            GROUP BY dc.ControllerTypeId
+            HAVING COUNT(DISTINCT b.OwnerUserId) = 1
+        ) owners ON owners.Id = ct.Id
+        WHERE ct.OwnerUserId IS NULL OR ct.OwnerUserId <> owners.OwnerUserId
+        """);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE vat
+        SET OwnerUserId = (
+            SELECT TOP 1 u.Id
+            FROM users u
+            WHERE u.TenantId = vat.TenantId
+              AND u.IsMaster = 1
+              AND u.IsDeleted = 0
+            ORDER BY u.CreatedAt
+        )
+        FROM VenueAssetTypes vat
+        WHERE vat.OwnerUserId IS NULL
+        """);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE ct
+        SET OwnerUserId = (
+            SELECT TOP 1 u.Id
+            FROM users u
+            WHERE u.TenantId = ct.TenantId
+              AND u.IsMaster = 1
+              AND u.IsDeleted = 0
+            ORDER BY u.CreatedAt
+        )
+        FROM ControllerTypes ct
+        WHERE ct.OwnerUserId IS NULL
+        """);
     await DatabaseSeeder.SeedAsync(db, app.Configuration);
 }
 

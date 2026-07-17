@@ -98,8 +98,11 @@ public class SessionService : ISessionService
             .Include(d => d.Room)
             .Include(d => d.DeviceControllers)
             .Include(d => d.Screens)
-            .FirstOrDefaultAsync(d => d.Id == request.DeviceId && d.BranchId == branchId && d.IsActive, ct)
+            .FirstOrDefaultAsync(d => d.Id == request.DeviceId && d.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Device not found.");
+
+        if (!device.IsActive)
+            throw new InvalidOperationException("This device is inactive and cannot start a session.");
 
         if (await _db.Sessions.AnyAsync(s => s.DeviceId == device.Id && s.Status != SessionStatus.Closed, ct))
             throw new InvalidOperationException("This device already has an active session.");

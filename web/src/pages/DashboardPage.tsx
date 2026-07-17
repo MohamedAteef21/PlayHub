@@ -21,7 +21,7 @@ import { InventoryUnitKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit,
 type GuestType = 'none' | 'registered' | 'quick';
 
 function statusKey(status: string) {
-  return status.toLowerCase() as 'idle' | 'gaming' | 'watching' | 'paused';
+  return status.toLowerCase() as 'idle' | 'gaming' | 'watching' | 'paused' | 'inactive';
 }
 
 function DeviceCard({
@@ -54,26 +54,46 @@ function DeviceCard({
   const { t } = useTranslation();
   const elapsed = useLiveTimer(session ?? null);
   const isActive = !!session && session.status !== SessionStatus.Closed;
-  const liveStatus = session?.status === SessionStatus.Paused ? 'Paused' : device.liveStatus;
+  const deviceOffline = !device.isActive;
+  const liveStatus = deviceOffline
+    ? 'Inactive'
+    : session?.status === SessionStatus.Paused
+      ? 'Paused'
+      : device.liveStatus;
 
   return (
     <Card
-      className={`relative overflow-hidden transition-all ${isActive ? 'border-primary/50 shadow-lg shadow-primary/10' : ''}`}
+      className={`relative overflow-hidden transition-all ${
+        deviceOffline
+          ? 'border-danger/60 bg-danger/5 opacity-95'
+          : isActive
+            ? 'border-primary/50 shadow-lg shadow-primary/10'
+            : ''
+      }`}
     >
-      {isActive && (
+      {isActive && !deviceOffline && (
         <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-primary to-accent" />
+      )}
+      {deviceOffline && (
+        <div className="absolute inset-x-0 top-0 h-0.5 bg-danger" />
       )}
       <CardHeader>
         <div>
-          <CardTitle className="text-base">{device.name}</CardTitle>
+          <CardTitle className={`text-base ${deviceOffline ? 'text-danger' : ''}`}>{device.name}</CardTitle>
           <p className="text-xs text-muted">{roomName}</p>
         </div>
         <Badge status={statusKey(liveStatus)} pulse={liveStatus === 'Gaming' || liveStatus === 'Watching'}>
-          {t(`dashboard.${statusKey(liveStatus)}`, { defaultValue: liveStatus })}
+          {deviceOffline
+            ? t('common.inactive')
+            : t(`dashboard.${statusKey(liveStatus)}`, { defaultValue: liveStatus })}
         </Badge>
       </CardHeader>
 
-      {isActive && session ? (
+      {deviceOffline ? (
+        <div className="space-y-2 pt-1">
+          <p className="text-sm text-danger">{t('dashboard.deviceInactiveHint')}</p>
+        </div>
+      ) : isActive && session ? (
         <div className="space-y-3">
           <div className="flex items-baseline justify-between">
             <span className="font-mono text-3xl font-bold tracking-tight text-accent">

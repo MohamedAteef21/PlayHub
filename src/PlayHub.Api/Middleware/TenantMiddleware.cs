@@ -35,7 +35,7 @@ public class TenantMiddleware
                 ?? context.User.FindFirst("role")?.Value;
             tenantContext.Role = int.TryParse(roleClaim, out var roleInt) && Enum.IsDefined(typeof(UserRole), (short)roleInt)
                 ? (UserRole)roleInt
-                : tenantContext.IsMaster ? UserRole.SuperAdmin : UserRole.Staff;
+                : tenantContext.IsMaster ? UserRole.MasterAdmin : UserRole.Staff;
             tenantContext.Permissions = context.User.FindAll("permission").Select(c => c.Value).ToList();
 
             if (tenantContext.UserId != Guid.Empty)

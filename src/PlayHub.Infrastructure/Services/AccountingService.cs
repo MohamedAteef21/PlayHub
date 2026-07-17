@@ -23,11 +23,9 @@ public class AccountingService : IAccountingService
     public async Task<IReadOnlyList<ExpenseCategoryDto>> GetCategoriesAsync(CancellationToken ct = default)
     {
         var query = _db.ExpenseCategories.AsQueryable();
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            query = query.Where(c => c.OwnerUserId == ownerId);
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue)
+            query = query.Where(c => c.OwnerUserId == ownerFilter.Value);
 
         return await query
             .OrderBy(c => c.Name)

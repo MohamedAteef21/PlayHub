@@ -23,11 +23,9 @@ public class OfferService : IOfferService
     public async Task<IReadOnlyList<OfferDto>> GetAllAsync(bool? activeOnly = null, CancellationToken ct = default)
     {
         var query = _db.CustomerOffers.AsNoTracking().AsQueryable();
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            query = query.Where(o => o.OwnerUserId == ownerId);
-        }
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue)
+            query = query.Where(o => o.OwnerUserId == ownerFilter.Value);
 
         if (activeOnly == true)
             query = query.Where(o => o.IsActive);

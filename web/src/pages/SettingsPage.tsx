@@ -943,14 +943,17 @@ export function SettingsPage() {
           )}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((d) => (
-              <Card key={d.id}>
+              <Card
+                key={d.id}
+                className={!d.isActive ? 'border-danger/50 bg-danger/5' : undefined}
+              >
                 <div className="flex items-start gap-3">
-                  <span className="rounded-lg bg-accent/15 p-2 text-accent">
+                  <span className={`rounded-lg p-2 ${!d.isActive ? 'bg-danger/15 text-danger' : 'bg-accent/15 text-accent'}`}>
                     <Icon name="gaming" className="h-5 w-5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">{d.name}</p>
-                    <p className="text-xs text-muted">
+                    <p className={`font-medium ${!d.isActive ? 'text-danger' : ''}`}>{d.name}</p>
+                    <p className={`text-xs ${!d.isActive ? 'text-danger' : 'text-muted'}`}>
                       {d.roomName ? d.roomName : t('settings.noRoom')}
                       {!d.isActive ? ` · ${t('common.inactive')}` : ''}
                     </p>

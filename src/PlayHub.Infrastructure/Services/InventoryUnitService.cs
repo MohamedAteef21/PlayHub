@@ -27,8 +27,9 @@ public class InventoryUnitService : IInventoryUnitService
         await EnsureDefaultUnitsAsync(ownerId, ct);
 
         var q = _db.InventoryUnits.AsQueryable();
-        if (!_tenantContext.IsSuperAdmin)
-            q = q.Where(u => u.OwnerUserId == ownerId);
+        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
+        if (ownerFilter.HasValue)
+            q = q.Where(u => u.OwnerUserId == ownerFilter.Value);
         if (activeOnly)
             q = q.Where(u => u.IsActive);
 
