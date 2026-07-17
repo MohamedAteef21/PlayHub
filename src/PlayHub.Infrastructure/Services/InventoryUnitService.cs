@@ -23,13 +23,10 @@ public class InventoryUnitService : IInventoryUnitService
 
     public async Task<IReadOnlyList<InventoryUnitDto>> GetAllAsync(bool activeOnly = true, CancellationToken ct = default)
     {
-        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         await EnsureDefaultUnitsAsync(ownerId, ct);
 
-        var q = _db.InventoryUnits.AsQueryable();
-        var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
-        if (ownerFilter.HasValue)
-            q = q.Where(u => u.OwnerUserId == ownerFilter.Value);
+        var q = _db.InventoryUnits.Where(u => u.OwnerUserId == ownerId);
         if (activeOnly)
             q = q.Where(u => u.IsActive);
 
@@ -45,7 +42,7 @@ public class InventoryUnitService : IInventoryUnitService
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
 
-        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         var exists = await _db.InventoryUnits.AnyAsync(
             u => u.TenantId == _tenantContext.TenantId
                  && u.OwnerUserId == ownerId
@@ -75,7 +72,7 @@ public class InventoryUnitService : IInventoryUnitService
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
 
-        var ownerId = unit.OwnerUserId ?? await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var ownerId = unit.OwnerUserId ?? await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         var duplicate = await _db.InventoryUnits.AnyAsync(
             u => u.TenantId == _tenantContext.TenantId
                  && u.OwnerUserId == ownerId
@@ -90,11 +87,20 @@ public class InventoryUnitService : IInventoryUnitService
         unit.IsActive = request.IsActive;
         unit.OwnerUserId ??= ownerId;
 
-        // Keep cafeteria item labels in sync when the catalog unit is renamed.
+        // Keep cafeteria item labels in sync — only on this owner's branches.
         if (!string.Equals(oldName, name, StringComparison.Ordinal))
         {
+            var ownerBranchIds = await _db.Branches
+                .Where(b => b.OwnerUserId == ownerId)
+                .Select(b => b.Id)
+                .ToListAsync(ct);
+
             var items = await _db.CafeteriaItems
-                .Where(i => i.BaseUnitName == oldName || i.LargeUnitName == oldName)
+                .IgnoreQueryFilters()
+                .Where(i => i.TenantId == _tenantContext.TenantId
+                            && !i.IsDeleted
+                            && ownerBranchIds.Contains(i.BranchId)
+                            && (i.BaseUnitName == oldName || i.LargeUnitName == oldName))
                 .ToListAsync(ct);
 
             foreach (var item in items)
@@ -115,7 +121,7 @@ public class InventoryUnitService : IInventoryUnitService
     {
         var unit = await RequireOwnedUnitAsync(id, ct);
 
-        await EnsureUnitNotUsedOnOpenSessionsAsync(unit.Name, ct);
+        await EnsureUnitNotUsedOnOpenSessionsAsync(unit.Name, unit.OwnerUserId, ct);
 
         unit.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         unit.IsActive = false;
@@ -124,12 +130,21 @@ public class InventoryUnitService : IInventoryUnitService
     }
 
     /// <summary>
-    /// Blocks delete while any open/paused session has cafeteria lines for items that use this unit.
+    /// Blocks delete while any open/paused session has cafeteria lines for items that use this unit
+    /// on the unit owner's branches.
     /// </summary>
-    private async Task EnsureUnitNotUsedOnOpenSessionsAsync(string unitName, CancellationToken ct)
+    private async Task EnsureUnitNotUsedOnOpenSessionsAsync(string unitName, Guid? ownerUserId, CancellationToken ct)
     {
+        var ownerBranchIds = ownerUserId.HasValue
+            ? await _db.Branches.Where(b => b.OwnerUserId == ownerUserId).Select(b => b.Id).ToListAsync(ct)
+            : await _db.Branches.Where(b => _tenantContext.AllowedBranchIds.Contains(b.Id)).Select(b => b.Id).ToListAsync(ct);
+
         var itemIds = await _db.CafeteriaItems
-            .Where(i => i.BaseUnitName == unitName || i.LargeUnitName == unitName)
+            .IgnoreQueryFilters()
+            .Where(i => i.TenantId == _tenantContext.TenantId
+                        && !i.IsDeleted
+                        && ownerBranchIds.Contains(i.BranchId)
+                        && (i.BaseUnitName == unitName || i.LargeUnitName == unitName))
             .Select(i => i.Id)
             .ToListAsync(ct);
 
@@ -186,56 +201,27 @@ public class InventoryUnitService : IInventoryUnitService
         var unit = await _db.InventoryUnits.FirstOrDefaultAsync(u => u.Id == id, ct)
             ?? throw new KeyNotFoundException("Unit not found.");
 
-        if (!_tenantContext.IsSuperAdmin)
-        {
-            var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
-            if (!OwnerScope.CanAccess(unit.OwnerUserId, ownerId, false))
-                throw new KeyNotFoundException("Unit not found.");
-        }
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
+        if (!OwnerScope.CanAccess(unit.OwnerUserId, ownerId, false))
+            throw new KeyNotFoundException("Unit not found.");
 
         return unit;
     }
 
     private async Task EnsureDefaultUnitsAsync(Guid ownerId, CancellationToken ct)
     {
-        var hasAny = await _db.InventoryUnits.AnyAsync(
-            u => _tenantContext.IsSuperAdmin || u.OwnerUserId == ownerId, ct);
-        if (hasAny)
-            return;
-
-        var defaults = new[] { "قطعة", "علبة", "كرتونة" };
-
-        foreach (var name in defaults)
-        {
-            _db.InventoryUnits.Add(new InventoryUnit
-            {
-                TenantId = _tenantContext.TenantId,
-                OwnerUserId = ownerId,
-                Name = name,
-                NameAr = name,
-                IsActive = true
-            });
-        }
-
-        var allowedBranches = _tenantContext.AllowedBranchIds;
-        var used = await _db.CafeteriaItems
-            .IgnoreQueryFilters()
-            .Where(i => i.TenantId == _tenantContext.TenantId
-                        && !i.IsDeleted
-                        && (_tenantContext.IsSuperAdmin || allowedBranches.Contains(i.BranchId)))
-            .Select(i => new { i.BaseUnitName, i.LargeUnitName })
+        var existingNames = await _db.InventoryUnits
+            .Where(u => u.OwnerUserId == ownerId)
+            .Select(u => u.Name)
             .ToListAsync(ct);
 
-        var names = used
-            .SelectMany(x => new[] { x.BaseUnitName, x.LargeUnitName })
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n!.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        var added = false;
 
-        foreach (var name in names)
+        var defaults = new[] { "قطعة", "علبة", "كرتونة" };
+        foreach (var name in defaults)
         {
-            if (defaults.Any(d => string.Equals(d, name, StringComparison.OrdinalIgnoreCase)))
+            if (existingSet.Contains(name))
                 continue;
             _db.InventoryUnits.Add(new InventoryUnit
             {
@@ -245,8 +231,50 @@ public class InventoryUnitService : IInventoryUnitService
                 NameAr = name,
                 IsActive = true
             });
+            existingSet.Add(name);
+            added = true;
         }
 
-        await _db.SaveChangesAsync(ct);
+        // Pull unit names used on this owner's branches into their private catalog.
+        var ownerBranchIds = await _db.Branches
+            .Where(b => b.OwnerUserId == ownerId)
+            .Select(b => b.Id)
+            .ToListAsync(ct);
+
+        if (ownerBranchIds.Count > 0)
+        {
+            var used = await _db.CafeteriaItems
+                .IgnoreQueryFilters()
+                .Where(i => i.TenantId == _tenantContext.TenantId
+                            && !i.IsDeleted
+                            && ownerBranchIds.Contains(i.BranchId))
+                .Select(i => new { i.BaseUnitName, i.LargeUnitName })
+                .ToListAsync(ct);
+
+            var names = used
+                .SelectMany(x => new[] { x.BaseUnitName, x.LargeUnitName })
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var name in names)
+            {
+                if (existingSet.Contains(name))
+                    continue;
+                _db.InventoryUnits.Add(new InventoryUnit
+                {
+                    TenantId = _tenantContext.TenantId,
+                    OwnerUserId = ownerId,
+                    Name = name,
+                    NameAr = name,
+                    IsActive = true
+                });
+                existingSet.Add(name);
+                added = true;
+            }
+        }
+
+        if (added)
+            await _db.SaveChangesAsync(ct);
     }
 }

@@ -32,7 +32,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<IReadOnlyList<CafeteriaItemDto>> GetItemsAsync(CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
         return await _db.CafeteriaItems
             .Where(i => i.BranchId == branchId)
             .OrderBy(i => i.Name)
@@ -42,14 +42,14 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaItemDto?> GetItemByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
         var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct);
         return item is null ? null : MapItem(item);
     }
 
     public async Task<CafeteriaItemDto> CreateItemAsync(CreateCafeteriaItemRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         var (baseUnit, largeUnit, unitsPerLarge) = await ResolveUnitsAsync(
             request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct);
@@ -109,7 +109,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaItemDto> UpdateItemAsync(Guid id, UpdateCafeteriaItemRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
@@ -173,8 +173,10 @@ public class CafeteriaService : ICafeteriaService
         int unitsPerLarge,
         CancellationToken ct)
     {
+        var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
+
         var baseUnit = await _db.InventoryUnits.FirstOrDefaultAsync(
-            u => u.Id == baseUnitId && u.IsActive, ct)
+            u => u.Id == baseUnitId && u.IsActive && u.OwnerUserId == ownerId, ct)
             ?? throw new InvalidOperationException("Base unit not found. Add it from Inventory → Units first.");
 
         string? largeName = null;
@@ -184,7 +186,7 @@ public class CafeteriaService : ICafeteriaService
                 throw new InvalidOperationException("Large unit must be different from the base unit.");
 
             var large = await _db.InventoryUnits.FirstOrDefaultAsync(
-                u => u.Id == largeUnitId.Value && u.IsActive, ct)
+                u => u.Id == largeUnitId.Value && u.IsActive && u.OwnerUserId == ownerId, ct)
                 ?? throw new InvalidOperationException("Large unit not found.");
             largeName = large.Name;
         }
@@ -194,9 +196,31 @@ public class CafeteriaService : ICafeteriaService
         return (baseName, largeName, unitsPerLarge);
     }
 
-    public async Task SoftDeleteItemAsync(Guid id, CancellationToken ct = default)
+    /// <summary>
+    /// Branch must be selected and, for non-SuperAdmin, belong to the business owner
+    /// (blocks masters from reading another master's items via a stray UserBranch).
+    /// </summary>
+    private async Task<Guid> RequireOwnedBranchIdAsync(CancellationToken ct)
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        if (_tenantContext.IsSuperAdmin)
+            return branchId;
+
+        var businessOwnerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var branchOwnerId = await _db.Branches.AsNoTracking()
+            .Where(b => b.Id == branchId)
+            .Select(b => b.OwnerUserId)
+            .FirstOrDefaultAsync(ct);
+
+        if (branchOwnerId.HasValue && branchOwnerId.Value != businessOwnerId)
+            throw new UnauthorizedAccessException("You do not have access to this branch.");
+
+        return branchId;
+    }
+
+    public async Task SoftDeleteItemAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
@@ -210,7 +234,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<IReadOnlyList<CafeteriaSaleDto>> GetSalesAsync(DateTime? from = null, DateTime? to = null, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         var query = _db.CafeteriaSales
             .Include(s => s.Lines).ThenInclude(l => l.CafeteriaItem)
@@ -227,7 +251,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaSaleDto?> GetSaleByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         var sale = await _db.CafeteriaSales
             .Include(s => s.Lines).ThenInclude(l => l.CafeteriaItem)
@@ -240,7 +264,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaSaleDto> CreateStandaloneSaleAsync(CreateCafeteriaSaleRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await RequireOwnedBranchIdAsync(ct);
 
         if (request.Lines is null || request.Lines.Count == 0)
             throw new InvalidOperationException("At least one sale line is required.");

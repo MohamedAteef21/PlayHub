@@ -362,6 +362,50 @@ using (var scope = app.Services.CreateScope())
         FROM ControllerTypes ct
         WHERE ct.OwnerUserId IS NULL
         """);
+    // Inventory units: exclusive cafeteria usage → correct owner.
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE iu
+        SET OwnerUserId = owners.OwnerUserId
+        FROM inventory_units iu
+        INNER JOIN (
+            SELECT iu2.Id AS Id, MIN(b.OwnerUserId) AS OwnerUserId
+            FROM inventory_units iu2
+            INNER JOIN cafeteria_items ci
+                ON ci.TenantId = iu2.TenantId
+               AND ci.IsDeleted = 0
+               AND (ci.BaseUnitName = iu2.Name OR ci.LargeUnitName = iu2.Name)
+            INNER JOIN branches b ON b.Id = ci.BranchId
+            WHERE b.OwnerUserId IS NOT NULL
+            GROUP BY iu2.Id
+            HAVING COUNT(DISTINCT b.OwnerUserId) = 1
+        ) owners ON owners.Id = iu.Id
+        WHERE iu.OwnerUserId IS NULL OR iu.OwnerUserId <> owners.OwnerUserId
+        """);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE iu
+        SET OwnerUserId = (
+            SELECT TOP 1 u.Id
+            FROM users u
+            WHERE u.TenantId = iu.TenantId
+              AND u.IsMaster = 1
+              AND u.IsDeleted = 0
+            ORDER BY u.CreatedAt
+        )
+        FROM inventory_units iu
+        WHERE iu.OwnerUserId IS NULL
+        """);
+    // Drop MasterAdmin UserBranch links to branches they don't own (stops cross-master item leak).
+    // Do not touch SuperAdmin assignments.
+    await db.Database.ExecuteSqlRawAsync("""
+        DELETE ub
+        FROM UserBranches ub
+        INNER JOIN users u ON u.Id = ub.UserId
+        INNER JOIN branches b ON b.Id = ub.BranchId
+        WHERE u.Role = 1
+          AND u.IsDeleted = 0
+          AND b.OwnerUserId IS NOT NULL
+          AND b.OwnerUserId <> u.Id
+        """);
     await DatabaseSeeder.SeedAsync(db, app.Configuration);
 }
 

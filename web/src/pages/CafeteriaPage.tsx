@@ -37,6 +37,7 @@ function cartKey(itemId: string, unit: InventoryUnitKind) {
 export function CafeteriaPage() {
   const { t, i18n } = useTranslation();
   const user = useAuthStore((s) => s.user);
+  const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const queryClient = useQueryClient();
   const canSell = hasPermission(user, Permissions.CafeteriaSell);
 
@@ -51,12 +52,12 @@ export function CafeteriaPage() {
   const [pickUnitItem, setPickUnitItem] = useState<CafeteriaItem | null>(null);
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['cafeteria-items'],
+    queryKey: ['cafeteria-items', user?.id, activeBranchId],
     queryFn: cafeteriaApi.getItems,
   });
 
   const { data: activeSessions = [] } = useQuery({
-    queryKey: ['sessions', 'active'],
+    queryKey: ['sessions', 'active', user?.id, activeBranchId],
     queryFn: sessionsApi.getActive,
     enabled: canSell,
     refetchInterval: 15000,

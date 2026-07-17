@@ -39,8 +39,9 @@ const movementLabels: Record<number, string> = {
 
 export function InventoryPage() {
   const { t, i18n } = useTranslation();
-  const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const [tab, setTab] = useState<Tab>('stock');
   const [adjustItem, setAdjustItem] = useState<CafeteriaItem | null>(null);
   const [newQty, setNewQty] = useState('');
@@ -75,7 +76,7 @@ export function InventoryPage() {
   const canManageItems = hasPermission(user, Permissions.InventoryManageItems);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery({
-    queryKey: ['cafeteria-items'],
+    queryKey: ['cafeteria-items', user?.id, activeBranchId],
     queryFn: cafeteriaApi.getItems,
   });
 
@@ -83,26 +84,26 @@ export function InventoryPage() {
     tab === 'units' || addItemOpen || voucherOpen || canManageItems;
 
   const { data: units = [], isLoading: unitsLoading } = useQuery({
-    queryKey: ['inventory-units'],
+    queryKey: ['inventory-units', user?.id, activeBranchId],
     queryFn: () => inventoryApi.getUnits(false),
     enabled: needsUnits,
   });
 
   const { data: conversionLogs = [], isLoading: logsLoading } = useQuery({
-    queryKey: ['inventory-conversion-logs'],
+    queryKey: ['inventory-conversion-logs', user?.id, activeBranchId],
     queryFn: () => inventoryApi.getConversionLogs(),
     enabled: tab === 'units' && canManageItems,
   });
 
   const { data: movementsPage, isLoading: movLoading } = useQuery({
-    queryKey: ['inventory-movements', page, pageSize],
+    queryKey: ['inventory-movements', user?.id, activeBranchId, page, pageSize],
     queryFn: () => inventoryApi.getMovements(undefined, page, pageSize),
     enabled: tab === 'movements',
   });
   const movements = movementsPage?.items ?? [];
 
   const { data: vouchersPage, isLoading: voucherLoading } = useQuery({
-    queryKey: ['stock-vouchers', page, pageSize],
+    queryKey: ['stock-vouchers', user?.id, activeBranchId, page, pageSize],
     queryFn: () => inventoryApi.getVouchers(undefined, page, pageSize),
     enabled: tab === 'vouchers',
   });
