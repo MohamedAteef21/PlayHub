@@ -119,9 +119,26 @@ builder.Services.AddCors(options =>
 
 {
 
+    var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5173"];
+
     options.AddPolicy("Frontend", policy =>
 
-        policy.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5173"])
+        policy.SetIsOriginAllowed(origin =>
+        {
+            if (corsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+                return true;
+
+            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                return false;
+
+            // Support wildcard entries like "https://*.vercel.app" (covers production + preview deploys).
+            return corsOrigins
+                .Where(o => o.StartsWith("https://*.", StringComparison.OrdinalIgnoreCase))
+                .Select(o => o["https://*.".Length..])
+                .Any(domain => uri.Scheme == Uri.UriSchemeHttps
+                    && (uri.Host.Equals(domain, StringComparison.OrdinalIgnoreCase)
+                        || uri.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase)));
+        })
 
             .AllowAnyHeader()
 

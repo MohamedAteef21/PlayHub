@@ -42,6 +42,14 @@ Step 'GET devices + pricing plans' { "devices=$($devices.Count) plans=$($plans.C
 $freeDevice = $devices | Where-Object { $_.isActive -and $_.status -eq 1 } | Select-Object -First 1
 if (-not $freeDevice) { $freeDevice = $devices | Where-Object { $_.isActive } | Select-Object -First 1 }
 $gamingPlan = $plans | Where-Object { $_.sessionMode -eq 1 -and $_.isActive } | Select-Object -First 1
+if (-not $gamingPlan) {
+    Step 'Create gaming pricing plan (none existed)' {
+        $body = @{ name = 'E2E Hourly'; sessionMode = 1; timeUnit = 2; watchingBilling = 0; branchId = $null;
+                   gamingRates = @(@{ controllerCount = 1; rate = 20 }, @{ controllerCount = 2; rate = 30 }) } | ConvertTo-Json -Depth 4
+        $script:gamingPlan = Invoke-RestMethod -Uri "$base/pricing/plans" -Method Post -ContentType 'application/json' -Headers $h -Body $body
+        "planId=$($script:gamingPlan.id)"
+    }
+}
 
 # 5. Customer + wallet
 $phone = "010$(Get-Random -Minimum 10000000 -Maximum 99999999)"

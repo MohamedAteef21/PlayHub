@@ -32,8 +32,19 @@ public class SessionCostCalculator : ISessionCostCalculator
         int? watcherCount,
         bool billingRoundUp)
     {
-        var snapshot = JsonSerializer.Deserialize<RateSnapshot>(rateSnapshotJson, JsonOptions)
-            ?? throw new InvalidOperationException("Invalid rate snapshot.");
+        RateSnapshot? snapshot;
+        try
+        {
+            snapshot = JsonSerializer.Deserialize<RateSnapshot>(rateSnapshotJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            snapshot = null;
+        }
+
+        // Corrupt/legacy snapshot: bill 0 instead of failing every session screen.
+        if (snapshot is null)
+            return 0;
 
         if (mode == SessionMode.Gaming && snapshot.PackagePrice is > 0 && snapshot.PackageDurationMinutes is > 0)
             return CalculatePackageCost(snapshot, controllerCount, elapsedSeconds, billingRoundUp);
@@ -65,8 +76,10 @@ public class SessionCostCalculator : ISessionCostCalculator
 
     private static decimal CalculateGamingCost(RateSnapshot snapshot, int? controllerCount, decimal units)
     {
+        // Misconfigured plan / legacy session: bill 0 for the time instead of breaking
+        // the whole active-sessions list (rates are validated at session open now).
         if (controllerCount is null or <= 0)
-            throw new InvalidOperationException("Controller count is required for gaming sessions.");
+            return 0;
 
         var rate = snapshot.GamingRates
             .Where(r => r.ControllerCount == controllerCount.Value)
@@ -74,7 +87,7 @@ public class SessionCostCalculator : ISessionCostCalculator
             .FirstOrDefault();
 
         if (rate <= 0)
-            throw new InvalidOperationException($"No gaming rate configured for {controllerCount} controller(s).");
+            return 0;
 
         return rate * units;
     }
@@ -95,8 +108,9 @@ public class SessionCostCalculator : ISessionCostCalculator
     private static decimal CalculateWatchingCost(RateSnapshot snapshot, int? watcherCount, decimal units)
     {
         var rate = snapshot.WatchingRates.FirstOrDefault()?.RatePerPerson ?? 0;
+        // Misconfigured plan / legacy session: bill 0 instead of breaking the active-sessions list.
         if (rate <= 0)
-            throw new InvalidOperationException("No watching rate configured for this plan.");
+            return 0;
 
         // Default PerPerson for old snapshots that omit WatchingBilling
         var billing = snapshot.WatchingBilling == 0
@@ -104,7 +118,7 @@ public class SessionCostCalculator : ISessionCostCalculator
             : snapshot.WatchingBilling;
 
         if (watcherCount is null or <= 0)
-            throw new InvalidOperationException("Watcher count is required for watching sessions.");
+            return 0;
 
         // Per person = flat fee for each watcher for the whole watching session (no time).
         if (billing == WatchingBilling.PerPerson)

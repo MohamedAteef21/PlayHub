@@ -179,6 +179,7 @@ export function DashboardPage() {
   const [returnQty, setReturnQty] = useState('1');
   const [returnReason, setReturnReason] = useState('');
   const [cafError, setCafError] = useState('');
+  const [openError, setOpenError] = useState('');
   const user = useAuthStore((s) => s.user);
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const language = useUiStore((s) => s.language);
@@ -366,6 +367,7 @@ export function DashboardPage() {
   async function handleOpen() {
     if (!openModal || !planId) return;
     setLoading(true);
+    setOpenError('');
     try {
       const plan = plans?.find((p) => p.id === planId);
       const useFixed =
@@ -392,6 +394,11 @@ export function DashboardPage() {
       setCustomerSearch('');
       setSelectedCustomer(null);
       setQuickGuestName('');
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    } catch (err) {
+      setOpenError(err instanceof Error ? err.message : t('common.error'));
+      // Refresh floor state — the device may actually be occupied already.
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } finally {
@@ -703,6 +710,7 @@ export function DashboardPage() {
                       setPlanId('');
                       setBookingMode('open');
                       setDurationHours(2);
+                      setOpenError('');
                     }}
                     onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
                     onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
@@ -943,6 +951,7 @@ export function DashboardPage() {
           setCustomerSearch('');
           setSelectedCustomer(null);
           setQuickGuestName('');
+          setOpenError('');
         }}
         title={t('session.open')}
         footer={
@@ -1180,6 +1189,9 @@ export function DashboardPage() {
               value={watcherCount}
               onChange={(e) => setWatcherCount(+e.target.value)}
             />
+          )}
+          {openError && (
+            <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{openError}</p>
           )}
         </div>
       </Modal>

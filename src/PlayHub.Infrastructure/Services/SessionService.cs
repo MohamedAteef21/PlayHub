@@ -111,6 +111,7 @@ public class SessionService : ISessionService
             ?? throw new KeyNotFoundException("Pricing plan not found.");
 
         ValidateSessionCounts(request, device);
+        ValidatePlanRates(request, plan);
 
         if (request.CustomerId.HasValue && request.IsQuickGuest)
             throw new InvalidOperationException("Cannot set both a registered customer and quick guest.");
@@ -747,6 +748,24 @@ public class SessionService : ISessionService
                 throw new InvalidOperationException("Watcher count is required for watching sessions.");
             if (request.WatcherCount > device.Room.MaxWatchingCapacity)
                 throw new InvalidOperationException($"This room supports at most {device.Room.MaxWatchingCapacity} watcher(s).");
+        }
+    }
+
+    /// <summary>Refuse to open a session the plan cannot bill — otherwise it gets stuck (cost calc would fail on every screen).</summary>
+    private static void ValidatePlanRates(OpenSessionRequest request, PricingPlan plan)
+    {
+        if (request.SessionMode == SessionMode.Gaming)
+        {
+            var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
+            var hasRate = plan.GamingRates.Any(r => r.ControllerCount == request.ControllerCount && r.Rate > 0);
+            if (!hasRate && !hasPackage)
+                throw new InvalidOperationException(
+                    $"Pricing plan '{plan.Name}' has no rate for {request.ControllerCount} controller(s). Configure the rate first.");
+        }
+        else if (!plan.WatchingRates.Any(r => r.RatePerPerson > 0))
+        {
+            throw new InvalidOperationException(
+                $"Pricing plan '{plan.Name}' has no watching rate configured. Configure the rate first.");
         }
     }
 
