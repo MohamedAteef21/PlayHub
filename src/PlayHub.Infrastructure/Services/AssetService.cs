@@ -205,6 +205,11 @@ public class AssetService : IAssetService
     {
         var type = await RequireOwnedVenueAssetTypeAsync(id, ct);
 
+        // Drop room assignments so rooms don't keep showing a deleted catalog item.
+        var assigned = await _db.RoomAssets.Where(a => a.VenueAssetTypeId == id).ToListAsync(ct);
+        if (assigned.Count > 0)
+            _db.RoomAssets.RemoveRange(assigned);
+
         type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         type.IsActive = false;
         await _db.SaveChangesAsync(ct);
@@ -261,6 +266,10 @@ public class AssetService : IAssetService
     public async Task SoftDeleteControllerTypeAsync(Guid id, CancellationToken ct = default)
     {
         var type = await RequireOwnedControllerTypeAsync(id, ct);
+
+        if (await _db.DeviceControllers.AnyAsync(c => c.ControllerTypeId == id, ct))
+            throw new InvalidOperationException(
+                "Cannot delete a controller type that is assigned to devices. Remove it from devices first.");
 
         type.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         type.IsActive = false;
@@ -457,7 +466,7 @@ public class AssetService : IAssetService
             r.Name,
             r.RoomNumber,
             r.MaxWatchingCapacity,
-            r.RoomAssets.Select(MapRoomAsset).ToList(),
+            r.RoomAssets.Where(a => a.VenueAssetType is { IsDeleted: false }).Select(MapRoomAsset).ToList(),
             r.Devices.Select(d => MapDashboardDevice(d, r.MaxWatchingCapacity, liveStatuses)).ToList()
         )).ToList();
 
@@ -582,12 +591,12 @@ public class AssetService : IAssetService
 
     private static RoomDto MapRoom(Room room) =>
         new(room.Id, room.BranchId, room.Name, room.RoomNumber, room.MaxWatchingCapacity,
-            room.IsActive, room.Devices.Count(d => d.IsActive),
-            room.RoomAssets.Select(MapRoomAsset).ToList(),
+            room.IsActive, room.Devices.Count(d => d.IsActive && !d.IsDeleted),
+            room.RoomAssets.Where(a => a.VenueAssetType is { IsDeleted: false }).Select(MapRoomAsset).ToList(),
             room.CreatedAt);
 
     private static RoomAssetDto MapRoomAsset(RoomAsset a) =>
-        new(a.Id, a.VenueAssetTypeId, a.VenueAssetType.Name, a.Quantity, a.WorkingCount, a.Notes);
+        new(a.Id, a.VenueAssetTypeId, a.VenueAssetType?.Name ?? "—", a.Quantity, a.WorkingCount, a.Notes);
 
     private static DeviceDto MapDevice(Device device, Dictionary<Guid, string> liveStatuses)
     {

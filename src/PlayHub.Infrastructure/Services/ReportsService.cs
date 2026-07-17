@@ -244,6 +244,10 @@ public class ReportsService : IReportsService
         if (amount > balance)
             throw new InvalidOperationException($"Cannot collect more than the drawer balance ({balance:0.##}).");
 
+        // Treat "collect all" as exact balance to avoid leftover cents from rounding.
+        if (balance - amount < 0.01m)
+            amount = balance;
+
         _db.CashCollections.Add(new CashCollection
         {
             TenantId = _tenantContext.TenantId,
@@ -256,6 +260,7 @@ public class ReportsService : IReportsService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("CashDrawer.Collected", "CashCollection", null, new { Amount = amount, request.Note }, ct: ct);
 
+        // Fresh read so the client gets the post-collection drawer balance (0 after collect-all).
         return await GetCashDrawerAsync(request.Date, request.TzOffsetMinutes, branchId, ct);
     }
 
@@ -284,7 +289,7 @@ public class ReportsService : IReportsService
             collectionsQuery = collectionsQuery.Where(c => c.BranchId == branchId.Value);
         var collected = await collectionsQuery.SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
 
-        return cashIn + topUps - expenses - collected;
+        return decimal.Round(cashIn + topUps - expenses - collected, 2);
     }
 
     private void EnsureMaster()

@@ -255,7 +255,17 @@ export function UsersPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => usersApi.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<{ items: import('@/types').ManagedUser[] }>(
+        { queryKey: ['users'] },
+        (old) =>
+          old
+            ? { ...old, items: old.items.filter((u) => u.id !== id) }
+            : old
+      );
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
     onError: (e: Error) => setError(e.message),
   });
 
@@ -271,6 +281,12 @@ export function UsersPage() {
       </PageHeader>
 
       <p className="mb-6 max-w-2xl text-sm text-muted">{t('users.hint')}</p>
+
+      {error && !open && (
+        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
       {isLoading ? (
         <PageLoader />

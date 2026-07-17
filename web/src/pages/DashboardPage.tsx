@@ -1328,6 +1328,10 @@ export function DashboardPage() {
         <div className="space-y-4">
           {closeModal && (
             <div className="space-y-1 rounded-xl border border-border bg-surface p-3">
+              <div className="flex justify-between text-sm text-muted">
+                <span>{t('session.timeCost')}</span>
+                <span>{formatCurrency(closeModal.currentTimeCost)}</span>
+              </div>
               {closeModal.roomSurchargeCost > 0 && (
                 <div className="flex justify-between text-sm text-muted">
                   <span>{t('session.roomSurcharge')}</span>
@@ -1335,6 +1339,10 @@ export function DashboardPage() {
                 </div>
               )}
               <div className="flex justify-between text-sm text-muted">
+                <span>{t('session.cafeteria')}</span>
+                <span>{formatCurrency(closeModal.cafeteriaCost)}</span>
+              </div>
+              <div className="flex justify-between text-sm font-medium">
                 <span>{t('session.subtotal')}</span>
                 <span>{formatCurrency(closeModal.totalCost)}</span>
               </div>

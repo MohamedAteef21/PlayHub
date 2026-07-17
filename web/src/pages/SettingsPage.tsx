@@ -363,7 +363,12 @@ export function SettingsPage() {
 
   const deleteBranchMutation = useMutation({
     mutationFn: (id: string) => branchesApi.delete(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').Branch[]>(
+        { queryKey: ['branches'] },
+        (old) => old?.filter((b) => b.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['branches'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -421,18 +426,31 @@ export function SettingsPage() {
 
   const deleteAssetTypeMutation = useMutation({
     mutationFn: (id: string) => assetsApi.deleteVenueAssetType(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').VenueAssetType[]>(
+        { queryKey: ['venue-asset-types'] },
+        (old) => old?.filter((a) => a.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (e: Error) => setError(e.message),
   });
 
   const deleteRoomMutation = useMutation({
     mutationFn: (id: string) => assetsApi.deleteRoom(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').Room[]>(
+        { queryKey: ['rooms'] },
+        (old) => old?.filter((r) => r.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -534,7 +552,12 @@ export function SettingsPage() {
 
   const deleteDeviceMutation = useMutation({
     mutationFn: (id: string) => assetsApi.deleteDevice(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').Device[]>(
+        { queryKey: ['devices'] },
+        (old) => old?.filter((d) => d.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
@@ -543,7 +566,12 @@ export function SettingsPage() {
 
   const deletePlanMutation = useMutation({
     mutationFn: (id: string) => pricingApi.deletePlan(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').PricingPlan[]>(
+        { queryKey: ['all-plans'] },
+        (old) => old?.filter((p) => p.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
       queryClient.invalidateQueries({ queryKey: ['plans'] });
     },
@@ -649,6 +677,12 @@ export function SettingsPage() {
           </Button>
         ))}
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
       {tab === 'branches' && isMaster && (
         <section className="space-y-4">

@@ -207,7 +207,14 @@ export function InventoryPage() {
 
   const deleteItemMutation = useMutation({
     mutationFn: (id: string) => cafeteriaApi.deleteItem(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] }),
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<import('@/types').CafeteriaItem[]>(
+        { queryKey: ['cafeteria-items'] },
+        (old) => old?.filter((i) => i.id !== id)
+      );
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    },
     onError: (e: Error) => setError(e.message),
   });
 
@@ -250,8 +257,12 @@ export function InventoryPage() {
 
   const deleteUnitMutation = useMutation({
     mutationFn: (id: string) => inventoryApi.deleteUnit(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       setError('');
+      queryClient.setQueriesData<import('@/types').InventoryUnit[]>(
+        { queryKey: ['inventory-units'] },
+        (old) => old?.filter((u) => u.id !== id)
+      );
       queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -427,6 +438,12 @@ export function InventoryPage() {
           </Button>
         ))}
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
       {tab === 'stock' && (
         itemsLoading ? (

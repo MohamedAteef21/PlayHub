@@ -21,6 +21,7 @@ export function ReportsPage() {
   const [collectAmount, setCollectAmount] = useState('');
   const [collectNote, setCollectNote] = useState('');
   const [collectError, setCollectError] = useState('');
+  const [collectMsg, setCollectMsg] = useState('');
   const queryClient = useQueryClient();
 
   const isoFrom = toIsoDate(from);
@@ -42,7 +43,9 @@ export function ReportsPage() {
       }),
     onSuccess: (updated) => {
       queryClient.setQueryData(['reports-cash-drawer', cashDate], updated);
+      void queryClient.invalidateQueries({ queryKey: ['reports-cash-drawer'] });
       setCollectOpen(false);
+      setCollectMsg(t('reports.collectSuccess'));
     },
     onError: (e: Error) => setCollectError(e.message),
   });
@@ -51,6 +54,7 @@ export function ReportsPage() {
     setCollectAmount(drawer && drawer.drawerBalance > 0 ? String(drawer.drawerBalance) : '');
     setCollectNote('');
     setCollectError('');
+    setCollectMsg('');
     setCollectOpen(true);
   }
 
@@ -116,10 +120,19 @@ export function ReportsPage() {
           <div className="space-y-6">
             <p className="max-w-3xl text-sm text-muted">{t('reports.cashDrawerHint')}</p>
 
+            {collectMsg && (
+              <p className="rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+                {collectMsg}
+              </p>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/35 bg-primary/10 p-4">
               <div>
                 <p className="text-sm text-muted">{t('reports.drawerBalance')}</p>
                 <p className="mt-1 text-3xl font-bold text-primary">{formatCurrency(drawer.drawerBalance)}</p>
+                {drawer.drawerBalance <= 0 && (
+                  <p className="mt-1 text-sm text-success">{t('reports.drawerEmpty')}</p>
+                )}
               </div>
               <Button onClick={openCollect} disabled={drawer.drawerBalance <= 0}>
                 {t('reports.collect')}
@@ -127,10 +140,10 @@ export function ReportsPage() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard label={t('reports.netCash')} value={formatCurrency(drawer.netCash)} accent="primary" />
-              <StatCard label={t('reports.totalCashIn')} value={formatCurrency(drawer.totalCashIn)} accent="success" />
+              <StatCard label={t('reports.collectedOnDay')} value={formatCurrency(drawer.collectedOnDay)} accent="success" />
+              <StatCard label={t('reports.netCash')} value={formatCurrency(drawer.netCash)} />
+              <StatCard label={t('reports.totalCashIn')} value={formatCurrency(drawer.totalCashIn)} />
               <StatCard label={t('reports.cashExpenses')} value={formatCurrency(drawer.cashExpenses)} accent="danger" />
-              <StatCard label={t('reports.collectedOnDay')} value={formatCurrency(drawer.collectedOnDay)} />
             </div>
 
             <div>
