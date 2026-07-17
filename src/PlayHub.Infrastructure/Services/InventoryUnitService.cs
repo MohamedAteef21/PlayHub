@@ -3,6 +3,7 @@ using PlayHub.Application.Common;
 using PlayHub.Application.Inventory;
 using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
+using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
 
 namespace PlayHub.Infrastructure.Services;
@@ -82,12 +83,30 @@ public class InventoryUnitService : IInventoryUnitService
         if (duplicate)
             throw new InvalidOperationException("This unit name already exists.");
 
+        var oldName = unit.Name;
         unit.Name = name;
         unit.NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
         unit.IsActive = request.IsActive;
         unit.OwnerUserId ??= ownerId;
+
+        // Keep cafeteria item labels in sync when the catalog unit is renamed.
+        if (!string.Equals(oldName, name, StringComparison.Ordinal))
+        {
+            var items = await _db.CafeteriaItems
+                .Where(i => i.BaseUnitName == oldName || i.LargeUnitName == oldName)
+                .ToListAsync(ct);
+
+            foreach (var item in items)
+            {
+                if (string.Equals(item.BaseUnitName, oldName, StringComparison.Ordinal))
+                    item.BaseUnitName = name;
+                if (string.Equals(item.LargeUnitName, oldName, StringComparison.Ordinal))
+                    item.LargeUnitName = name;
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("InventoryUnit.Updated", "InventoryUnit", unit.Id, new { unit.Name, unit.IsActive }, ct: ct);
+        await _audit.LogAsync("InventoryUnit.Updated", "InventoryUnit", unit.Id, new { oldName, unit.Name, unit.IsActive }, ct: ct);
         return new InventoryUnitDto(unit.Id, unit.Name, unit.NameAr, unit.IsActive, unit.CreatedAt);
     }
 
@@ -95,10 +114,38 @@ public class InventoryUnitService : IInventoryUnitService
     {
         var unit = await RequireOwnedUnitAsync(id, ct);
 
+        await EnsureUnitNotUsedOnOpenSessionsAsync(unit.Name, ct);
+
         unit.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         unit.IsActive = false;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("InventoryUnit.SoftDeleted", "InventoryUnit", unit.Id, new { unit.Name }, ct: ct);
+    }
+
+    /// <summary>
+    /// Blocks delete while any open/paused session has cafeteria lines for items that use this unit.
+    /// </summary>
+    private async Task EnsureUnitNotUsedOnOpenSessionsAsync(string unitName, CancellationToken ct)
+    {
+        var itemIds = await _db.CafeteriaItems
+            .Where(i => i.BaseUnitName == unitName || i.LargeUnitName == unitName)
+            .Select(i => i.Id)
+            .ToListAsync(ct);
+
+        if (itemIds.Count == 0)
+            return;
+
+        var hasOpen = await _db.SessionCafeteriaLines
+            .AnyAsync(l =>
+                itemIds.Contains(l.CafeteriaItemId)
+                && l.Session.Status != SessionStatus.Closed
+                && !l.Session.IsDeleted, ct);
+
+        if (hasOpen)
+        {
+            throw new InvalidOperationException(
+                "Cannot delete this unit while it is used by cafeteria items on an open session. Close the session first, then delete.");
+        }
     }
 
     public async Task<IReadOnlyList<ItemUnitConversionLogDto>> GetConversionLogsAsync(
@@ -169,7 +216,6 @@ public class InventoryUnitService : IInventoryUnitService
             });
         }
 
-        // Import distinct unit names already used on items in this master's branches.
         var allowedBranches = _tenantContext.AllowedBranchIds;
         var used = await _db.CafeteriaItems
             .IgnoreQueryFilters()

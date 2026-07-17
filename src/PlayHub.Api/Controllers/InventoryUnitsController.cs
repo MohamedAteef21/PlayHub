@@ -38,6 +38,10 @@ public class InventoryUnitsController : ControllerBase
             await _units.SoftDeleteAsync(id, ct);
             return NoContent();
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { message = ex.Message });

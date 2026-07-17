@@ -64,6 +64,10 @@ export function InventoryPage() {
   const [unitsPerLarge, setUnitsPerLarge] = useState('24');
   const [initialStockUnit, setInitialStockUnit] = useState<InventoryUnitKind>(InventoryUnitKind.Base);
   const [newUnitName, setNewUnitName] = useState('');
+  const [editingUnit, setEditingUnit] = useState<InventoryUnit | null>(null);
+  const [editUnitName, setEditUnitName] = useState('');
+  const [editUnitNameAr, setEditUnitNameAr] = useState('');
+  const [editUnitActive, setEditUnitActive] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -217,6 +221,22 @@ export function InventoryPage() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const updateUnitMutation = useMutation({
+    mutationFn: () =>
+      inventoryApi.updateUnit(editingUnit!.id, {
+        name: editUnitName.trim(),
+        nameAr: editUnitNameAr.trim() || null,
+        isActive: editUnitActive,
+      }),
+    onSuccess: () => {
+      setEditingUnit(null);
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   const toggleUnitMutation = useMutation({
     mutationFn: (unit: InventoryUnit) =>
       inventoryApi.updateUnit(unit.id, {
@@ -230,9 +250,20 @@ export function InventoryPage() {
 
   const deleteUnitMutation = useMutation({
     mutationFn: (id: string) => inventoryApi.deleteUnit(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory-units'] }),
+    onSuccess: () => {
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
     onError: (e: Error) => setError(e.message),
   });
+
+  function openEditUnit(unit: InventoryUnit) {
+    setEditingUnit(unit);
+    setEditUnitName(unit.name);
+    setEditUnitNameAr(unit.nameAr ?? '');
+    setEditUnitActive(unit.isActive);
+    setError('');
+  }
 
   const createVoucherMutation = useMutation({
     mutationFn: async () => {
@@ -599,6 +630,9 @@ export function InventoryPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openEditUnit(unit)}>
+                          {t('users.edit')}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -612,7 +646,9 @@ export function InventoryPage() {
                           size="sm"
                           loading={deleteUnitMutation.isPending}
                           onClick={() => {
-                            if (window.confirm(t('common.confirmDelete'))) {
+                            if (window.confirm(t('inventory.confirmDeleteUnit', {
+                              defaultValue: t('common.confirmDelete'),
+                            }))) {
                               deleteUnitMutation.mutate(unit.id);
                             }
                           }}
@@ -854,6 +890,42 @@ export function InventoryPage() {
               (!!largeUnitId && Number(unitsPerLarge) < 2)
             }
             onClick={() => createItemMutation.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editingUnit}
+        onClose={() => setEditingUnit(null)}
+        title={t('inventory.editUnit', { defaultValue: 'Edit unit' })}
+      >
+        <div className="space-y-3">
+          <Input
+            label={t('inventory.unitName')}
+            value={editUnitName}
+            onChange={(e) => setEditUnitName(e.target.value)}
+          />
+          <Input
+            label={t('inventory.unitNameAr', { defaultValue: 'Unit name (Arabic)' })}
+            value={editUnitNameAr}
+            onChange={(e) => setEditUnitNameAr(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={editUnitActive}
+              onChange={(e) => setEditUnitActive(e.target.checked)}
+            />
+            {t('common.active')}
+          </label>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            loading={updateUnitMutation.isPending}
+            disabled={!editUnitName.trim()}
+            onClick={() => updateUnitMutation.mutate()}
           >
             {t('common.save')}
           </Button>
