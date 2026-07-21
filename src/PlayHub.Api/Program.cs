@@ -262,8 +262,23 @@ app.MapHangfireDashboard("/hangfire");
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PlayHubDbContext>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
     await db.Database.MigrateAsync();
-    await db.Database.ExecuteSqlRawAsync("""
+
+    async Task TrySqlAsync(string label, string sql)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(sql);
+        }
+        catch (Exception ex)
+        {
+            // Owner-backfill is best-effort; never block app start on a bad table/column name.
+            startupLogger.LogWarning(ex, "Startup SQL skipped ({Label})", label);
+        }
+    }
+
+    await TrySqlAsync("branches.OwnerUserId", """
         UPDATE b
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -277,27 +292,28 @@ using (var scope = app.Services.CreateScope())
         WHERE b.OwnerUserId IS NULL
         """);
     // Infer catalog owners from room/device usage so masters don't see each other's stock.
-    await db.Database.ExecuteSqlRawAsync("""
+    // Table names must match EF mappings (mixed Pascal/snake in this schema).
+    await TrySqlAsync("venue_asset_types from rooms", """
         UPDATE vat
         SET OwnerUserId = (
             SELECT TOP 1 b.OwnerUserId
-            FROM RoomAssets ra
+            FROM room_assets ra
             INNER JOIN Rooms r ON r.Id = ra.RoomId
-            INNER JOIN Branches b ON b.Id = r.BranchId
+            INNER JOIN branches b ON b.Id = r.BranchId
             WHERE ra.VenueAssetTypeId = vat.Id
               AND b.OwnerUserId IS NOT NULL
             ORDER BY b.CreatedAt
         )
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types from devices", """
         UPDATE ct
         SET OwnerUserId = (
             SELECT TOP 1 b.OwnerUserId
             FROM Devices d
             INNER JOIN DeviceControllers dc ON dc.DeviceId = d.Id
-            INNER JOIN Branches b ON b.Id = d.BranchId
+            INNER JOIN branches b ON b.Id = d.BranchId
             WHERE dc.ControllerTypeId = ct.Id
               AND b.OwnerUserId IS NOT NULL
             ORDER BY b.CreatedAt
@@ -306,22 +322,22 @@ using (var scope = app.Services.CreateScope())
         WHERE ct.OwnerUserId IS NULL
         """);
     // Fix catalogs used only on one master's branches (wrong OwnerUserId from earlier leaks).
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("venue_asset_types exclusive owner", """
         UPDATE vat
         SET OwnerUserId = owners.OwnerUserId
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         INNER JOIN (
             SELECT ra.VenueAssetTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
-            FROM RoomAssets ra
+            FROM room_assets ra
             INNER JOIN Rooms r ON r.Id = ra.RoomId
-            INNER JOIN Branches b ON b.Id = r.BranchId
+            INNER JOIN branches b ON b.Id = r.BranchId
             WHERE b.OwnerUserId IS NOT NULL
             GROUP BY ra.VenueAssetTypeId
             HAVING COUNT(DISTINCT b.OwnerUserId) = 1
         ) owners ON owners.Id = vat.Id
         WHERE vat.OwnerUserId IS NULL OR vat.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types exclusive owner", """
         UPDATE ct
         SET OwnerUserId = owners.OwnerUserId
         FROM ControllerTypes ct
@@ -329,14 +345,14 @@ using (var scope = app.Services.CreateScope())
             SELECT dc.ControllerTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
             FROM DeviceControllers dc
             INNER JOIN Devices d ON d.Id = dc.DeviceId
-            INNER JOIN Branches b ON b.Id = d.BranchId
+            INNER JOIN branches b ON b.Id = d.BranchId
             WHERE b.OwnerUserId IS NOT NULL
             GROUP BY dc.ControllerTypeId
             HAVING COUNT(DISTINCT b.OwnerUserId) = 1
         ) owners ON owners.Id = ct.Id
         WHERE ct.OwnerUserId IS NULL OR ct.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("venue_asset_types fallback master", """
         UPDATE vat
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -346,10 +362,10 @@ using (var scope = app.Services.CreateScope())
               AND u.IsDeleted = 0
             ORDER BY u.CreatedAt
         )
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types fallback master", """
         UPDATE ct
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -363,7 +379,7 @@ using (var scope = app.Services.CreateScope())
         WHERE ct.OwnerUserId IS NULL
         """);
     // Inventory units: exclusive cafeteria usage → correct owner.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("inventory_units exclusive owner", """
         UPDATE iu
         SET OwnerUserId = owners.OwnerUserId
         FROM inventory_units iu
@@ -381,7 +397,7 @@ using (var scope = app.Services.CreateScope())
         ) owners ON owners.Id = iu.Id
         WHERE iu.OwnerUserId IS NULL OR iu.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("inventory_units fallback master", """
         UPDATE iu
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -396,9 +412,9 @@ using (var scope = app.Services.CreateScope())
         """);
     // Drop MasterAdmin UserBranch links to branches they don't own (stops cross-master item leak).
     // Do not touch SuperAdmin assignments.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("prune master user_branches", """
         DELETE ub
-        FROM UserBranches ub
+        FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
         INNER JOIN branches b ON b.Id = ub.BranchId
         WHERE u.Role = 1
@@ -407,9 +423,9 @@ using (var scope = app.Services.CreateScope())
           AND b.OwnerUserId <> u.Id
         """);
     // Staff must not keep branches owned by a different master than their parent.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("prune staff user_branches", """
         DELETE ub
-        FROM UserBranches ub
+        FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
         INNER JOIN branches b ON b.Id = ub.BranchId
         WHERE u.Role = 0

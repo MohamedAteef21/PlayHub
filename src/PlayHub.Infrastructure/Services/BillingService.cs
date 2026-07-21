@@ -69,7 +69,8 @@ public class BillingService
             Amount = total,
             Status = paymentStatus,
             DebtorName = payment.DebtorName?.Trim(),
-            DebtorPhone = payment.DebtorPhone?.Trim()
+            DebtorPhone = payment.DebtorPhone?.Trim(),
+            CustomerId = payment.CustomerId
         };
 
         if (!string.IsNullOrWhiteSpace(payment.ProofFileUrl))

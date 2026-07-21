@@ -38,6 +38,8 @@ export function UsersPage() {
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<number>(UserRole.Staff);
@@ -224,7 +226,9 @@ export function UsersPage() {
         branchIds: isPrivilegedRole ? [] : selectedBranches,
       }),
     onSuccess: () => {
+      if (password.trim()) setRevealedPassword(password.trim());
       setOpen(false);
+      setPassword('');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -245,9 +249,11 @@ export function UsersPage() {
       }),
     onSuccess: async () => {
       if (password.trim()) {
-        await usersApi.resetPassword(editUser!.id, password);
+        const result = await usersApi.resetPassword(editUser!.id, password);
+        setRevealedPassword(result.newPassword);
       }
       setOpen(false);
+      setPassword('');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -417,23 +423,35 @@ export function UsersPage() {
             <div>
               <p className="mb-2 text-sm font-medium">{t('users.notificationChannels')}</p>
               <p className="mb-2 text-xs text-muted">{t('users.notificationChannelsHint')}</p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={allowedChannels === NotificationChannel.Email ? 'primary' : 'secondary'}
-                  onClick={() => setAllowedChannels(NotificationChannel.Email)}
-                >
-                  {t('users.channelEmailOnly')}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={allowedChannels === NotificationChannel.EmailAndWhatsApp ? 'primary' : 'secondary'}
-                  onClick={() => setAllowedChannels(NotificationChannel.EmailAndWhatsApp)}
-                >
-                  {t('users.channelEmailWhatsApp')}
-                </Button>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={(allowedChannels & NotificationChannel.Email) !== 0}
+                    onChange={(e) =>
+                      setAllowedChannels((prev) =>
+                        e.target.checked
+                          ? prev | NotificationChannel.Email
+                          : prev & ~NotificationChannel.Email
+                      )
+                    }
+                  />
+                  {t('users.channelGmail')}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={(allowedChannels & NotificationChannel.WhatsApp) !== 0}
+                    onChange={(e) =>
+                      setAllowedChannels((prev) =>
+                        e.target.checked
+                          ? prev | NotificationChannel.WhatsApp
+                          : prev & ~NotificationChannel.WhatsApp
+                      )
+                    }
+                  />
+                  {t('users.channelWhatsApp')}
+                </label>
               </div>
             </div>
           )}
@@ -605,6 +623,42 @@ export function UsersPage() {
           >
             {t('common.save')}
           </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!revealedPassword}
+        onClose={() => {
+          setRevealedPassword(null);
+          setPasswordCopied(false);
+        }}
+        title={t('users.passwordRevealedTitle')}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">{t('users.passwordRevealedHint')}</p>
+          <div className="rounded-lg border border-border bg-surface-elevated px-4 py-3 font-mono text-lg" dir="ltr">
+            {revealedPassword}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                if (!revealedPassword) return;
+                await navigator.clipboard.writeText(revealedPassword);
+                setPasswordCopied(true);
+              }}
+            >
+              {passwordCopied ? t('users.passwordCopied') : t('users.copyPassword')}
+            </Button>
+            <Button
+              onClick={() => {
+                setRevealedPassword(null);
+                setPasswordCopied(false);
+              }}
+            >
+              {t('common.done')}
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

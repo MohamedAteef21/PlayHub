@@ -48,6 +48,8 @@ public record UpdateUserRequest(
 
 public record ResetPasswordRequest(string NewPassword);
 
+public record ResetPasswordResultDto(string NewPassword);
+
 public interface IUserService
 {
     Task<PlayHub.Application.Common.PagedResult<ManagedUserDto>> GetUsersAsync(
@@ -57,5 +59,5 @@ public interface IUserService
     Task<ManagedUserDto> CreateAsync(CreateUserRequest request, CancellationToken ct = default);
     Task<ManagedUserDto> UpdateAsync(Guid id, UpdateUserRequest request, CancellationToken ct = default);
     Task SoftDeleteAsync(Guid id, CancellationToken ct = default);
-    Task ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default);
+    Task<ResetPasswordResultDto> ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default);
 }

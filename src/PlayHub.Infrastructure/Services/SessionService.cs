@@ -604,6 +604,15 @@ public class SessionService : ISessionService
                 DebtorPhone = payment.DebtorPhone?.Trim()
             };
 
+            if (payment.PaymentMethod == PaymentMethod.Deferred && session.CustomerId.HasValue)
+            {
+                invoicePayment.CustomerId = session.CustomerId;
+                if (string.IsNullOrWhiteSpace(invoicePayment.DebtorName))
+                    invoicePayment.DebtorName = session.Customer?.Name;
+                if (string.IsNullOrWhiteSpace(invoicePayment.DebtorPhone))
+                    invoicePayment.DebtorPhone = session.Customer?.Phone;
+            }
+
             if (!string.IsNullOrWhiteSpace(payment.ProofFileUrl))
             {
                 invoicePayment.Proof = new PaymentProof

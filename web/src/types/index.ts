@@ -155,6 +155,8 @@ export interface Customer {
   walletBalance: number;
   isActive: boolean;
   createdAt: string;
+  outstandingDebtAmount: number;
+  outstandingDebtCount: number;
 }
 
 export const WalletTransactionType = { TopUp: 1, Bonus: 2, Payment: 3, Adjustment: 4 } as const;
@@ -628,6 +630,50 @@ export interface PaymentRequest {
   debtorName?: string;
   debtorPhone?: string;
   proofFileUrl?: string;
+  customerId?: string;
+}
+
+export interface ResetPasswordResult {
+  newPassword: string;
+}
+
+export interface CafeteriaHoldLineAddOn {
+  id: string;
+  addOnId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  stockDeductQuantity: number;
+}
+
+export interface CafeteriaHoldLine {
+  id: string;
+  cafeteriaItemId: string;
+  itemName: string;
+  variantId: string | null;
+  variantName: string | null;
+  quantity: number;
+  stockDeductQuantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  addOns: CafeteriaHoldLineAddOn[];
+}
+
+export interface CafeteriaHold {
+  id: string;
+  branchId: string;
+  guestName: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  status: number;
+  totalAmount: number;
+  createdAt: string;
+  createdByName: string;
+  attachedSessionId: string | null;
+  convertedSaleId: string | null;
+  finalizedAt: string | null;
+  lines: CafeteriaHoldLine[];
 }
 
 export interface ManagedUser {

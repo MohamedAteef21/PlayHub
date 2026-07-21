@@ -117,6 +117,54 @@ public record CreateCafeteriaSaleRequest(
     string? CustomerName = null,
     bool AllowSkipMissingIngredients = false);
 
+public record CreateCafeteriaHoldRequest(
+    IReadOnlyList<CafeteriaSaleLineInput> Lines,
+    string? GuestName = null,
+    Guid? CustomerId = null,
+    bool AllowSkipMissingIngredients = false);
+
+public record AttachHoldToSessionRequest(Guid SessionId);
+
+public record ConvertHoldToSaleRequest(
+    PaymentRequest Payment,
+    string? CustomerName = null);
+
+public record CafeteriaHoldLineAddOnDto(
+    Guid Id,
+    Guid AddOnId,
+    string Name,
+    int Quantity,
+    decimal UnitPrice,
+    decimal LineTotal,
+    int StockDeductQuantity);
+
+public record CafeteriaHoldLineDto(
+    Guid Id,
+    Guid CafeteriaItemId,
+    string ItemName,
+    Guid? VariantId,
+    string? VariantName,
+    int Quantity,
+    int StockDeductQuantity,
+    decimal UnitPrice,
+    decimal LineTotal,
+    IReadOnlyList<CafeteriaHoldLineAddOnDto> AddOns);
+
+public record CafeteriaHoldDto(
+    Guid Id,
+    Guid BranchId,
+    string? GuestName,
+    Guid? CustomerId,
+    string? CustomerName,
+    CafeteriaHoldStatus Status,
+    decimal TotalAmount,
+    DateTime CreatedAt,
+    string CreatedByName,
+    Guid? AttachedSessionId,
+    Guid? ConvertedSaleId,
+    DateTime? FinalizedAt,
+    IReadOnlyList<CafeteriaHoldLineDto> Lines);
+
 public record CafeteriaSaleLineAddOnDto(
     Guid Id,
     Guid AddOnId,
