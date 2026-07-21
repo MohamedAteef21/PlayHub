@@ -5,7 +5,7 @@ import { ApiError, cafeteriaApi, sessionsApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import type { CafeteriaAddOn, CafeteriaItem, CafeteriaItemVariant, MissingIngredient } from '@/types';
+import type { CafeteriaAddOn, CafeteriaHold, CafeteriaItem, CafeteriaItemVariant, MissingIngredient } from '@/types';
 import { CafeteriaItemKind, PaymentMethod } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -28,7 +28,7 @@ interface CartLine {
   addOns: CartAddOn[];
 }
 
-type SaleMode = 'walkin' | 'session';
+type SaleMode = 'walkin' | 'session' | 'waiting';
 
 function cartKey(itemId: string, variantId: string) {
   return `${itemId}:${variantId}`;
@@ -68,6 +68,10 @@ export function CafeteriaPage() {
   const [paymentMethod, setPaymentMethod] = useState<number>(PaymentMethod.Cash);
   const [debtorName, setDebtorName] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [guestName, setGuestName] = useState('');
+  const [holdConvertId, setHoldConvertId] = useState<string | null>(null);
+  const [holdAttachId, setHoldAttachId] = useState<string | null>(null);
+  const [holdAttachSessionId, setHoldAttachSessionId] = useState('');
   const [error, setError] = useState('');
   const [pickItem, setPickItem] = useState<CafeteriaItem | null>(null);
   const [pickVariantId, setPickVariantId] = useState('');
@@ -92,6 +96,14 @@ export function CafeteriaPage() {
   const { data: activeSessions = [] } = useQuery({
     queryKey: ['sessions', 'active', user?.id, activeBranchId],
     queryFn: sessionsApi.getActive,
+    enabled: canSell,
+    refetchInterval: 15000,
+    meta: { silent: true },
+  });
+
+  const { data: openHolds = [] } = useQuery({
+    queryKey: ['cafeteria-holds', 'open', user?.id, activeBranchId],
+    queryFn: cafeteriaApi.getOpenHolds,
     enabled: canSell,
     refetchInterval: 15000,
     meta: { silent: true },
@@ -212,6 +224,19 @@ export function CafeteriaPage() {
   }
 
   async function executeSale(allowSkip = false) {
+    if (saleMode === 'waiting') {
+      await cafeteriaApi.createHold(
+        cart.map((l) => ({
+          cafeteriaItemId: l.item.id,
+          variantId: l.variant.id,
+          quantity: l.quantity,
+          stockDeductQuantity: l.stockDeduct,
+          addOns: l.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
+        })),
+        { guestName: guestName.trim() || undefined, allowSkipMissingIngredients: allowSkip }
+      );
+      return;
+    }
     if (saleMode === 'session') {
       if (!sessionId) throw new Error(t('cafeteria.selectSession'));
       for (const line of cart) {
@@ -252,10 +277,12 @@ export function CafeteriaPage() {
       setCheckoutOpen(false);
       setDebtorName('');
       setCustomerName('');
+      setGuestName('');
       setPaymentMethod(PaymentMethod.Cash);
       setMissingDialog(null);
       queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-holds'] });
     },
     onError: (e: unknown) => {
       const missing = parseMissingIngredients(e);
@@ -268,16 +295,59 @@ export function CafeteriaPage() {
             setCheckoutOpen(false);
             setDebtorName('');
             setCustomerName('');
+            setGuestName('');
             setPaymentMethod(PaymentMethod.Cash);
             setMissingDialog(null);
             queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
             queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            queryClient.invalidateQueries({ queryKey: ['cafeteria-holds'] });
           },
         });
         return;
       }
       setError(e instanceof Error ? e.message : t('common.error'));
     },
+  });
+
+  const convertHoldMutation = useMutation({
+    mutationFn: (holdId: string) =>
+      cafeteriaApi.convertHoldToSale(
+        holdId,
+        {
+          paymentMethod,
+          debtorName: paymentMethod === PaymentMethod.Deferred ? debtorName : undefined,
+        },
+        customerName.trim() || undefined
+      ),
+    onSuccess: () => {
+      setHoldConvertId(null);
+      setDebtorName('');
+      setCustomerName('');
+      setPaymentMethod(PaymentMethod.Cash);
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-holds'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const attachHoldMutation = useMutation({
+    mutationFn: ({ holdId, sessionId }: { holdId: string; sessionId: string }) =>
+      cafeteriaApi.attachHoldToSession(holdId, sessionId),
+    onSuccess: () => {
+      setHoldAttachId(null);
+      setHoldAttachSessionId('');
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-holds'] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const cancelHoldMutation = useMutation({
+    mutationFn: (holdId: string) => cafeteriaApi.cancelHold(holdId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-holds'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    },
+    onError: (e: Error) => setError(e.message),
   });
 
   if (isLoading) {
@@ -308,7 +378,18 @@ export function CafeteriaPage() {
           <Icon name="gaming" className="h-3.5 w-3.5" />
           {t('cafeteria.chargeToSession')}
         </Button>
+        <Button
+          size="sm"
+          variant={saleMode === 'waiting' ? 'primary' : 'secondary'}
+          onClick={() => setSaleMode('waiting')}
+        >
+          {t('cafeteria.waitingList')}
+        </Button>
       </div>
+
+      {saleMode === 'waiting' && (
+        <p className="mb-4 text-sm text-muted">{t('cafeteria.waitingHint')}</p>
+      )}
 
       {saleMode === 'session' && (
         <div className="mb-4 max-w-md">
@@ -329,6 +410,70 @@ export function CafeteriaPage() {
             <p className="mt-1 text-xs text-warning">{t('cafeteria.noOpenSessions')}</p>
           )}
         </div>
+      )}
+
+      {saleMode === 'waiting' && (
+        <Card className="mb-4 space-y-3">
+          <p className="text-sm font-semibold">{t('cafeteria.openHolds')}</p>
+          {openHolds.length === 0 ? (
+            <p className="text-sm text-muted">{t('cafeteria.noOpenHolds')}</p>
+          ) : (
+            <div className="space-y-2">
+              {openHolds.map((hold: CafeteriaHold) => (
+                <div
+                  key={hold.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {hold.guestName || hold.customerName || t('cafeteria.guestNameOptional')}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {formatCurrency(hold.totalAmount)} · {new Date(hold.createdAt).toLocaleTimeString()}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setHoldAttachId(hold.id);
+                        setHoldAttachSessionId(activeSessions[0]?.id ?? '');
+                        setError('');
+                      }}
+                    >
+                      {t('cafeteria.attachToSession')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setHoldConvertId(hold.id);
+                        setCustomerName(hold.guestName || hold.customerName || '');
+                        setPaymentMethod(PaymentMethod.Cash);
+                        setDebtorName('');
+                        setError('');
+                      }}
+                    >
+                      {t('cafeteria.convertToWalkIn')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={cancelHoldMutation.isPending}
+                      onClick={() => {
+                        if (window.confirm(t('common.confirmDelete'))) {
+                          cancelHoldMutation.mutate(hold.id);
+                        }
+                      }}
+                    >
+                      {t('cafeteria.cancelHold')}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
       )}
 
       {error && <p className="mb-3 text-sm text-danger">{error}</p>}
@@ -412,7 +557,7 @@ export function CafeteriaPage() {
                 <span className="font-semibold">{formatCurrency(cartTotal)}</span>
               </div>
               <Button className="w-full" disabled={!canSell} onClick={() => setCheckoutOpen(true)}>
-                {t('cafeteria.checkout')}
+                {saleMode === 'waiting' ? t('cafeteria.createHold') : t('cafeteria.checkout')}
               </Button>
             </div>
           )}
@@ -502,13 +647,22 @@ export function CafeteriaPage() {
         )}
       </Modal>
 
-      <Modal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} title={t('cafeteria.checkout')}>
+      <Modal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} title={saleMode === 'waiting' ? t('cafeteria.createHold') : t('cafeteria.checkout')}>
         <div className="space-y-3">
-          <Input
-            label={t('cafeteria.customerName')}
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-          />
+          {saleMode === 'waiting' ? (
+            <Input
+              label={t('cafeteria.guestName')}
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              placeholder={t('cafeteria.guestNameOptional')}
+            />
+          ) : (
+            <Input
+              label={t('cafeteria.customerName')}
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+            />
+          )}
           {saleMode === 'walkin' && (
             <>
               <label className="mb-1 block text-sm text-muted">{t('common.paymentMethod')}</label>
@@ -538,6 +692,88 @@ export function CafeteriaPage() {
               {t('common.cancel')}
             </Button>
             <Button loading={saleMutation.isPending} onClick={() => saleMutation.mutate()}>
+              {saleMode === 'waiting' ? t('cafeteria.createHold') : t('common.confirm')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!holdConvertId}
+        onClose={() => setHoldConvertId(null)}
+        title={t('cafeteria.convertToWalkIn')}
+      >
+        <div className="space-y-3">
+          <Input
+            label={t('cafeteria.customerName')}
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+          />
+          <label className="mb-1 block text-sm text-muted">{t('common.paymentMethod')}</label>
+          <select
+            className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            value={paymentMethod}
+            onChange={(e) => setPaymentMethod(Number(e.target.value))}
+          >
+            <option value={PaymentMethod.Cash}>{t('payment.cash')}</option>
+            <option value={PaymentMethod.BankTransfer}>{t('payment.transfer')}</option>
+            <option value={PaymentMethod.DigitalWallet}>{t('payment.wallet')}</option>
+            <option value={PaymentMethod.Deferred}>{t('payment.deferred')}</option>
+          </select>
+          {paymentMethod === PaymentMethod.Deferred && (
+            <Input
+              label={t('cafeteria.debtorName')}
+              value={debtorName}
+              onChange={(e) => setDebtorName(e.target.value)}
+            />
+          )}
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setHoldConvertId(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              loading={convertHoldMutation.isPending}
+              onClick={() => holdConvertId && convertHoldMutation.mutate(holdConvertId)}
+            >
+              {t('common.confirm')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!holdAttachId}
+        onClose={() => setHoldAttachId(null)}
+        title={t('cafeteria.attachToSession')}
+      >
+        <div className="space-y-3">
+          <label className="mb-1 block text-sm text-muted">{t('cafeteria.openSession')}</label>
+          <select
+            className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            value={holdAttachSessionId}
+            onChange={(e) => setHoldAttachSessionId(e.target.value)}
+          >
+            <option value="">{t('cafeteria.selectSession')}</option>
+            {activeSessions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.deviceName} · {s.roomName} ({formatCurrency(s.totalCost)})
+              </option>
+            ))}
+          </select>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setHoldAttachId(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              loading={attachHoldMutation.isPending}
+              disabled={!holdAttachSessionId}
+              onClick={() =>
+                holdAttachId &&
+                attachHoldMutation.mutate({ holdId: holdAttachId, sessionId: holdAttachSessionId })
+              }
+            >
               {t('common.confirm')}
             </Button>
           </div>

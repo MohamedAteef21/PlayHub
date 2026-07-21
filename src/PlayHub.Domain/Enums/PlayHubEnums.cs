@@ -85,6 +85,15 @@ public enum CafeteriaSaleStatus : short
     FullyReturned = 3
 }
 
+/// <summary>Waiting-list / held cafeteria tab before attaching to a session or converting to walk-in.</summary>
+public enum CafeteriaHoldStatus : short
+{
+    Open = 1,
+    AttachedToSession = 2,
+    ConvertedToSale = 3,
+    Cancelled = 4
+}
+
 /// <summary>
 /// Warehouse = ingredients/packaged stock.
 /// Menu = sold via variants (recipe deducts ingredients).

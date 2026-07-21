@@ -78,6 +78,10 @@ public class PlayHubDbContext : DbContext
     public DbSet<CafeteriaSale> CafeteriaSales => Set<CafeteriaSale>();
     public DbSet<CafeteriaSaleLine> CafeteriaSaleLines => Set<CafeteriaSaleLine>();
     public DbSet<CafeteriaReturn> CafeteriaReturns => Set<CafeteriaReturn>();
+    public DbSet<CafeteriaHold> CafeteriaHolds => Set<CafeteriaHold>();
+    public DbSet<CafeteriaHoldLine> CafeteriaHoldLines => Set<CafeteriaHoldLine>();
+    public DbSet<CafeteriaHoldLineAddOn> CafeteriaHoldLineAddOns => Set<CafeteriaHoldLineAddOn>();
+    public DbSet<CafeteriaHoldLineIngredientDeduct> CafeteriaHoldLineIngredientDeducts => Set<CafeteriaHoldLineIngredientDeduct>();
     public DbSet<InventoryMovement> InventoryMovements => Set<InventoryMovement>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -318,6 +322,14 @@ public class PlayHubDbContext : DbContext
                  && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<CafeteriaSale>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
+
+        modelBuilder.Entity<CafeteriaHold>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)

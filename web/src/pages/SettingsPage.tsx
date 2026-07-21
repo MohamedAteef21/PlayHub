@@ -142,7 +142,7 @@ export function SettingsPage() {
   const { data: alertSettings } = useQuery({
     queryKey: ['alert-settings', user?.id],
     queryFn: alertsApi.getSettings,
-    enabled: isMaster && tab === 'alerts',
+    enabled: isMaster,
   });
 
   const { data: openMaintenance = [] } = useQuery({
@@ -656,7 +656,7 @@ export function SettingsPage() {
     { id: 'rooms', label: t('settings.rooms'), icon: 'room' },
     { id: 'devices', label: t('settings.devices'), icon: 'gaming' },
     { id: 'pricing', label: t('settings.pricing'), icon: 'pricing' },
-    ...(isMaster
+    ...(isMaster && alertSettings && alertSettings.allowedChannels !== NotificationChannel.None
       ? [{ id: 'alerts' as const, label: t('settings.alerts'), icon: 'mail' as const }]
       : []),
     ...(canManageAssets
@@ -1224,31 +1224,29 @@ export function SettingsPage() {
         </section>
       )}
 
-      {tab === 'alerts' && isMaster && (
+      {tab === 'alerts' && isMaster && alertSettings && alertSettings.allowedChannels !== NotificationChannel.None && (
         <section className="space-y-4">
           <p className="max-w-2xl text-sm text-muted">{t('settings.alertsHint')}</p>
-          {alertSettings && (
-            <p className="text-xs text-muted">
-              {t('settings.allowedChannelsNote')}{' '}
-              {(alertSettings.allowedChannels & NotificationChannel.WhatsApp) !== 0
-                ? t('users.channelEmailWhatsApp')
-                : t('users.channelEmailOnly')}
-            </p>
-          )}
           <Card className="max-w-2xl space-y-3">
-            <Input label={t('settings.smtpHost')} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
-            <Input label={t('settings.smtpPort')} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
-            <Input label={t('settings.smtpUsername')} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} placeholder="venue@gmail.com" />
-            <Input
-              label={t('settings.smtpPassword')}
-              type="password"
-              value={smtpPassword}
-              onChange={(e) => setSmtpPassword(e.target.value)}
-              placeholder={alertSettings?.hasSmtpPassword ? t('settings.smtpPasswordKeep') : ''}
-            />
-            <Input label={t('settings.senderDisplayName')} value={senderDisplayName} onChange={(e) => setSenderDisplayName(e.target.value)} />
-            <Input label={t('settings.alertRecipientEmail')} value={alertRecipientEmail} onChange={(e) => setAlertRecipientEmail(e.target.value)} />
-            <Input label={t('settings.ownerWhatsAppPhone')} value={ownerWhatsAppPhone} onChange={(e) => setOwnerWhatsAppPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+            {(alertSettings.allowedChannels & NotificationChannel.Email) !== 0 && (
+              <>
+                <Input label={t('settings.smtpHost')} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                <Input label={t('settings.smtpPort')} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                <Input label={t('settings.smtpUsername')} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} placeholder="venue@gmail.com" />
+                <Input
+                  label={t('settings.smtpPassword')}
+                  type="password"
+                  value={smtpPassword}
+                  onChange={(e) => setSmtpPassword(e.target.value)}
+                  placeholder={alertSettings?.hasSmtpPassword ? t('settings.smtpPasswordKeep') : ''}
+                />
+                <Input label={t('settings.senderDisplayName')} value={senderDisplayName} onChange={(e) => setSenderDisplayName(e.target.value)} />
+                <Input label={t('settings.alertRecipientEmail')} value={alertRecipientEmail} onChange={(e) => setAlertRecipientEmail(e.target.value)} />
+              </>
+            )}
+            {(alertSettings.allowedChannels & NotificationChannel.WhatsApp) !== 0 && (
+              <Input label={t('settings.ownerWhatsAppPhone')} value={ownerWhatsAppPhone} onChange={(e) => setOwnerWhatsAppPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={notifyLowStock} onChange={(e) => setNotifyLowStock(e.target.checked)} />
               {t('settings.notifyLowStock')}
@@ -1274,17 +1272,19 @@ export function SettingsPage() {
               >
                 {t('settings.saveAlerts')}
               </Button>
-              <Button
-                variant="secondary"
-                loading={testEmailMutation.isPending}
-                onClick={() => {
-                  setError('');
-                  setAlertsMsg('');
-                  testEmailMutation.mutate();
-                }}
-              >
-                {t('settings.testEmail')}
-              </Button>
+              {(alertSettings.allowedChannels & NotificationChannel.Email) !== 0 && (
+                <Button
+                  variant="secondary"
+                  loading={testEmailMutation.isPending}
+                  onClick={() => {
+                    setError('');
+                    setAlertsMsg('');
+                    testEmailMutation.mutate();
+                  }}
+                >
+                  {t('settings.testEmail')}
+                </Button>
+              )}
             </div>
           </Card>
         </section>

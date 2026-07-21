@@ -434,6 +434,343 @@ public class CafeteriaService : ICafeteriaService
         return MapSale(sale);
     }
 
+    public async Task<IReadOnlyList<CafeteriaHoldDto>> GetOpenHoldsAsync(CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var holds = await _db.CafeteriaHolds
+            .Include(h => h.Lines).ThenInclude(l => l.CafeteriaItem)
+            .Include(h => h.Lines).ThenInclude(l => l.AddOns)
+            .Include(h => h.CreatedByUser)
+            .Include(h => h.Customer)
+            .Where(h => h.BranchId == branchId && h.Status == CafeteriaHoldStatus.Open)
+            .OrderByDescending(h => h.CreatedAt)
+            .ToListAsync(ct);
+
+        return holds.Select(MapHold).ToList();
+    }
+
+    public async Task<CafeteriaHoldDto> CreateHoldAsync(CreateCafeteriaHoldRequest request, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        if (request.Lines is null || request.Lines.Count == 0)
+            throw new InvalidOperationException("At least one hold line is required.");
+
+        Customer? customer = null;
+        if (request.CustomerId.HasValue)
+        {
+            customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId.Value && c.IsActive, ct)
+                ?? throw new KeyNotFoundException("Customer not found.");
+        }
+
+        var hold = new CafeteriaHold
+        {
+            TenantId = _tenantContext.TenantId,
+            BranchId = branchId,
+            GuestName = string.IsNullOrWhiteSpace(request.GuestName) ? null : request.GuestName.Trim(),
+            CustomerId = customer?.Id,
+            Status = CafeteriaHoldStatus.Open,
+            CreatedByUserId = _tenantContext.UserId
+        };
+
+        decimal total = 0;
+        var touched = new HashSet<Guid>();
+
+        foreach (var line in request.Lines)
+        {
+            var plan = await CafeteriaStockPlanner.PlanAsync(
+                _db, branchId, line.CafeteriaItemId, line.VariantId, line.Quantity,
+                line.StockDeductQuantity, line.Unit, line.AddOns, request.AllowSkipMissingIngredients, ct);
+
+            var holdLine = new CafeteriaHoldLine
+            {
+                CafeteriaItemId = plan.Item.Id,
+                VariantId = plan.Variant.Id,
+                VariantName = plan.Variant.Name,
+                Quantity = plan.Quantity,
+                StockDeductQuantity = plan.ParentStockDeduct,
+                UnitPrice = plan.UnitPrice,
+                LineTotal = plan.LineTotal
+            };
+
+            foreach (var a in plan.AddOns)
+            {
+                holdLine.AddOns.Add(new CafeteriaHoldLineAddOn
+                {
+                    AddOnId = a.AddOn.Id,
+                    Name = a.AddOn.Name,
+                    Quantity = a.Quantity,
+                    UnitPrice = a.AddOn.SellPrice,
+                    LineTotal = a.LineTotal,
+                    StockDeductQuantity = a.StockDeduct
+                });
+            }
+
+            hold.Lines.Add(holdLine);
+            total += plan.LineTotal;
+
+            CafeteriaStockPlanner.ApplyDeducts(
+                _db, _tenantContext, branchId, plan, "CafeteriaHold", hold.Id,
+                trackHoldIngredient: d => holdLine.IngredientDeducts.Add(d),
+                holdMode: true);
+
+            touched.Add(plan.Item.Id);
+            foreach (var ing in plan.Ingredients)
+                touched.Add(ing.WarehouseItem.Id);
+        }
+
+        hold.TotalAmount = total;
+        _db.CafeteriaHolds.Add(hold);
+        await _db.SaveChangesAsync(ct);
+
+        foreach (var itemId in touched)
+        {
+            var item = await _db.CafeteriaItems.FirstOrDefaultAsync(i => i.Id == itemId, ct);
+            if (item is not null)
+                await _lowStock.CheckAndNotifyAsync(item, ct);
+        }
+
+        await _audit.LogAsync("CafeteriaHold.Created", "CafeteriaHold", hold.Id,
+            new { total, LineCount = request.Lines.Count, hold.GuestName }, ct: ct);
+        await _db.SaveChangesAsync(ct);
+
+        await LoadHoldGraphAsync(hold, ct);
+        return MapHold(hold);
+    }
+
+    public async Task<CafeteriaHoldDto> AttachToSessionAsync(Guid holdId, AttachHoldToSessionRequest request, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        var hold = await _db.CafeteriaHolds
+            .Include(h => h.Lines).ThenInclude(l => l.CafeteriaItem)
+            .Include(h => h.Lines).ThenInclude(l => l.AddOns)
+            .Include(h => h.CreatedByUser)
+            .Include(h => h.Customer)
+            .FirstOrDefaultAsync(h => h.Id == holdId && h.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Cafeteria hold not found.");
+
+        if (hold.Status != CafeteriaHoldStatus.Open)
+            throw new InvalidOperationException("Only open holds can be attached to a session.");
+
+        var session = await _db.Sessions
+            .Include(s => s.CafeteriaLines)
+            .FirstOrDefaultAsync(s => s.Id == request.SessionId && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
+            ?? throw new KeyNotFoundException("Active session not found.");
+
+        var customerLabel = hold.GuestName ?? hold.Customer?.Name;
+
+        foreach (var hl in hold.Lines)
+        {
+            var line = new SessionCafeteriaLine
+            {
+                CafeteriaItemId = hl.CafeteriaItemId,
+                VariantId = hl.VariantId,
+                VariantName = hl.VariantName,
+                Quantity = hl.Quantity,
+                StockDeductQuantity = 0,
+                UnitPrice = hl.UnitPrice,
+                LineTotal = hl.LineTotal,
+                CustomerName = customerLabel,
+                AddedByUserId = _tenantContext.UserId
+            };
+
+            foreach (var a in hl.AddOns)
+            {
+                line.AddOns.Add(new SessionCafeteriaLineAddOn
+                {
+                    AddOnId = a.AddOnId,
+                    Name = a.Name,
+                    Quantity = a.Quantity,
+                    UnitPrice = a.UnitPrice,
+                    LineTotal = a.LineTotal,
+                    StockDeductQuantity = 0
+                });
+            }
+
+            session.CafeteriaLines.Add(line);
+        }
+
+        hold.Status = CafeteriaHoldStatus.AttachedToSession;
+        hold.AttachedSessionId = session.Id;
+        hold.FinalizedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("CafeteriaHold.AttachedToSession", "CafeteriaHold", hold.Id,
+            new { SessionId = session.Id, hold.TotalAmount }, ct: ct);
+
+        return MapHold(hold);
+    }
+
+    public async Task<CafeteriaSaleDto> ConvertToSaleAsync(Guid holdId, ConvertHoldToSaleRequest request, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        var hold = await _db.CafeteriaHolds
+            .Include(h => h.Lines).ThenInclude(l => l.CafeteriaItem)
+            .Include(h => h.Lines).ThenInclude(l => l.AddOns)
+            .Include(h => h.Lines).ThenInclude(l => l.IngredientDeducts)
+            .Include(h => h.Customer)
+            .FirstOrDefaultAsync(h => h.Id == holdId && h.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Cafeteria hold not found.");
+
+        if (hold.Status != CafeteriaHoldStatus.Open)
+            throw new InvalidOperationException("Only open holds can be converted to a sale.");
+
+        var customerName = string.IsNullOrWhiteSpace(request.CustomerName)
+            ? hold.GuestName ?? hold.Customer?.Name
+            : request.CustomerName.Trim();
+
+        var sale = new CafeteriaSale
+        {
+            TenantId = _tenantContext.TenantId,
+            BranchId = branchId,
+            SoldByUserId = _tenantContext.UserId,
+            CustomerName = customerName,
+            SoldAt = DateTime.UtcNow,
+            TotalAmount = hold.TotalAmount
+        };
+
+        foreach (var hl in hold.Lines)
+        {
+            var saleLine = new CafeteriaSaleLine
+            {
+                CafeteriaItemId = hl.CafeteriaItemId,
+                VariantId = hl.VariantId,
+                VariantName = hl.VariantName,
+                Quantity = hl.Quantity,
+                StockDeductQuantity = hl.StockDeductQuantity,
+                UnitPrice = hl.UnitPrice,
+                LineTotal = hl.LineTotal
+            };
+
+            foreach (var a in hl.AddOns)
+            {
+                saleLine.AddOns.Add(new CafeteriaSaleLineAddOn
+                {
+                    AddOnId = a.AddOnId,
+                    Name = a.Name,
+                    Quantity = a.Quantity,
+                    UnitPrice = a.UnitPrice,
+                    LineTotal = a.LineTotal,
+                    StockDeductQuantity = a.StockDeductQuantity
+                });
+            }
+
+            foreach (var d in hl.IngredientDeducts)
+            {
+                saleLine.IngredientDeducts.Add(new CafeteriaSaleLineIngredientDeduct
+                {
+                    WarehouseItemId = d.WarehouseItemId,
+                    Quantity = d.Quantity,
+                    WasSkipped = d.WasSkipped
+                });
+            }
+
+            sale.Lines.Add(saleLine);
+        }
+
+        _db.CafeteriaSales.Add(sale);
+
+        var payment = request.Payment with
+        {
+            CustomerId = request.Payment.CustomerId ?? hold.CustomerId
+        };
+
+        var invoice = await _billing.CreateInvoiceAsync(
+            branchId, InvoiceType.Cafeteria, null, sale.Id, hold.TotalAmount, payment, RevenueType.Cafeteria, ct);
+        sale.Invoice = invoice;
+
+        hold.Status = CafeteriaHoldStatus.ConvertedToSale;
+        hold.ConvertedSaleId = sale.Id;
+        hold.FinalizedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("CafeteriaHold.ConvertedToSale", "CafeteriaHold", hold.Id,
+            new { SaleId = sale.Id, hold.TotalAmount }, ct: ct);
+
+        await _db.Entry(sale).Reference(s => s.SoldByUser).LoadAsync(ct);
+        await _db.Entry(sale).Collection(s => s.Lines).Query()
+            .Include(l => l.CafeteriaItem)
+            .Include(l => l.AddOns)
+            .LoadAsync(ct);
+        await _db.Entry(sale).Reference(s => s.Invoice).Query().Include(i => i!.Payments).LoadAsync(ct);
+
+        return MapSale(sale);
+    }
+
+    public async Task<CafeteriaHoldDto> CancelHoldAsync(Guid holdId, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        var hold = await _db.CafeteriaHolds
+            .Include(h => h.Lines).ThenInclude(l => l.CafeteriaItem)
+            .Include(h => h.Lines).ThenInclude(l => l.AddOns)
+            .Include(h => h.Lines).ThenInclude(l => l.IngredientDeducts).ThenInclude(d => d.WarehouseItem)
+            .Include(h => h.CreatedByUser)
+            .Include(h => h.Customer)
+            .FirstOrDefaultAsync(h => h.Id == holdId && h.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Cafeteria hold not found.");
+
+        if (hold.Status != CafeteriaHoldStatus.Open)
+            throw new InvalidOperationException("Only open holds can be cancelled.");
+
+        foreach (var line in hold.Lines)
+        {
+            if (line.StockDeductQuantity > 0)
+            {
+                line.CafeteriaItem.CurrentQuantity += line.StockDeductQuantity;
+                _db.InventoryMovements.Add(new InventoryMovement
+                {
+                    TenantId = _tenantContext.TenantId,
+                    BranchId = branchId,
+                    CafeteriaItemId = line.CafeteriaItemId,
+                    MovementType = InventoryMovementType.Return,
+                    QuantityChange = line.StockDeductQuantity,
+                    ReferenceType = "CafeteriaHoldCancel",
+                    ReferenceId = hold.Id,
+                    Notes = "Hold cancelled — stock restored",
+                    PerformedByUserId = _tenantContext.UserId
+                });
+            }
+
+            foreach (var ded in line.IngredientDeducts.Where(d => !d.WasSkipped && d.Quantity > 0))
+            {
+                ded.WarehouseItem.CurrentQuantity += ded.Quantity;
+                _db.InventoryMovements.Add(new InventoryMovement
+                {
+                    TenantId = _tenantContext.TenantId,
+                    BranchId = branchId,
+                    CafeteriaItemId = ded.WarehouseItemId,
+                    MovementType = InventoryMovementType.Return,
+                    QuantityChange = ded.Quantity,
+                    ReferenceType = "CafeteriaHoldCancel",
+                    ReferenceId = hold.Id,
+                    Notes = "Hold cancelled — ingredient restored",
+                    PerformedByUserId = _tenantContext.UserId
+                });
+            }
+        }
+
+        hold.Status = CafeteriaHoldStatus.Cancelled;
+        hold.FinalizedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        foreach (var line in hold.Lines)
+        {
+            await _lowStock.CheckAndNotifyAsync(line.CafeteriaItem, ct);
+            foreach (var ded in line.IngredientDeducts.Where(d => !d.WasSkipped))
+                await _lowStock.CheckAndNotifyAsync(ded.WarehouseItem, ct);
+        }
+
+        await _audit.LogAsync("CafeteriaHold.Cancelled", "CafeteriaHold", hold.Id,
+            new { hold.TotalAmount, LineCount = hold.Lines.Count }, ct: ct);
+        await _db.SaveChangesAsync(ct);
+
+        return MapHold(hold);
+    }
+
     public Task<CafeteriaReturnDto> ReturnItemAsync(Guid saleId, ReturnCafeteriaItemRequest request, CancellationToken ct = default)
     {
         _ = saleId;
@@ -622,6 +959,45 @@ public class CafeteriaService : ICafeteriaService
             a.WarehouseItem?.CurrentQuantity ?? 0,
             a.IsActive,
             a.CreatedAt);
+
+    private async Task LoadHoldGraphAsync(CafeteriaHold hold, CancellationToken ct)
+    {
+        await _db.Entry(hold).Reference(h => h.CreatedByUser).LoadAsync(ct);
+        await _db.Entry(hold).Reference(h => h.Customer).LoadAsync(ct);
+        await _db.Entry(hold).Collection(h => h.Lines).Query()
+            .Include(l => l.CafeteriaItem)
+            .Include(l => l.AddOns)
+            .LoadAsync(ct);
+    }
+
+    private static CafeteriaHoldDto MapHold(CafeteriaHold h) =>
+        new(
+            h.Id,
+            h.BranchId,
+            h.GuestName,
+            h.CustomerId,
+            h.Customer?.Name,
+            h.Status,
+            h.TotalAmount,
+            h.CreatedAt,
+            h.CreatedByUser.FullName,
+            h.AttachedSessionId,
+            h.ConvertedSaleId,
+            h.FinalizedAt,
+            h.Lines.Select(l => new CafeteriaHoldLineDto(
+                l.Id,
+                l.CafeteriaItemId,
+                l.VariantName is null ? l.CafeteriaItem.Name : $"{l.CafeteriaItem.Name} — {l.VariantName}",
+                l.VariantId,
+                l.VariantName,
+                l.Quantity,
+                l.StockDeductQuantity,
+                l.UnitPrice,
+                l.LineTotal,
+                (l.AddOns ?? [])
+                    .Select(a => new CafeteriaHoldLineAddOnDto(
+                        a.Id, a.AddOnId, a.Name, a.Quantity, a.UnitPrice, a.LineTotal, a.StockDeductQuantity))
+                    .ToList())).ToList());
 
     private static CafeteriaSaleDto MapSale(CafeteriaSale s)
     {

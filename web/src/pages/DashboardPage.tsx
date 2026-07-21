@@ -654,6 +654,10 @@ export function DashboardPage() {
 
   async function submitCafeteriaToSession(allowSkip = false) {
     if (!cafSession) return;
+    const sessionCustomerName =
+      cafSession.customerName?.trim() ||
+      cafSession.quickGuestName?.trim() ||
+      undefined;
     let last: SessionLive | null = null;
     for (const line of cafCart) {
       last = await sessionsApi.addCafeteria(
@@ -662,7 +666,7 @@ export function DashboardPage() {
         line.variantId,
         line.quantity,
         line.stockDeduct,
-        cafCustomerName.trim() || undefined,
+        sessionCustomerName || cafCustomerName.trim() || undefined,
         line.addOns.map((a) => ({ addOnId: a.addOnId, quantity: a.quantity })),
         allowSkip
       );
@@ -1298,6 +1302,14 @@ export function DashboardPage() {
                 }}
                 placeholder={t('session.searchCustomerPlaceholder')}
               />
+              {selectedCustomer && (selectedCustomer.outstandingDebtAmount ?? 0) > 0 && (
+                <div className="rounded-lg border border-warning/40 bg-warning/15 px-3 py-2 text-sm text-warning">
+                  {t('dashboard.outstandingDebtWarning', {
+                    count: selectedCustomer.outstandingDebtCount ?? 0,
+                    amount: formatCurrency(selectedCustomer.outstandingDebtAmount ?? 0),
+                  })}
+                </div>
+              )}
               {selectedCustomer ? (
                 <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm">
                   <span className="font-medium">{selectedCustomer.name}</span>
@@ -1646,12 +1658,17 @@ export function DashboardPage() {
               {t('cafeteria.chargeToSession')}
             </p>
           )}
-          <Input
-            label={t('cafeteria.customerName')}
-            value={cafCustomerName}
-            onChange={(e) => setCafCustomerName(e.target.value)}
-            placeholder={t('cafeteria.customerNameOptional')}
-          />
+          {cafSession &&
+            !cafSession.customerId &&
+            !cafSession.customerName &&
+            !cafSession.quickGuestName && (
+            <Input
+              label={t('cafeteria.customerName')}
+              value={cafCustomerName}
+              onChange={(e) => setCafCustomerName(e.target.value)}
+              placeholder={t('cafeteria.customerNameOptional')}
+            />
+          )}
           {(() => {
             const activeItems = cafItems.filter((i: CafeteriaItem) => i.isActive);
             const query = cafSearch.trim().toLowerCase();

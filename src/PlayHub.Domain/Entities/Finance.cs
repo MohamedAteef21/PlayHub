@@ -38,11 +38,14 @@ public class InvoicePayment : BaseEntity
     public PaymentStatus Status { get; set; }
     public string? DebtorName { get; set; }
     public string? DebtorPhone { get; set; }
+    /// <summary>Registered customer linked when debt is from a session/customer (for open-session warnings).</summary>
+    public Guid? CustomerId { get; set; }
     public DateTime? CollectedAt { get; set; }
     public PaymentMethod? CollectionMethod { get; set; }
     public Guid? CollectedByUserId { get; set; }
 
     public Invoice Invoice { get; set; } = null!;
+    public Customer? Customer { get; set; }
     public User? CollectedByUser { get; set; }
     public PaymentProof? Proof { get; set; }
 }

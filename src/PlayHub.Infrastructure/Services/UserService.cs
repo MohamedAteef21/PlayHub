@@ -262,7 +262,7 @@ public class UserService : IUserService
         await _audit.LogAsync("User.SoftDeleted", "User", user.Id, new { user.Email, user.Role }, ct: ct);
     }
 
-    public async Task ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default)
+    public async Task<ResetPasswordResultDto> ResetPasswordAsync(Guid id, ResetPasswordRequest request, CancellationToken ct = default)
     {
         EnsureCanManageUsers();
 
@@ -276,9 +276,11 @@ public class UserService : IUserService
 
         EnsureCanAccessUser(user);
 
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        var newPassword = request.NewPassword;
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("User.PasswordReset", "User", user.Id, new { user.Email }, ct: ct);
+        return new ResetPasswordResultDto(newPassword);
     }
 
     private async Task AssignPermissionsAsync(User user, IReadOnlyList<string>? codes, CancellationToken ct)

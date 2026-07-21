@@ -518,6 +518,44 @@ export const cafeteriaApi = {
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
       }),
     }),
+  getOpenHolds: () => apiFetch<import('@/types').CafeteriaHold[]>('/cafeteria/holds'),
+  createHold: (
+    lines: {
+      cafeteriaItemId: string;
+      variantId: string;
+      quantity: number;
+      stockDeductQuantity?: number;
+      addOns?: { addOnId: string; quantity: number }[];
+    }[],
+    opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }
+  ) =>
+    apiFetch<import('@/types').CafeteriaHold>('/cafeteria/holds', {
+      method: 'POST',
+      body: JSON.stringify({
+        lines,
+        guestName: opts?.guestName,
+        customerId: opts?.customerId,
+        allowSkipMissingIngredients: opts?.allowSkipMissingIngredients || undefined,
+      }),
+    }),
+  attachHoldToSession: (holdId: string, sessionId: string) =>
+    apiFetch<import('@/types').CafeteriaHold>(`/cafeteria/holds/${holdId}/attach-session`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    }),
+  convertHoldToSale: (
+    holdId: string,
+    payment: import('@/types').PaymentRequest,
+    customerName?: string
+  ) =>
+    apiFetch<import('@/types').CafeteriaSale>(`/cafeteria/holds/${holdId}/convert-sale`, {
+      method: 'POST',
+      body: JSON.stringify({ payment, customerName: customerName || undefined }),
+    }),
+  cancelHold: (holdId: string) =>
+    apiFetch<import('@/types').CafeteriaHold>(`/cafeteria/holds/${holdId}/cancel`, {
+      method: 'POST',
+    }),
 };
 
 export const inventoryApi = {
@@ -701,7 +739,7 @@ export const usersApi = {
     }),
   delete: (id: string) => apiFetch<void>(`/users/${id}`, { method: 'DELETE' }),
   resetPassword: (id: string, newPassword: string) =>
-    apiFetch<void>(`/users/${id}/reset-password`, {
+    apiFetch<import('@/types').ResetPasswordResult>(`/users/${id}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ newPassword }),
     }),
