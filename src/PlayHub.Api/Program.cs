@@ -257,6 +257,9 @@ app.MapHub<BranchSessionHub>("/hubs/sessions");
 
 app.MapHangfireDashboard("/hangfire");
 
+// Serve the React SPA from wwwroot for non-API routes (production on MonsterASP).
+app.MapFallbackToFile("index.html");
+
 
 
 using (var scope = app.Services.CreateScope())
