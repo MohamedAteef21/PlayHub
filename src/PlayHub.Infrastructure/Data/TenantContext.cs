@@ -9,8 +9,13 @@ public partial class TenantContext
     public bool IsMaster { get; set; }
     public UserRole Role { get; set; } = UserRole.Staff;
     public Guid? BranchId { get; set; }
-    /// <summary>Branches this user may access (UserBranches + owned). Empty = no branch data for non-SuperAdmin.</summary>
+    /// <summary>Branches this user may access (owned for masters; assigned+owned for staff). Empty = no branch data for non-SuperAdmin.</summary>
     public List<Guid> AllowedBranchIds { get; set; } = [];
+    /// <summary>
+    /// Owner used by global catalog filters (VenueAssetType, ControllerType, …).
+    /// Null only for SuperAdmin with no branch selected (sees all masters' catalogs).
+    /// </summary>
+    public Guid? CatalogOwnerUserId { get; set; }
     public IReadOnlyList<string> Permissions { get; set; } = [];
 
     public bool IsSuperAdmin => Role == UserRole.SuperAdmin;

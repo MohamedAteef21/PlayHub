@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using PlayHub.Infrastructure.Data;
 
 namespace PlayHub.Api.Hubs;
 
@@ -11,7 +12,7 @@ public class BranchSessionHub : Hub
     public override async Task OnConnectedAsync()
     {
         var branchId = GetBranchIdFromContext();
-        if (branchId.HasValue)
+        if (branchId.HasValue && CanAccessBranch(branchId.Value))
             await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(branchId.Value));
 
         await base.OnConnectedAsync();
@@ -39,9 +40,13 @@ public class BranchSessionHub : Hub
 
     private bool CanAccessBranch(Guid branchId)
     {
-        if (Context.User?.HasClaim("is_master", "true") == true)
+        var tenant = Context.GetHttpContext()?.RequestServices.GetService(typeof(TenantContext)) as TenantContext;
+        if (tenant is null)
+            return false;
+
+        if (tenant.IsSuperAdmin)
             return true;
 
-        return Context.User?.FindAll("branch").Any(c => c.Value == branchId.ToString()) == true;
+        return tenant.AllowedBranchIds.Contains(branchId);
     }
 }
