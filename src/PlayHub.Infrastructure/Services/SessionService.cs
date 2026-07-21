@@ -171,6 +171,7 @@ public class SessionService : ISessionService
         };
 
         _db.Sessions.Add(session);
+        await ApplyEquipmentAllocationsAsync(session, request.Equipment, branchId, ct);
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Session.Opened", "Session", session.Id, new
         {
@@ -182,7 +183,8 @@ public class SessionService : ISessionService
             PlanName = plan.Name,
             session.CustomerId,
             session.IsQuickGuest,
-            session.QuickGuestName
+            session.QuickGuestName,
+            Equipment = request.Equipment
         }, ct: ct);
 
         await _db.Entry(session).Reference(s => s.Device).LoadAsync(ct);
@@ -191,6 +193,8 @@ public class SessionService : ISessionService
         await _db.Entry(session).Reference(s => s.OpenedByUser).LoadAsync(ct);
         if (session.CustomerId.HasValue)
             await _db.Entry(session).Reference(s => s.Customer).LoadAsync(ct);
+        await _db.Entry(session).Collection(s => s.EquipmentAllocations).Query()
+            .Include(a => a.BranchEquipment).LoadAsync(ct);
 
         var live = MapLive(session, billingRoundUp);
         await _notifier.NotifySessionUpdatedAsync(branchId, live, ct);
@@ -393,6 +397,7 @@ public class SessionService : ISessionService
             .Include(s => s.Device).ThenInclude(d => d.DeviceControllers)
             .Include(s => s.Device).ThenInclude(d => d.Room)
             .Include(s => s.Device).ThenInclude(d => d.Screens)
+            .Include(s => s.EquipmentAllocations).ThenInclude(a => a.BranchEquipment)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
@@ -455,6 +460,9 @@ public class SessionService : ISessionService
         session.TotalPausedSeconds = 0;
         session.PlannedDurationMinutes = null;
         session.Status = SessionStatus.Open;
+
+        if (request.Equipment is { Count: > 0 })
+            await ApplyEquipmentAllocationsAsync(session, request.Equipment, branchId, ct);
 
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Session.Converted", "Session", session.Id, new
@@ -870,6 +878,7 @@ public class SessionService : ISessionService
             .Include(s => s.Pauses)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.AddOns)
+            .Include(s => s.EquipmentAllocations).ThenInclude(a => a.BranchEquipment)
             .Where(s => s.BranchId == branchId && s.Status != SessionStatus.Closed);
 
     private async Task<Session> GetMutableActiveSessionAsync(Guid id, Guid branchId, CancellationToken ct)
@@ -877,6 +886,7 @@ public class SessionService : ISessionService
         var session = await _db.Sessions
             .Include(s => s.Pauses)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
+            .Include(s => s.EquipmentAllocations).ThenInclude(a => a.BranchEquipment)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
@@ -891,6 +901,67 @@ public class SessionService : ISessionService
         await _db.Entry(session).Reference(s => s.OpenedByUser).LoadAsync(ct);
         if (session.CustomerId.HasValue)
             await _db.Entry(session).Reference(s => s.Customer).LoadAsync(ct);
+        await _db.Entry(session).Collection(s => s.EquipmentAllocations).Query()
+            .Include(a => a.BranchEquipment).LoadAsync(ct);
+    }
+
+    /// <summary>
+    /// Allocate branch equipment to a session. Validates free stock (Total − Maintenance − InUse).
+    /// </summary>
+    private async Task ApplyEquipmentAllocationsAsync(
+        Session session,
+        IReadOnlyList<SessionEquipmentLineRequest>? lines,
+        Guid branchId,
+        CancellationToken ct)
+    {
+        if (lines is null || lines.Count == 0) return;
+
+        var grouped = lines
+            .Where(l => l.Quantity > 0)
+            .GroupBy(l => l.BranchEquipmentId)
+            .Select(g => new { Id = g.Key, Qty = g.Sum(x => x.Quantity) })
+            .ToList();
+
+        if (grouped.Count == 0) return;
+
+        var ids = grouped.Select(g => g.Id).ToList();
+        var equipment = await _db.BranchEquipments
+            .Where(e => e.BranchId == branchId && e.IsActive && ids.Contains(e.Id))
+            .ToListAsync(ct);
+
+        if (equipment.Count != ids.Count)
+            throw new KeyNotFoundException("One or more equipment items were not found for this branch.");
+
+        var inUseMap = await _db.SessionEquipmentAllocations
+            .Where(a => ids.Contains(a.BranchEquipmentId)
+                && a.Session.BranchId == branchId
+                && a.Session.Status != SessionStatus.Closed
+                && a.SessionId != session.Id)
+            .GroupBy(a => a.BranchEquipmentId)
+            .Select(g => new { Id = g.Key, Qty = g.Sum(x => x.Quantity) })
+            .ToDictionaryAsync(x => x.Id, x => x.Qty, ct);
+
+        // Existing allocations on this session (e.g. convert) count toward already-held stock.
+        var alreadyOnSession = session.EquipmentAllocations
+            .GroupBy(a => a.BranchEquipmentId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        foreach (var line in grouped)
+        {
+            var item = equipment.First(e => e.Id == line.Id);
+            var inUseElsewhere = inUseMap.GetValueOrDefault(line.Id);
+            var held = alreadyOnSession.GetValueOrDefault(line.Id);
+            var free = item.TotalQuantity - item.MaintenanceQuantity - inUseElsewhere - held;
+            if (line.Qty > free)
+                throw new InvalidOperationException(
+                    $"Not enough free '{item.Name}'. Free: {Math.Max(0, free)}, requested: {line.Qty}.");
+
+            session.EquipmentAllocations.Add(new SessionEquipmentAllocation
+            {
+                BranchEquipmentId = item.Id,
+                Quantity = line.Qty,
+            });
+        }
     }
 
     private async Task<bool> GetBillingRoundUpAsync(CancellationToken ct)
@@ -1027,7 +1098,14 @@ public class SessionService : ISessionService
             session.Customer?.Phone,
             session.IsQuickGuest,
             session.QuickGuestName,
-            session.CafeteriaLines.Select(MapCafeteriaLine).ToList());
+            session.CafeteriaLines.Select(MapCafeteriaLine).ToList(),
+            (session.EquipmentAllocations ?? [])
+                .Select(a => new SessionEquipmentAllocationDto(
+                    a.BranchEquipmentId,
+                    a.BranchEquipment?.Name ?? "—",
+                    (short)(a.BranchEquipment?.Kind ?? 0),
+                    a.Quantity))
+                .ToList());
     }
 
     private static SessionCafeteriaLineDto MapCafeteriaLine(SessionCafeteriaLine l) =>

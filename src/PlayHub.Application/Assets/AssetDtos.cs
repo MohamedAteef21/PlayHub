@@ -127,4 +127,30 @@ public record AssetDashboardDto(
     Guid BranchId,
     string BranchName,
     IReadOnlyList<AssetDashboardRoomDto> Rooms,
-    IReadOnlyList<AssetDashboardDeviceDto> UnassignedDevices);
+    IReadOnlyList<AssetDashboardDeviceDto> UnassignedDevices,
+    IReadOnlyList<BranchEquipmentDto> Equipment);
+
+public record BranchEquipmentDto(
+    Guid Id,
+    Guid BranchId,
+    string Name,
+    short Kind,
+    int TotalQuantity,
+    int MaintenanceQuantity,
+    int InUseQuantity,
+    int FreeQuantity,
+    bool IsActive,
+    DateTime CreatedAt);
+
+public record CreateBranchEquipmentRequest(
+    string Name,
+    short Kind,
+    int TotalQuantity,
+    int MaintenanceQuantity = 0);
+
+public record UpdateBranchEquipmentRequest(
+    string Name,
+    short Kind,
+    int TotalQuantity,
+    int MaintenanceQuantity,
+    bool IsActive);

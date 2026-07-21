@@ -16,6 +16,7 @@ import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
 import type {
   AssetDashboardDevice,
+  BranchEquipment,
   CafeteriaAddOn,
   CafeteriaItem,
   CafeteriaItemVariant,
@@ -25,7 +26,7 @@ import type {
   SessionDetail,
   SessionLive,
 } from '@/types';
-import { CafeteriaItemKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import { CafeteriaItemKind, EquipmentKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
 
 type CafCartAddOn = { addOnId: string; name: string; price: number; quantity: number };
 
@@ -285,6 +286,8 @@ export function DashboardPage() {
   const [durationHours, setDurationHours] = useState(2);
   const [controllerCount, setControllerCount] = useState(2);
   const [watcherCount, setWatcherCount] = useState(2);
+  const [equipmentQty, setEquipmentQty] = useState<Record<string, number>>({});
+  const [convertEquipmentQty, setConvertEquipmentQty] = useState<Record<string, number>>({});
   const [debtorName, setDebtorName] = useState('');
   const [discountAmount, setDiscountAmount] = useState('');
   const [discountReason, setDiscountReason] = useState('');
@@ -464,6 +467,78 @@ export function DashboardPage() {
     return `${p.name} (${unit}${watching}${rate != null ? ` · ${formatCurrency(rate)}` : ''}${pkg})`;
   }
 
+  const branchEquipment = dashboard?.equipment ?? [];
+
+  function buildEquipmentPayload(qtyMap: Record<string, number>) {
+    return Object.entries(qtyMap)
+      .filter(([, q]) => q > 0)
+      .map(([branchEquipmentId, quantity]) => ({ branchEquipmentId, quantity }));
+  }
+
+  function initEquipmentQty(items: BranchEquipment[], preferControllers?: number) {
+    const next: Record<string, number> = {};
+    for (const e of items.filter((x) => x.isActive)) {
+      if (e.kind === EquipmentKind.Controller && preferControllers != null) {
+        next[e.id] = Math.min(preferControllers, Math.max(0, e.freeQuantity));
+      } else {
+        next[e.id] = 0;
+      }
+    }
+    return next;
+  }
+
+  function syncControllerQty(
+    qtyMap: Record<string, number>,
+    items: BranchEquipment[],
+    controllers: number
+  ) {
+    const next = { ...qtyMap };
+    for (const e of items.filter((x) => x.isActive && x.kind === EquipmentKind.Controller)) {
+      next[e.id] = Math.min(controllers, Math.max(0, e.freeQuantity));
+    }
+    return next;
+  }
+
+  function EquipmentQtyFields({
+    items,
+    qtyMap,
+    onChange,
+  }: {
+    items: BranchEquipment[];
+    qtyMap: Record<string, number>;
+    onChange: (id: string, qty: number) => void;
+  }) {
+    const active = items.filter((e) => e.isActive);
+    if (active.length === 0) return null;
+    return (
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-sm font-medium">{t('dashboard.equipmentCheckout')}</p>
+        <p className="text-xs text-muted">{t('dashboard.equipmentCheckoutHint')}</p>
+        {active.map((e) => (
+          <div key={e.id} className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm">{e.name}</p>
+              <p className="text-xs text-muted">
+                {t('dashboard.equipmentFree')}: {e.freeQuantity}/{e.totalQuantity}
+              </p>
+            </div>
+            <Input
+              type="number"
+              min={0}
+              max={e.freeQuantity}
+              className="w-20"
+              value={String(qtyMap[e.id] ?? 0)}
+              onChange={(ev) => {
+                const n = Math.max(0, Math.min(e.freeQuantity, Number(ev.target.value) || 0));
+                onChange(e.id, n);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   async function handleOpen() {
     if (!openModal || !planId) return;
     setLoading(true);
@@ -474,6 +549,7 @@ export function DashboardPage() {
         bookingMode === 'fixed' &&
         plan?.timeUnit !== TimeUnit.PerGame &&
         !(plan?.sessionMode === SessionMode.Watching && plan.watchingBilling === WatchingBilling.PerPerson);
+      const equipment = buildEquipmentPayload(equipmentQty);
       await sessionsApi.open({
         deviceId: openModal.id,
         pricingPlanId: planId,
@@ -486,6 +562,7 @@ export function DashboardPage() {
         isQuickGuest: guestType === 'quick',
         quickGuestName:
           guestType === 'quick' ? quickGuestName.trim() || undefined : undefined,
+        equipment: equipment.length ? equipment : undefined,
       });
       setOpenModal(null);
       setBookingMode('open');
@@ -494,6 +571,7 @@ export function DashboardPage() {
       setCustomerSearch('');
       setSelectedCustomer(null);
       setQuickGuestName('');
+      setEquipmentQty({});
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
@@ -823,6 +901,26 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {branchEquipment.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {branchEquipment.filter((e) => e.isActive).map((e) => (
+            <Card key={e.id} className="!p-3">
+              <p className="text-sm font-semibold">{e.name}</p>
+              <p className="mt-1 text-xs text-muted">
+                {t('dashboard.equipmentFree')}: {e.freeQuantity}
+                {' · '}
+                {t('dashboard.equipmentInUse')}: {e.inUseQuantity}
+              </p>
+              <p className="text-xs text-muted">
+                {t('dashboard.equipmentMaintenance')}: {e.maintenanceQuantity}
+                {' · '}
+                {t('dashboard.equipmentTotal')}: {e.totalQuantity}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
       {canSellCafeteria && sessions.length > 0 && (
         <Card className="space-y-3">
           <div>
@@ -876,11 +974,6 @@ export function DashboardPage() {
             <h2 className="mb-3 text-lg font-semibold text-muted">
               {room.name}{room.roomNumber ? ` · ${room.roomNumber}` : ''}
             </h2>
-            {(room.assets?.length ?? 0) > 0 && (
-              <p className="mb-3 text-xs text-muted">
-                {room.assets.map((a) => `${a.assetTypeName}: ${a.workingCount}/${a.quantity}`).join(' · ')}
-              </p>
-            )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {room.devices.map((device) => {
                 const session = sessionMap.get(device.id);
@@ -896,6 +989,7 @@ export function DashboardPage() {
                       setBookingMode('open');
                       setDurationHours(2);
                       setControllerCount(2);
+                      setEquipmentQty(initEquipmentQty(branchEquipment, 2));
                       setOpenError('');
                     }}
                     onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
@@ -913,6 +1007,7 @@ export function DashboardPage() {
                       setConvertModal(session);
                       setConvertPlanId('');
                       setConvertControllers(2);
+                      setConvertEquipmentQty(initEquipmentQty(branchEquipment, 2));
                       setConvertError('');
                     }}
                     onClose={() => {
@@ -962,6 +1057,7 @@ export function DashboardPage() {
                       setBookingMode('open');
                       setDurationHours(2);
                       setControllerCount(2);
+                      setEquipmentQty(initEquipmentQty(branchEquipment, 2));
                       setOpenError('');
                     }}
                     onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
@@ -979,6 +1075,7 @@ export function DashboardPage() {
                       setConvertModal(session);
                       setConvertPlanId('');
                       setConvertControllers(2);
+                      setConvertEquipmentQty(initEquipmentQty(branchEquipment, 2));
                       setConvertError('');
                     }}
                     onClose={() => {
@@ -1132,9 +1229,14 @@ export function DashboardPage() {
                   const updated = await sessionsApi.convert(convertModal.id, {
                     pricingPlanId: convertPlanId,
                     controllerCount: convertControllers,
+                    equipment: (() => {
+                      const lines = buildEquipmentPayload(convertEquipmentQty);
+                      return lines.length ? lines : undefined;
+                    })(),
                   });
                   onUpdate(updated);
                   setConvertModal(null);
+                  setConvertEquipmentQty({});
                 } catch (e) {
                   setConvertError(e instanceof Error ? e.message : String(e));
                 } finally {
@@ -1179,7 +1281,10 @@ export function DashboardPage() {
               <Button
                 size="sm"
                 variant={convertControllers <= 2 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(2)}
+                onClick={() => {
+                  setConvertControllers(2);
+                  setConvertEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, 2));
+                }}
               >
                 {t('settings.individual')}
                 {(() => {
@@ -1191,7 +1296,10 @@ export function DashboardPage() {
               <Button
                 size="sm"
                 variant={convertControllers >= 3 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(4)}
+                onClick={() => {
+                  setConvertControllers(4);
+                  setConvertEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, 4));
+                }}
               >
                 {t('settings.couple')}
                 {(() => {
@@ -1208,13 +1316,21 @@ export function DashboardPage() {
                   key={n}
                   size="sm"
                   variant={convertControllers === n ? 'primary' : 'secondary'}
-                  onClick={() => setConvertControllers(n)}
+                  onClick={() => {
+                    setConvertControllers(n);
+                    setConvertEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, n));
+                  }}
                 >
                   {n}
                 </Button>
               ))}
             </div>
           </div>
+          <EquipmentQtyFields
+            items={branchEquipment}
+            qtyMap={convertEquipmentQty}
+            onChange={(id, qty) => setConvertEquipmentQty((prev) => ({ ...prev, [id]: qty }))}
+          />
           {convertError && <p className="text-sm text-danger">{convertError}</p>}
         </div>
       </Modal>
@@ -1441,14 +1557,20 @@ export function DashboardPage() {
                 <Button
                   size="sm"
                   variant={controllerCount <= 2 ? 'primary' : 'secondary'}
-                  onClick={() => setControllerCount(2)}
+                  onClick={() => {
+                    setControllerCount(2);
+                    setEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, 2));
+                  }}
                 >
                   {t('settings.individual')}
                 </Button>
                 <Button
                   size="sm"
                   variant={controllerCount >= 3 ? 'primary' : 'secondary'}
-                  onClick={() => setControllerCount(4)}
+                  onClick={() => {
+                    setControllerCount(4);
+                    setEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, 4));
+                  }}
                 >
                   {t('settings.couple')}
                 </Button>
@@ -1460,7 +1582,10 @@ export function DashboardPage() {
                     key={n}
                     size="sm"
                     variant={controllerCount === n ? 'primary' : 'secondary'}
-                    onClick={() => setControllerCount(n)}
+                    onClick={() => {
+                      setControllerCount(n);
+                      setEquipmentQty((prev) => syncControllerQty(prev, branchEquipment, n));
+                    }}
                   >
                     {n}
                   </Button>
@@ -1475,6 +1600,11 @@ export function DashboardPage() {
               onChange={(e) => setWatcherCount(+e.target.value)}
             />
           )}
+          <EquipmentQtyFields
+            items={branchEquipment}
+            qtyMap={equipmentQty}
+            onChange={(id, qty) => setEquipmentQty((prev) => ({ ...prev, [id]: qty }))}
+          />
           {openError && (
             <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{openError}</p>
           )}

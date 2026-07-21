@@ -167,6 +167,7 @@ export const sessionsApi = {
     customerId?: string;
     isQuickGuest?: boolean;
     quickGuestName?: string;
+    equipment?: { branchEquipmentId: string; quantity: number }[];
   }) =>
     apiFetch<import('@/types').SessionLive>('/sessions/open', {
       method: 'POST',
@@ -182,7 +183,14 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number }) =>
+  convert: (
+    id: string,
+    data: {
+      pricingPlanId: string;
+      controllerCount: number;
+      equipment?: { branchEquipmentId: string; quantity: number }[];
+    }
+  ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -296,6 +304,38 @@ export const assetsApi = {
       body: JSON.stringify({ ...data, roomId: data.roomId || null }),
     }),
   deleteDevice: (id: string) => apiFetch<void>(`/assets/devices/${id}`, { method: 'DELETE' }),
+  getEquipment: () =>
+    apiFetch<import('@/types').BranchEquipment[]>('/assets/equipment'),
+  ensureDefaultEquipment: () =>
+    apiFetch<import('@/types').BranchEquipment[]>('/assets/equipment/ensure-defaults', {
+      method: 'POST',
+    }),
+  createEquipment: (data: {
+    name: string;
+    kind: number;
+    totalQuantity: number;
+    maintenanceQuantity?: number;
+  }) =>
+    apiFetch<import('@/types').BranchEquipment>('/assets/equipment', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateEquipment: (
+    id: string,
+    data: {
+      name: string;
+      kind: number;
+      totalQuantity: number;
+      maintenanceQuantity: number;
+      isActive: boolean;
+    }
+  ) =>
+    apiFetch<import('@/types').BranchEquipment>(`/assets/equipment/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteEquipment: (id: string) =>
+    apiFetch<void>(`/assets/equipment/${id}`, { method: 'DELETE' }),
   getControllerTypes: () =>
     apiFetch<import('@/types').ControllerType[]>('/assets/controller-types'),
   createControllerType: (data: { name: string; description?: string }) =>
@@ -310,34 +350,6 @@ export const assetsApi = {
     }),
   deleteControllerType: (id: string) =>
     apiFetch<void>(`/assets/controller-types/${id}`, { method: 'DELETE' }),
-  getVenueAssetTypes: () =>
-    apiFetch<import('@/types').VenueAssetType[]>('/assets/venue-asset-types'),
-  createVenueAssetType: (data: {
-    name: string;
-    description?: string;
-    totalQuantity: number;
-    workingCount: number;
-  }) =>
-    apiFetch<import('@/types').VenueAssetType>('/assets/venue-asset-types', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  updateVenueAssetType: (
-    id: string,
-    data: {
-      name: string;
-      description?: string;
-      totalQuantity: number;
-      workingCount: number;
-      isActive: boolean;
-    }
-  ) =>
-    apiFetch<import('@/types').VenueAssetType>(`/assets/venue-asset-types/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-  deleteVenueAssetType: (id: string) =>
-    apiFetch<void>(`/assets/venue-asset-types/${id}`, { method: 'DELETE' }),
 };
 
 export const pricingApi = {
