@@ -262,8 +262,23 @@ app.MapHangfireDashboard("/hangfire");
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PlayHubDbContext>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
     await db.Database.MigrateAsync();
-    await db.Database.ExecuteSqlRawAsync("""
+
+    async Task TrySqlAsync(string label, string sql)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(sql);
+        }
+        catch (Exception ex)
+        {
+            // Owner-backfill is best-effort; never block app start on a bad table/column name.
+            startupLogger.LogWarning(ex, "Startup SQL skipped ({Label})", label);
+        }
+    }
+
+    await TrySqlAsync("branches.OwnerUserId", """
         UPDATE b
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -278,7 +293,7 @@ using (var scope = app.Services.CreateScope())
         """);
     // Infer catalog owners from room/device usage so masters don't see each other's stock.
     // Table names must match EF mappings (mixed Pascal/snake in this schema).
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("venue_asset_types from rooms", """
         UPDATE vat
         SET OwnerUserId = (
             SELECT TOP 1 b.OwnerUserId
@@ -292,7 +307,7 @@ using (var scope = app.Services.CreateScope())
         FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types from devices", """
         UPDATE ct
         SET OwnerUserId = (
             SELECT TOP 1 b.OwnerUserId
@@ -307,7 +322,7 @@ using (var scope = app.Services.CreateScope())
         WHERE ct.OwnerUserId IS NULL
         """);
     // Fix catalogs used only on one master's branches (wrong OwnerUserId from earlier leaks).
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("venue_asset_types exclusive owner", """
         UPDATE vat
         SET OwnerUserId = owners.OwnerUserId
         FROM venue_asset_types vat
@@ -322,7 +337,7 @@ using (var scope = app.Services.CreateScope())
         ) owners ON owners.Id = vat.Id
         WHERE vat.OwnerUserId IS NULL OR vat.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types exclusive owner", """
         UPDATE ct
         SET OwnerUserId = owners.OwnerUserId
         FROM ControllerTypes ct
@@ -337,7 +352,7 @@ using (var scope = app.Services.CreateScope())
         ) owners ON owners.Id = ct.Id
         WHERE ct.OwnerUserId IS NULL OR ct.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("venue_asset_types fallback master", """
         UPDATE vat
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -350,7 +365,7 @@ using (var scope = app.Services.CreateScope())
         FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("controller_types fallback master", """
         UPDATE ct
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -364,7 +379,7 @@ using (var scope = app.Services.CreateScope())
         WHERE ct.OwnerUserId IS NULL
         """);
     // Inventory units: exclusive cafeteria usage → correct owner.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("inventory_units exclusive owner", """
         UPDATE iu
         SET OwnerUserId = owners.OwnerUserId
         FROM inventory_units iu
@@ -382,7 +397,7 @@ using (var scope = app.Services.CreateScope())
         ) owners ON owners.Id = iu.Id
         WHERE iu.OwnerUserId IS NULL OR iu.OwnerUserId <> owners.OwnerUserId
         """);
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("inventory_units fallback master", """
         UPDATE iu
         SET OwnerUserId = (
             SELECT TOP 1 u.Id
@@ -397,7 +412,7 @@ using (var scope = app.Services.CreateScope())
         """);
     // Drop MasterAdmin UserBranch links to branches they don't own (stops cross-master item leak).
     // Do not touch SuperAdmin assignments.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("prune master user_branches", """
         DELETE ub
         FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
@@ -408,7 +423,7 @@ using (var scope = app.Services.CreateScope())
           AND b.OwnerUserId <> u.Id
         """);
     // Staff must not keep branches owned by a different master than their parent.
-    await db.Database.ExecuteSqlRawAsync("""
+    await TrySqlAsync("prune staff user_branches", """
         DELETE ub
         FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
