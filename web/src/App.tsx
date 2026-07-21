@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from '@/layouts/AppLayout';
-import { LoginPage, RegisterPage } from '@/pages/AuthPages';
+import { LoginPage } from '@/pages/AuthPages';
 import { BranchSelectPage } from '@/pages/BranchSelectPage';
 import { HomeDashboardPage } from '@/pages/HomeDashboardPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -56,7 +56,7 @@ export default function App() {
         <AuthSessionKeepAlive />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/register" element={<Navigate to="/login" replace />} />
           <Route path="/select-branch" element={
             <ProtectedRoute><BranchSelectPage /></ProtectedRoute>
           } />

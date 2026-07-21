@@ -126,20 +126,6 @@ export const authApi = {
       body: JSON.stringify({ email: username, password }),
     }),
 
-  register: (data: {
-    tenantName: string;
-    slug: string;
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    branchName: string;
-  }) =>
-    apiFetch<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
   selectBranch: (branchId: string) =>
     apiFetch<AuthResponse>('/auth/select-branch', {
       method: 'POST',
