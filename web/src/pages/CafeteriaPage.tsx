@@ -656,12 +656,29 @@ export function CafeteriaPage() {
               onChange={(e) => setGuestName(e.target.value)}
               placeholder={t('cafeteria.guestNameOptional')}
             />
-          ) : (
+          ) : saleMode === 'walkin' ? (
             <Input
               label={t('cafeteria.customerName')}
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
+              placeholder={t('cafeteria.customerNameOptional')}
             />
+          ) : (
+            // Session mode: only ask for a name when the open session has no guest yet
+            (() => {
+              const session = activeSessions.find((s) => s.id === sessionId);
+              const hasGuest =
+                !!session?.customerId || !!session?.customerName || !!session?.quickGuestName;
+              if (hasGuest) return null;
+              return (
+                <Input
+                  label={t('cafeteria.customerName')}
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder={t('cafeteria.customerNameOptional')}
+                />
+              );
+            })()
           )}
           {saleMode === 'walkin' && (
             <>
