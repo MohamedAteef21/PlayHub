@@ -122,7 +122,7 @@ public class InventoryService : IInventoryService
 
     public async Task<StockVoucherDto> CreateVoucherAsync(CreateStockVoucherRequest request, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
 
         if (request.Lines is null || request.Lines.Count == 0)
             throw new InvalidOperationException("At least one voucher line is required.");

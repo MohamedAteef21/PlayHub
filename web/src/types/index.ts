@@ -214,7 +214,7 @@ export interface SessionHistory {
 }
 
 export interface AssetDashboard {
-  branchId: string;
+  branchId: string | null;
   branchName: string;
   rooms: AssetDashboardRoom[];
   unassignedDevices: AssetDashboardDevice[];
@@ -222,6 +222,8 @@ export interface AssetDashboard {
 
 export interface AssetDashboardRoom {
   id: string;
+  branchId: string;
+  branchName: string;
   name: string;
   roomNumber: string | null;
   maxWatchingCapacity: number;
@@ -250,6 +252,8 @@ export interface VenueAssetType {
 
 export interface AssetDashboardDevice {
   id: string;
+  branchId: string;
+  branchName: string;
   identifier: string;
   name: string;
   liveStatus: string;

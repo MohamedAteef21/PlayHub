@@ -13,6 +13,7 @@ import {
   StockVoucherStatus,
   StockVoucherType,
 } from '@/types';
+import { BranchTargetSelect, withBranchName } from '@/components/BranchSelect';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -104,6 +105,7 @@ export function InventoryPage() {
   const [voucherNotes, setVoucherNotes] = useState('');
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
   const [itemFormOpen, setItemFormOpen] = useState(false);
+  const [targetBranchId, setTargetBranchId] = useState('');
   const [formContext, setFormContext] = useState<'warehouse' | 'menu'>('warehouse');
   const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
   const [itemKind, setItemKind] = useState<number>(CafeteriaItemKind.Warehouse);
@@ -248,6 +250,7 @@ export function InventoryPage() {
         nameAr: itemNameAr.trim() || undefined,
         currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
         minThreshold: Number(itemThreshold) || 0,
+        branchId: user?.isMaster ? targetBranchId || undefined : undefined,
         variants: variants.map(({ name, sellPrice, recipeLines }) => ({
           name,
           sellPrice,
@@ -310,7 +313,10 @@ export function InventoryPage() {
       if (editingAddon) {
         return cafeteriaApi.updateAddOn(editingAddon.id, { ...payload, isActive: addonIsActive });
       }
-      return cafeteriaApi.createAddOn(payload);
+      return cafeteriaApi.createAddOn({
+        ...payload,
+        branchId: user?.isMaster ? targetBranchId || undefined : undefined,
+      });
     },
     onSuccess: () => {
       resetAddonForm();
@@ -353,6 +359,7 @@ export function InventoryPage() {
         voucherType,
         lines,
         notes: voucherNotes.trim() || undefined,
+        branchId: user?.isMaster ? targetBranchId || undefined : undefined,
       });
       return inventoryApi.postVoucher(created.id);
     },
@@ -360,6 +367,7 @@ export function InventoryPage() {
       setVoucherOpen(false);
       setVoucherLines({});
       setVoucherNotes('');
+      setTargetBranchId(activeBranchId ?? '');
       setError('');
       queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
@@ -392,7 +400,9 @@ export function InventoryPage() {
   });
 
   function itemLabel(item: CafeteriaItem) {
-    return i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
+    const name = i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
+    const branchName = user?.branches.find((b) => b.id === item.branchId)?.name;
+    return withBranchName(name, branchName);
   }
 
   function kindLabel(kind: number) {
@@ -419,6 +429,7 @@ export function InventoryPage() {
     setBaseUnitId('');
     setLargeUnitId('');
     setUnitsPerLarge('1');
+    setTargetBranchId(activeBranchId ?? '');
     setVariantRows([newVariantRow()]);
     setError('');
   }
@@ -435,6 +446,7 @@ export function InventoryPage() {
     setBaseUnitId(units[0]?.id ?? '');
     setLargeUnitId('');
     setUnitsPerLarge('1');
+    setTargetBranchId(activeBranchId ?? '');
     setVariantRows([newVariantRow()]);
     setError('');
     setItemFormOpen(true);
@@ -492,6 +504,7 @@ export function InventoryPage() {
     setAddonWarehouseId(warehouseItems[0]?.id ?? '');
     setAddonDeductQty('1');
     setAddonIsActive(true);
+    setTargetBranchId(activeBranchId ?? '');
     setError('');
     setAddonFormOpen(true);
   }
@@ -562,6 +575,7 @@ export function InventoryPage() {
 
   function canSaveItem() {
     if (!itemName.trim()) return false;
+    if (user?.isMaster && !editingItem && !targetBranchId) return false;
     if (formContext === 'warehouse' && isStockKind(itemKind) && !baseUnitId) return false;
     if (needsVariants() && validVariantRows().length === 0) return false;
     return true;
@@ -608,6 +622,7 @@ export function InventoryPage() {
               size="sm"
               onClick={() => {
                 setVoucherType(StockVoucherType.StockIn);
+                setTargetBranchId(activeBranchId ?? '');
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -619,6 +634,7 @@ export function InventoryPage() {
               variant="secondary"
               onClick={() => {
                 setVoucherType(StockVoucherType.StockCount);
+                setTargetBranchId(activeBranchId ?? '');
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -630,6 +646,7 @@ export function InventoryPage() {
               variant="secondary"
               onClick={() => {
                 setVoucherType(StockVoucherType.Settlement);
+                setTargetBranchId(activeBranchId ?? '');
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -989,7 +1006,11 @@ export function InventoryPage() {
             <Button variant="secondary" onClick={() => setVoucherOpen(false)}>
               {t('session.cancel')}
             </Button>
-            <Button loading={createVoucherMutation.isPending} onClick={() => createVoucherMutation.mutate()}>
+            <Button
+              loading={createVoucherMutation.isPending}
+              disabled={!!user?.isMaster && !targetBranchId}
+              onClick={() => createVoucherMutation.mutate()}
+            >
               {t('inventory.createAndPost')}
             </Button>
           </>
@@ -1001,6 +1022,7 @@ export function InventoryPage() {
             {voucherType === StockVoucherType.StockCount && t('inventory.stockCountHint')}
             {voucherType === StockVoucherType.Settlement && t('inventory.settlementHint')}
           </p>
+          <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
           <Input label={t('inventory.notes')} value={voucherNotes} onChange={(e) => setVoucherNotes(e.target.value)} />
           <div className="max-h-72 space-y-2 overflow-y-auto">
             {stockItems
@@ -1044,6 +1066,9 @@ export function InventoryPage() {
         }
       >
         <div className="max-h-[70vh] space-y-3 overflow-y-auto pe-1">
+          {!editingItem && (
+            <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
+          )}
           <div>
             <label className="mb-1 block text-sm text-muted">{t('inventory.kind')}</label>
             <select
@@ -1310,6 +1335,9 @@ export function InventoryPage() {
         title={editingAddon ? t('users.edit') : t('inventory.addAddOn')}
       >
         <div className="space-y-3">
+          {!editingAddon && (
+            <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
+          )}
           <Input label={t('inventory.addOn')} value={addonName} onChange={(e) => setAddonName(e.target.value)} />
           <Input
             label={t('inventory.sellPrice')}
@@ -1356,7 +1384,12 @@ export function InventoryPage() {
           <Button
             className="w-full"
             loading={saveAddonMutation.isPending}
-            disabled={!addonName.trim() || !addonWarehouseId || addonPrice === ''}
+            disabled={
+              !addonName.trim() ||
+              !addonWarehouseId ||
+              addonPrice === '' ||
+              (!!user?.isMaster && !editingAddon && !targetBranchId)
+            }
             onClick={() => saveAddonMutation.mutate()}
           >
             {t('common.save')}

@@ -36,10 +36,14 @@ public class SessionService : ISessionService
 
     public async Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = BranchGuard.ResolveReadBranchId(_tenantContext);
         var billingRoundUp = await GetBillingRoundUpAsync(ct);
 
-        var sessions = await LoadActiveSessionsQuery(branchId).ToListAsync(ct);
+        var query = branchId.HasValue
+            ? LoadActiveSessionsQuery(branchId.Value)
+            : LoadActiveSessionsQueryAll();
+
+        var sessions = await query.ToListAsync(ct);
         return sessions.Select(s => MapLive(s, billingRoundUp)).ToList();
     }
 
@@ -871,6 +875,18 @@ public class SessionService : ISessionService
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.AddOns)
             .Where(s => s.BranchId == branchId && s.Status != SessionStatus.Closed);
+
+    private IQueryable<Session> LoadActiveSessionsQueryAll() =>
+        _db.Sessions
+            .Include(s => s.Device)
+            .Include(s => s.Room)
+            .Include(s => s.PricingPlan)
+            .Include(s => s.OpenedByUser)
+            .Include(s => s.Customer)
+            .Include(s => s.Pauses)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.AddOns)
+            .Where(s => s.Status != SessionStatus.Closed);
 
     private async Task<Session> GetMutableActiveSessionAsync(Guid id, Guid branchId, CancellationToken ct)
     {

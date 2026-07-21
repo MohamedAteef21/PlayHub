@@ -7,6 +7,7 @@ import { startOfMonth, today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import type { Expense, ExpenseCategory } from '@/types';
+import { BranchTargetSelect, withBranchName } from '@/components/BranchSelect';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
 import { Input } from '@/components/ui/Input';
@@ -18,6 +19,7 @@ import { Pagination } from '@/components/ui/Pagination';
 export function AccountingPage() {
   const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
+  const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const queryClient = useQueryClient();
   const canViewReports = hasPermission(user, Permissions.ReportsView);
   const canAddExpense = hasPermission(user, Permissions.ExpensesAdd);
@@ -29,6 +31,7 @@ export function AccountingPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [addOpen, setAddOpen] = useState(false);
+  const [targetBranchId, setTargetBranchId] = useState('');
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
@@ -68,7 +71,10 @@ export function AccountingPage() {
       };
       return editingExpense
         ? accountingApi.updateExpense(editingExpense.id, data)
-        : accountingApi.createExpense(data);
+        : accountingApi.createExpense({
+            ...data,
+            branchId: user?.isMaster ? targetBranchId || undefined : undefined,
+          });
     },
     onSuccess: () => {
       setAddOpen(false);
@@ -77,6 +83,7 @@ export function AccountingPage() {
       setDescription('');
       setCategoryId('');
       setExpenseDate(today());
+      setTargetBranchId(activeBranchId ?? '');
       queryClient.invalidateQueries({ queryKey: ['accounting-expenses'] });
       queryClient.invalidateQueries({ queryKey: ['accounting-dashboard'] });
     },
@@ -128,6 +135,7 @@ export function AccountingPage() {
     setAmount('');
     setDescription('');
     setExpenseDate(today());
+    setTargetBranchId(activeBranchId ?? '');
     setError('');
     setAddOpen(true);
   }
@@ -277,7 +285,7 @@ export function AccountingPage() {
               <tr key={e.id} className="hover:bg-surface-hover transition-colors">
                 <td className="px-4 py-3">{e.expenseDate}</td>
                 <td className="px-4 py-3">{e.categoryName}</td>
-                <td className="px-4 py-3">{e.description}</td>
+                <td className="px-4 py-3">{withBranchName(e.description, e.branchName)}</td>
                 <td className="px-4 py-3 font-medium text-danger">{formatCurrency(e.amount)}</td>
                 <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
                 {canAddExpense && (
@@ -323,6 +331,9 @@ export function AccountingPage() {
         title={editingExpense ? t('users.edit') : t('accounting.addExpense')}
       >
         <div className="space-y-4">
+          {!editingExpense && (
+            <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
+          )}
           <div>
             <label className="mb-1 block text-sm text-muted">{t('accounting.category')}</label>
             <select
@@ -346,7 +357,12 @@ export function AccountingPage() {
           <Button
             className="w-full"
             loading={addMutation.isPending}
-            disabled={!categoryId || !amount || !description.trim()}
+            disabled={
+              !categoryId ||
+              !amount ||
+              !description.trim() ||
+              (!!user?.isMaster && !editingExpense && !targetBranchId)
+            }
             onClick={() => addMutation.mutate()}
           >
             {t('common.save')}

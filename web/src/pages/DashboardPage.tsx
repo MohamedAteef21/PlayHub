@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi, whatsappApi } from '@/api/client';
+import { alertsApi, assetsApi, authApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi, whatsappApi } from '@/api/client';
+import { BranchScopeSelect, withBranchName } from '@/components/BranchSelect';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -118,7 +119,9 @@ function DeviceCard({
       )}
       <CardHeader>
         <div>
-          <CardTitle className={`text-base ${deviceOffline ? 'text-danger' : ''}`}>{device.name}</CardTitle>
+          <CardTitle className={`text-base ${deviceOffline ? 'text-danger' : ''}`}>
+            {withBranchName(device.name, device.branchName)}
+          </CardTitle>
           <p className="text-xs text-muted">{roomName}</p>
         </div>
         <Badge status={statusKey(liveStatus)} pulse={liveStatus === 'Gaming' || liveStatus === 'Watching'}>
@@ -276,6 +279,7 @@ export function DashboardPage() {
   const [openError, setOpenError] = useState('');
   const user = useAuthStore((s) => s.user);
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
+  const setAuth = useAuthStore((s) => s.setAuth);
   const language = useUiStore((s) => s.language);
   const canReturn = hasPermission(user, Permissions.CafeteriaReturn);
   const canSellCafeteria = hasPermission(user, Permissions.CafeteriaSell) || !!user?.isMaster;
@@ -811,12 +815,30 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
           {dashboard && <p className="text-muted">{dashboard.branchName}</p>}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {user?.isMaster && (
+            <BranchScopeSelect
+              value={activeBranchId ?? 'all'}
+              onChange={(value) => {
+                const next = value === 'all' ? null : value;
+                if (next === activeBranchId) return;
+                void (async () => {
+                  try {
+                    const res = await authApi.selectBranch(next);
+                    setAuth(res.accessToken, res.refreshToken, res.user, res.activeBranchId, res.accessTokenExpiresAt);
+                    window.location.assign('/floor');
+                  } catch {
+                    /* ignore */
+                  }
+                })();
+              }}
+            />
+          )}
           {['idle', 'gaming', 'watching', 'paused'].map((s) => (
             <Badge key={s} status={s}>{t(`dashboard.${s}`)}</Badge>
           ))}
@@ -874,7 +896,10 @@ export function DashboardPage() {
         {dashboard.rooms.map((room) => (
           <section key={room.id}>
             <h2 className="mb-3 text-lg font-semibold text-muted">
-              {room.name}{room.roomNumber ? ` · ${room.roomNumber}` : ''}
+              {withBranchName(
+                `${room.name}${room.roomNumber ? ` · ${room.roomNumber}` : ''}`,
+                room.branchName
+              )}
             </h2>
             {(room.assets?.length ?? 0) > 0 && (
               <p className="mb-3 text-xs text-muted">

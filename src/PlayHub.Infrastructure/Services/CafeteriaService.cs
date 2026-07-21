@@ -35,10 +35,13 @@ public class CafeteriaService : ICafeteriaService
         bool forSaleOnly = false,
         CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = BranchGuard.ResolveReadBranchId(_tenantContext);
         var query = _db.CafeteriaItems
             .Include(i => i.Variants).ThenInclude(v => v.RecipeLines).ThenInclude(r => r.WarehouseItem)
-            .Where(i => i.BranchId == branchId);
+            .AsQueryable();
+
+        if (branchId.HasValue)
+            query = query.Where(i => i.BranchId == branchId.Value);
 
         if (kind.HasValue)
             query = query.Where(i => i.Kind == kind.Value);
@@ -60,7 +63,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaItemDto> CreateItemAsync(CreateCafeteriaItemRequest request, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
         var kind = request.Kind;
         var tracksStock = kind is CafeteriaItemKind.Warehouse or CafeteriaItemKind.SellAsIs;
 
@@ -242,7 +245,7 @@ public class CafeteriaService : ICafeteriaService
 
     public async Task<CafeteriaAddOnDto> CreateAddOnAsync(CreateCafeteriaAddOnRequest request, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new InvalidOperationException("Add-on name is required.");
         if (request.SellPrice < 0)

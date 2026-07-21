@@ -129,6 +129,8 @@ export const en = {
     floorTitle: 'Live floor',
     floorHint: 'Open timers, pause sessions, and close bills from the floor view.',
     goToFloor: 'Go to live floor',
+    byBranch: 'By branch',
+    net: 'Net',
   },
   dashboard: {
     title: 'Live floor',
@@ -339,6 +341,12 @@ export const en = {
     active: 'Active',
     inactive: 'Inactive',
     confirmDelete: 'Delete this item? It will be hidden (soft delete).',
+    targetBranch: 'Branch',
+    selectBranch: 'Select a branch',
+    targetBranchHint: 'Required for masters — choose which branch this item belongs to.',
+    branchScope: 'Show data for',
+    allBranches: 'All branches',
+    current: 'current',
   },
   sessionHistory: {
     title: 'Session history',
@@ -919,6 +927,8 @@ export const ar = {
     floorTitle: 'الصالة المباشرة',
     floorHint: 'افتح المؤقتات وأوقف الجلسات وأغلق الفواتير من عرض الصالة.',
     goToFloor: 'الذهاب للصالة',
+    byBranch: 'حسب الفرع',
+    net: 'صافي',
   },
   dashboard: {
     title: 'الصالة المباشرة',
@@ -1129,6 +1139,12 @@ export const ar = {
     active: 'مفعّل',
     inactive: 'معطّل',
     confirmDelete: 'حذف الصنف؟ هيختفي من النظام (سوفت ديليت).',
+    targetBranch: 'الفرع',
+    selectBranch: 'اختَر فرع',
+    targetBranchHint: 'مطلوب للماستر — اختَر الفرع اللي الصنف ده هيتضاف عليه.',
+    branchScope: 'عرض بيانات',
+    allBranches: 'كل الفروع',
+    current: 'الحالي',
   },
   sessionHistory: {
     title: 'سجل الجلسات',

@@ -17,7 +17,7 @@ public record LoginRequest(string Email, string Password, string? TenantSlug = n
 
 public record RefreshTokenRequest(string RefreshToken);
 
-public record SelectBranchRequest(Guid BranchId);
+public record SelectBranchRequest(Guid? BranchId);
 
 public record AuthUserDto(
     Guid Id,

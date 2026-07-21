@@ -8,6 +8,7 @@ import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import { SessionMode, TimeUnit, WatchingBilling, PaymentAccountType, NotificationChannel } from '@/types';
 import type { BranchDetail, BranchPaymentAccount, Device, PricingPlan, Room, VenueAssetType } from '@/types';
+import { BranchTargetSelect } from '@/components/BranchSelect';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Icon, type IconName } from '@/components/ui/Icons';
@@ -48,6 +49,7 @@ export function SettingsPage() {
   const lastSavedWaSessionRef = useRef<string | null>(null);
 
   const [roomOpen, setRoomOpen] = useState(false);
+  const [targetBranchId, setTargetBranchId] = useState('');
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [roomName, setRoomName] = useState('');
   const [roomNumber, setRoomNumber] = useState('');
@@ -384,7 +386,10 @@ export function SettingsPage() {
       };
       return editingRoom
         ? assetsApi.updateRoom(editingRoom.id, { ...data, isActive: editingRoom.isActive })
-        : assetsApi.createRoom(data);
+        : assetsApi.createRoom({
+            ...data,
+            branchId: isMaster ? targetBranchId || undefined : undefined,
+          });
     },
     onSuccess: () => {
       setRoomOpen(false);
@@ -392,6 +397,7 @@ export function SettingsPage() {
       setRoomName('');
       setRoomNumber('');
       setDraftRoomAssets([]);
+      setTargetBranchId(activeBranchId ?? '');
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['venue-asset-types'] });
@@ -535,6 +541,7 @@ export function SettingsPage() {
         roomId: deviceRoomId || null,
         name,
         controllers,
+        branchId: isMaster ? targetBranchId || undefined : undefined,
       });
     },
     onSuccess: () => {
@@ -542,6 +549,7 @@ export function SettingsPage() {
       setEditingDevice(null);
       setDeviceName('');
       setDeviceIsActive(true);
+      setTargetBranchId(activeBranchId ?? '');
       queryClient.invalidateQueries({ queryKey: ['devices'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
@@ -777,6 +785,7 @@ export function SettingsPage() {
                 setRoomNumber('');
                 setRoomCapacity('10');
                 setDraftRoomAssets([]);
+                setTargetBranchId(activeBranchId ?? '');
                 setRoomOpen(true);
               }}
             >
@@ -934,6 +943,7 @@ export function SettingsPage() {
                 setDeviceRoomId(rooms[0]?.id ?? '');
                 setCtrlTypeId(ctrlTypes[0]?.id ?? '');
                 setCtrlQty('2');
+                setTargetBranchId(activeBranchId ?? '');
                 setDeviceOpen(true);
               }}
             >
@@ -1488,6 +1498,9 @@ export function SettingsPage() {
         title={editingRoom ? t('settings.editRoom') : t('settings.addRoom')}
       >
         <div className="space-y-3">
+          {!editingRoom && (
+            <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
+          )}
           <Input label={t('settings.roomName')} value={roomName} onChange={(e) => setRoomName(e.target.value)} />
           <Input label={t('settings.roomNumber')} value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} />
           <Input label={t('settings.capacity')} type="number" value={roomCapacity} onChange={(e) => setRoomCapacity(e.target.value)} />
@@ -1556,7 +1569,12 @@ export function SettingsPage() {
             )}
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
-          <Button className="w-full" loading={roomMutation.isPending} disabled={!roomName.trim()} onClick={() => roomMutation.mutate()}>
+          <Button
+            className="w-full"
+            loading={roomMutation.isPending}
+            disabled={!roomName.trim() || (!!isMaster && !editingRoom && !targetBranchId)}
+            onClick={() => roomMutation.mutate()}
+          >
             {t('common.save')}
           </Button>
         </div>
@@ -1634,6 +1652,9 @@ export function SettingsPage() {
         title={editingDevice ? t('users.edit') : t('settings.addDevice')}
       >
         <div className="space-y-3">
+          {!editingDevice && (
+            <BranchTargetSelect value={targetBranchId} onChange={setTargetBranchId} />
+          )}
           <div>
             <label className="mb-1 block text-sm text-muted">{t('settings.room')}</label>
             <select
@@ -1664,7 +1685,7 @@ export function SettingsPage() {
           <Button
             className="w-full"
             loading={deviceMutation.isPending}
-            disabled={!deviceName.trim()}
+            disabled={!deviceName.trim() || (!!isMaster && !editingDevice && !targetBranchId)}
             onClick={() => deviceMutation.mutate()}
           >
             {t('common.save')}

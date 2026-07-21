@@ -23,7 +23,8 @@ public record CreateExpenseRequest(
     Guid CategoryId,
     decimal Amount,
     string Description,
-    DateOnly ExpenseDate);
+    DateOnly ExpenseDate,
+    Guid? BranchId = null);
 
 public record UpdateExpenseRequest(
     Guid CategoryId,

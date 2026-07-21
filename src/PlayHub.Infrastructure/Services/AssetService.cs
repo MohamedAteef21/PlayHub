@@ -51,7 +51,7 @@ public class AssetService : IAssetService
 
     public async Task<RoomDto> CreateRoomAsync(CreateRoomRequest request, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
 
         var room = new Room
         {
@@ -344,7 +344,7 @@ public class AssetService : IAssetService
 
     public async Task<DeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
 
         Room? room = null;
         if (request.RoomId.HasValue)
@@ -460,53 +460,76 @@ public class AssetService : IAssetService
 
     public async Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
-
-        var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == branchId, ct)
-            ?? throw new KeyNotFoundException("Branch not found.");
-
-        var liveStatuses = await GetLiveStatusMapAsync(branchId, ct);
-
-        var rooms = await _db.Rooms
-            .Include(r => r.Devices)
-                .ThenInclude(d => d.DeviceControllers)
-            .Include(r => r.Devices)
-                .ThenInclude(d => d.Screens)
-            .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
-            .Where(r => r.BranchId == branchId && r.IsActive)
-            .OrderBy(r => r.Name)
-            .ToListAsync(ct);
+        var branchId = BranchGuard.ResolveReadBranchId(_tenantContext);
 
         var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
-        var roomDtos = rooms.Select(r => new AssetDashboardRoomDto(
-            r.Id,
-            r.Name,
-            r.RoomNumber,
-            r.MaxWatchingCapacity,
-            r.RoomAssets
-                .Where(a => a.VenueAssetType is { IsDeleted: false }
-                    && (!ownerFilter.HasValue || a.VenueAssetType.OwnerUserId == ownerFilter.Value))
-                .Select(MapRoomAsset)
-                .ToList(),
-            r.Devices.OrderBy(d => d.Name).Select(d => MapDashboardDevice(d, r.MaxWatchingCapacity, liveStatuses)).ToList()
-        )).ToList();
+        List<Branch> branches;
+        if (branchId.HasValue)
+        {
+            var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == branchId.Value, ct)
+                ?? throw new KeyNotFoundException("Branch not found.");
+            branches = [branch];
+        }
+        else
+        {
+            branches = await _db.Branches.Where(b => b.IsActive).OrderBy(b => b.Name).ToListAsync(ct);
+        }
 
-        var unassigned = await _db.Devices
-            .Include(d => d.DeviceControllers).ThenInclude(c => c.ControllerType)
-            .Include(d => d.Screens)
-            .Where(d => d.BranchId == branchId && d.RoomId == null)
-            .OrderBy(d => d.Name)
-            .ToListAsync(ct);
+        var roomDtos = new List<AssetDashboardRoomDto>();
+        var unassignedDtos = new List<AssetDashboardDeviceDto>();
 
-        var unassignedDtos = unassigned
-            .Select(d => MapDashboardDevice(
+        foreach (var branch in branches)
+        {
+            var liveStatuses = await GetLiveStatusMapAsync(branch.Id, ct);
+
+            var rooms = await _db.Rooms
+                .Include(r => r.Devices)
+                    .ThenInclude(d => d.DeviceControllers)
+                .Include(r => r.Devices)
+                    .ThenInclude(d => d.Screens)
+                .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
+                .Where(r => r.BranchId == branch.Id && r.IsActive)
+                .OrderBy(r => r.Name)
+                .ToListAsync(ct);
+
+            roomDtos.AddRange(rooms.Select(r => new AssetDashboardRoomDto(
+                r.Id,
+                branch.Id,
+                branch.Name,
+                r.Name,
+                r.RoomNumber,
+                r.MaxWatchingCapacity,
+                r.RoomAssets
+                    .Where(a => a.VenueAssetType is { IsDeleted: false }
+                        && (!ownerFilter.HasValue || a.VenueAssetType.OwnerUserId == ownerFilter.Value))
+                    .Select(MapRoomAsset)
+                    .ToList(),
+                r.Devices.OrderBy(d => d.Name)
+                    .Select(d => MapDashboardDevice(d, branch.Id, branch.Name, r.MaxWatchingCapacity, liveStatuses))
+                    .ToList()
+            )));
+
+            var unassigned = await _db.Devices
+                .Include(d => d.DeviceControllers).ThenInclude(c => c.ControllerType)
+                .Include(d => d.Screens)
+                .Where(d => d.BranchId == branch.Id && d.RoomId == null)
+                .OrderBy(d => d.Name)
+                .ToListAsync(ct);
+
+            unassignedDtos.AddRange(unassigned.Select(d => MapDashboardDevice(
                 d,
+                branch.Id,
+                branch.Name,
                 Math.Max(d.Screens.Sum(s => s.WorkingCount), 10),
-                liveStatuses))
-            .ToList();
+                liveStatuses)));
+        }
 
-        return new AssetDashboardDto(branchId, branch.Name, roomDtos, unassignedDtos);
+        var label = branchId.HasValue
+            ? branches[0].Name
+            : "All branches";
+
+        return new AssetDashboardDto(branchId, label, roomDtos, unassignedDtos);
     }
 
     private async Task ReplaceRoomAssetsAsync(Room room, IReadOnlyList<UpsertRoomAssetRequest> assets, CancellationToken ct)
@@ -648,7 +671,12 @@ public class AssetService : IAssetService
             device.CreatedAt);
     }
 
-    private static AssetDashboardDeviceDto MapDashboardDevice(Device device, int maxWatchingCapacity, Dictionary<Guid, string> liveStatuses)
+    private static AssetDashboardDeviceDto MapDashboardDevice(
+        Device device,
+        Guid branchId,
+        string branchName,
+        int maxWatchingCapacity,
+        Dictionary<Guid, string> liveStatuses)
     {
         var totalControllers = device.DeviceControllers.Sum(c => c.Quantity);
         var workingControllers = device.DeviceControllers.Sum(c => c.WorkingCount);
@@ -656,6 +684,8 @@ public class AssetService : IAssetService
 
         return new AssetDashboardDeviceDto(
             device.Id,
+            branchId,
+            branchName,
             device.Identifier,
             device.Name,
             liveStatus,
