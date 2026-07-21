@@ -307,6 +307,88 @@ public class CafeteriaItemConfiguration : IEntityTypeConfiguration<CafeteriaItem
         builder.Property(x => x.BaseUnitName).HasMaxLength(100).IsRequired();
         builder.Property(x => x.LargeUnitName).HasMaxLength(100);
         builder.HasIndex(x => new { x.TenantId, x.BranchId, x.IsActive });
+        builder.HasIndex(x => new { x.BranchId, x.Kind, x.IsActive });
+    }
+}
+
+public class CafeteriaItemVariantConfiguration : IEntityTypeConfiguration<CafeteriaItemVariant>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaItemVariant> builder)
+    {
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.SellPrice).HasPrecision(18, 2);
+        builder.HasMany(x => x.RecipeLines).WithOne(x => x.Variant).HasForeignKey(x => x.VariantId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class CafeteriaVariantRecipeLineConfiguration : IEntityTypeConfiguration<CafeteriaVariantRecipeLine>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaVariantRecipeLine> builder)
+    {
+        builder.ToTable("cafeteria_variant_recipe_lines");
+        builder.HasIndex(x => new { x.VariantId, x.WarehouseItemId });
+        builder.HasOne(x => x.WarehouseItem).WithMany().HasForeignKey(x => x.WarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CafeteriaAddOnConfiguration : IEntityTypeConfiguration<CafeteriaAddOn>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaAddOn> builder)
+    {
+        builder.ToTable("cafeteria_add_ons");
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.SellPrice).HasPrecision(18, 2);
+        builder.HasIndex(x => new { x.TenantId, x.BranchId, x.IsActive });
+        builder.HasOne(x => x.WarehouseItem).WithMany().HasForeignKey(x => x.WarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CafeteriaSaleLineAddOnConfiguration : IEntityTypeConfiguration<CafeteriaSaleLineAddOn>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaSaleLineAddOn> builder)
+    {
+        builder.ToTable("cafeteria_sale_line_add_ons");
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
+        builder.Property(x => x.LineTotal).HasPrecision(18, 2);
+        builder.HasOne(x => x.AddOn).WithMany().HasForeignKey(x => x.AddOnId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CafeteriaSaleLineIngredientDeductConfiguration : IEntityTypeConfiguration<CafeteriaSaleLineIngredientDeduct>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaSaleLineIngredientDeduct> builder)
+    {
+        builder.ToTable("cafeteria_sale_line_ingredient_deducts");
+        builder.HasOne(x => x.WarehouseItem).WithMany().HasForeignKey(x => x.WarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class SessionCafeteriaLineAddOnConfiguration : IEntityTypeConfiguration<SessionCafeteriaLineAddOn>
+{
+    public void Configure(EntityTypeBuilder<SessionCafeteriaLineAddOn> builder)
+    {
+        builder.ToTable("session_cafeteria_line_add_ons");
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
+        builder.Property(x => x.LineTotal).HasPrecision(18, 2);
+        builder.HasOne(x => x.AddOn).WithMany().HasForeignKey(x => x.AddOnId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class SessionCafeteriaLineIngredientDeductConfiguration : IEntityTypeConfiguration<SessionCafeteriaLineIngredientDeduct>
+{
+    public void Configure(EntityTypeBuilder<SessionCafeteriaLineIngredientDeduct> builder)
+    {
+        builder.ToTable("session_cafeteria_line_ingredient_deducts");
+        builder.HasOne(x => x.WarehouseItem).WithMany().HasForeignKey(x => x.WarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

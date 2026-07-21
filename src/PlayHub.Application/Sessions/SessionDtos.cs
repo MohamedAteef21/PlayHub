@@ -1,3 +1,4 @@
+using PlayHub.Application.Cafeteria;
 using PlayHub.Domain.Enums;
 
 namespace PlayHub.Application.Sessions;
@@ -77,10 +78,12 @@ public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
     Guid VariantId,
     int Quantity,
-    /// <summary>How much stock to deduct from the parent product.</summary>
-    int StockDeductQuantity,
+    /// <summary>For SellAsIs: stock to deduct. Ignored for recipe menu items.</summary>
+    int StockDeductQuantity = 0,
     string? CustomerName = null,
-    InventoryUnitKind Unit = InventoryUnitKind.Base);
+    InventoryUnitKind Unit = InventoryUnitKind.Base,
+    IReadOnlyList<CafeteriaSaleLineAddOnInput>? AddOns = null,
+    bool AllowSkipMissingIngredients = false);
 
 /// <summary>AdditionalMinutes = null switches the session to an open (unlimited) timer.</summary>
 public record ExtendSessionRequest(int? AdditionalMinutes);
@@ -147,7 +150,8 @@ public record SessionCafeteriaLineDto(
     decimal UnitPrice,
     decimal LineTotal,
     string? CustomerName,
-    DateTime AddedAt);
+    DateTime AddedAt,
+    IReadOnlyList<CafeteriaSaleLineAddOnDto> AddOns);
 
 public record SessionInvoiceDto(
     Guid Id,

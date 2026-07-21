@@ -31,7 +31,7 @@ export function HomeDashboardPage() {
 
   const { data: items = [] } = useQuery({
     queryKey: ['cafeteria-items', user?.id, activeBranchId],
-    queryFn: cafeteriaApi.getItems,
+    queryFn: () => cafeteriaApi.getItems(),
   });
 
   const day = today();

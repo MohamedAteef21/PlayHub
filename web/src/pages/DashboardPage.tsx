@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { alertsApi, assetsApi, branchesApi, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi, whatsappApi } from '@/api/client';
+import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi, whatsappApi } from '@/api/client';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -14,19 +14,48 @@ import { playTimeUpSound } from '@/lib/timeUpSound';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
-import type { AssetDashboardDevice, CafeteriaItem, CafeteriaItemVariant, Customer, PricingPlan, SessionDetail, SessionLive } from '@/types';
-import { PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import type {
+  AssetDashboardDevice,
+  CafeteriaAddOn,
+  CafeteriaItem,
+  CafeteriaItemVariant,
+  Customer,
+  MissingIngredient,
+  PricingPlan,
+  SessionDetail,
+  SessionLive,
+} from '@/types';
+import { CafeteriaItemKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+
+type CafCartAddOn = { addOnId: string; name: string; price: number; quantity: number };
 
 type CafCartLine = {
   itemId: string;
   itemName: string;
+  itemKind: number;
   variantId: string;
   variantName: string;
+  variant: CafeteriaItemVariant;
   price: number;
   quantity: number;
   stockDeduct: number;
   stockAvailable: number;
+  addOns: CafCartAddOn[];
 };
+
+function variantHasRecipe(variant: CafeteriaItemVariant) {
+  return (variant.recipeLines ?? []).length > 0;
+}
+
+function needsManualStockDeduct(item: { kind: number }, variant: CafeteriaItemVariant) {
+  return item.kind === CafeteriaItemKind.SellAsIs && !variantHasRecipe(variant);
+}
+
+function parseMissingIngredients(err: unknown): MissingIngredient[] | null {
+  if (!(err instanceof ApiError) || err.code !== 'MISSING_INGREDIENTS') return null;
+  const body = err.data as { missing?: MissingIngredient[] } | undefined;
+  return body?.missing ?? null;
+}
 
 type GuestType = 'none' | 'registered' | 'quick';
 
@@ -233,6 +262,11 @@ export function DashboardPage() {
   const [cafPickVariantId, setCafPickVariantId] = useState('');
   const [cafPickQty, setCafPickQty] = useState('1');
   const [cafPickStock, setCafPickStock] = useState('1');
+  const [cafPickAddOns, setCafPickAddOns] = useState<Record<string, number>>({});
+  const [cafMissingDialog, setCafMissingDialog] = useState<{
+    missing: MissingIngredient[];
+    retry: () => Promise<void>;
+  } | null>(null);
   const [cafCustomerName, setCafCustomerName] = useState('');
   const [cafSearch, setCafSearch] = useState('');
   const [returnLineId, setReturnLineId] = useState('');
@@ -330,8 +364,14 @@ export function DashboardPage() {
   });
 
   const { data: cafItems = [] } = useQuery({
-    queryKey: ['cafeteria-items'],
-    queryFn: cafeteriaApi.getItems,
+    queryKey: ['cafeteria-items', 'for-sale', user?.id, activeBranchId],
+    queryFn: () => cafeteriaApi.getItems({ forSaleOnly: true }),
+    enabled: !!cafSession,
+  });
+
+  const { data: cafAddOns = [] } = useQuery({
+    queryKey: ['cafeteria-addons', 'active', user?.id, activeBranchId],
+    queryFn: () => cafeteriaApi.getAddOns(true),
     enabled: !!cafSession,
   });
 
@@ -612,6 +652,35 @@ export function DashboardPage() {
     }
   }
 
+  async function submitCafeteriaToSession(allowSkip = false) {
+    if (!cafSession) return;
+    let last: SessionLive | null = null;
+    for (const line of cafCart) {
+      last = await sessionsApi.addCafeteria(
+        cafSession.id,
+        line.itemId,
+        line.variantId,
+        line.quantity,
+        line.stockDeduct,
+        cafCustomerName.trim() || undefined,
+        line.addOns.map((a) => ({ addOnId: a.addOnId, quantity: a.quantity })),
+        allowSkip
+      );
+    }
+    if (last) onUpdate(last);
+    setCafSession(null);
+    setCafCart([]);
+    setCafPickItem(null);
+    setCafCustomerName('');
+    setCafSearch('');
+    setReturnLineId('');
+    setReturnQty('1');
+    setReturnReason('');
+    setCafMissingDialog(null);
+    queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    queryClient.invalidateQueries({ queryKey: ['sessions'] });
+  }
+
   async function handleAddCafeteriaToSession() {
     if (!cafSession) return;
     if (cafCart.length === 0) {
@@ -621,30 +690,17 @@ export function DashboardPage() {
     setLoading(true);
     setCafError('');
     try {
-      let last: SessionLive | null = null;
-      for (const line of cafCart) {
-        last = await sessionsApi.addCafeteria(
-          cafSession.id,
-          line.itemId,
-          line.variantId,
-          line.quantity,
-          line.stockDeduct,
-          cafCustomerName.trim() || undefined
-        );
-      }
-      if (last) onUpdate(last);
-      setCafSession(null);
-      setCafCart([]);
-      setCafPickItem(null);
-      setCafCustomerName('');
-      setCafSearch('');
-      setReturnLineId('');
-      setReturnQty('1');
-      setReturnReason('');
-      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      await submitCafeteriaToSession(false);
     } catch (e) {
-      setCafError(e instanceof Error ? e.message : t('common.error'));
+      const missing = parseMissingIngredients(e);
+      if (missing) {
+        setCafMissingDialog({
+          missing,
+          retry: () => submitCafeteriaToSession(true),
+        });
+      } else {
+        setCafError(e instanceof Error ? e.message : t('common.error'));
+      }
     } finally {
       setLoading(false);
     }
@@ -655,11 +711,18 @@ export function DashboardPage() {
     const variant = (cafPickItem.variants ?? []).find((v: CafeteriaItemVariant) => v.id === cafPickVariantId);
     if (!variant) return;
     const quantity = Math.max(1, Number(cafPickQty) || 1);
-    const stockDeduct = Math.max(1, Number(cafPickStock) || 1);
-    if (stockDeduct > cafPickItem.currentQuantity) {
-      setCafError(t('inventory.insufficientStock', { defaultValue: 'Insufficient stock.' }));
+    const manual = needsManualStockDeduct(cafPickItem, variant);
+    const stockDeduct = manual ? Math.max(1, Number(cafPickStock) || quantity) : quantity;
+    if (manual && stockDeduct > cafPickItem.currentQuantity) {
+      setCafError(t('inventory.insufficientStock'));
       return;
     }
+    const selectedAddOns: CafCartAddOn[] = Object.entries(cafPickAddOns)
+      .filter(([, q]) => q > 0)
+      .map(([addOnId, qty]) => {
+        const addon = cafAddOns.find((a: CafeteriaAddOn) => a.id === addOnId)!;
+        return { addOnId, name: addon.name, price: addon.sellPrice, quantity: qty };
+      });
     setCafCart((prev) => {
       const existing = prev.find((l) => l.variantId === variant.id);
       if (existing) {
@@ -670,6 +733,7 @@ export function DashboardPage() {
                 quantity: l.quantity + quantity,
                 stockDeduct: l.stockDeduct + stockDeduct,
                 stockAvailable: cafPickItem.currentQuantity,
+                addOns: mergeCafAddOns(l.addOns, selectedAddOns),
               }
             : l
         );
@@ -679,18 +743,32 @@ export function DashboardPage() {
         {
           itemId: cafPickItem.id,
           itemName: cafPickItem.name,
+          itemKind: cafPickItem.kind,
           variantId: variant.id,
           variantName: variant.name,
+          variant,
           price: variant.sellPrice,
           quantity,
           stockDeduct,
           stockAvailable: cafPickItem.currentQuantity,
+          addOns: selectedAddOns,
         },
       ];
     });
     setCafPickItem(null);
+    setCafPickAddOns({});
     setCafSearch('');
     setCafError('');
+  }
+
+  function mergeCafAddOns(existing: CafCartAddOn[], added: CafCartAddOn[]): CafCartAddOn[] {
+    const map = new Map(existing.map((a) => [a.addOnId, { ...a }]));
+    for (const a of added) {
+      const prev = map.get(a.addOnId);
+      if (prev) prev.quantity += a.quantity;
+      else map.set(a.addOnId, { ...a });
+    }
+    return [...map.values()];
   }
 
   async function handleReturnCafeteria() {
@@ -1583,7 +1661,11 @@ export function DashboardPage() {
                 i.name.toLowerCase().includes(query) ||
                 (i.nameAr ?? '').toLowerCase().includes(query)
             );
-            const cartTotal = cafCart.reduce((sum, l) => sum + l.price * l.quantity, 0);
+            const cartTotal = cafCart.reduce(
+              (sum, l) =>
+                sum + l.price * l.quantity + l.addOns.reduce((as, a) => as + a.price * a.quantity, 0),
+              0
+            );
             return (
               <>
                 <Input
@@ -1594,8 +1676,12 @@ export function DashboardPage() {
                 />
                 <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border p-1">
                   {results.map((item: CafeteriaItem) => {
-                    const outOfStock = item.currentQuantity <= 0;
-                    const variantCount = (item.variants ?? []).filter((v) => v.isActive).length;
+                    const variants = (item.variants ?? []).filter((v) => v.isActive);
+                    const sellAsIsNoRecipe =
+                      item.kind === CafeteriaItemKind.SellAsIs &&
+                      variants.every((v) => !variantHasRecipe(v));
+                    const outOfStock = sellAsIsNoRecipe && item.currentQuantity <= 0;
+                    const variantCount = variants.length;
                     return (
                       <button
                         key={item.id}
@@ -1603,15 +1689,15 @@ export function DashboardPage() {
                         disabled={outOfStock}
                         className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-start hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
-                          const variants = (item.variants ?? []).filter((v) => v.isActive);
                           if (variants.length === 0) {
-                            setCafError(t('inventory.noVariants', { defaultValue: 'No variants for this item.' }));
+                            setCafError(t('inventory.noVariants'));
                             return;
                           }
                           setCafPickItem(item);
                           setCafPickVariantId(variants[0].id);
                           setCafPickQty('1');
                           setCafPickStock('1');
+                          setCafPickAddOns({});
                           setCafError('');
                         }}
                       >
@@ -1644,9 +1730,19 @@ export function DashboardPage() {
                             {line.itemName} — {line.variantName}
                           </p>
                           <p className="text-xs text-muted">
-                            {formatCurrency(line.price)} · {t('inventory.stockDeduct', { defaultValue: 'Stock' })}{' '}
-                            {line.stockDeduct}
+                            {formatCurrency(line.price)}
+                            {needsManualStockDeduct({ kind: line.itemKind }, line.variant) && (
+                              <>
+                                {' · '}
+                                {t('inventory.stockDeduct')} {line.stockDeduct}
+                              </>
+                            )}
                           </p>
+                          {line.addOns.length > 0 && (
+                            <p className="text-xs text-muted">
+                              {line.addOns.map((a) => `+ ${a.name} ×${a.quantity}`).join(', ')}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-1">
                           <Button
@@ -1655,11 +1751,19 @@ export function DashboardPage() {
                             onClick={() =>
                               setCafCart((prev) =>
                                 prev
-                                  .map((l) =>
-                                    l.variantId === line.variantId
-                                      ? { ...l, quantity: Math.max(0, l.quantity - 1), stockDeduct: Math.max(0, l.stockDeduct - 1) }
-                                      : l
-                                  )
+                                  .map((l) => {
+                                    if (l.variantId !== line.variantId) return l;
+                                    const nextQty = Math.max(0, l.quantity - 1);
+                                    const manual = needsManualStockDeduct({ kind: l.itemKind }, l.variant);
+                                    const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
+                                    return {
+                                      ...l,
+                                      quantity: nextQty,
+                                      stockDeduct: manual
+                                        ? Math.max(nextQty > 0 ? Math.round(deductPer * nextQty) : 0, nextQty > 0 ? 1 : 0)
+                                        : nextQty,
+                                    };
+                                  })
                                   .filter((l) => l.quantity > 0)
                               )
                             }
@@ -1672,11 +1776,19 @@ export function DashboardPage() {
                             size="sm"
                             onClick={() =>
                               setCafCart((prev) =>
-                                prev.map((l) =>
-                                  l.variantId === line.variantId
-                                    ? { ...l, quantity: l.quantity + 1, stockDeduct: l.stockDeduct + 1 }
-                                    : l
-                                )
+                                prev.map((l) => {
+                                  if (l.variantId !== line.variantId) return l;
+                                  const nextQty = l.quantity + 1;
+                                  const manual = needsManualStockDeduct({ kind: l.itemKind }, l.variant);
+                                  const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
+                                  return {
+                                    ...l,
+                                    quantity: nextQty,
+                                    stockDeduct: manual
+                                      ? Math.max(Math.round(deductPer * nextQty), 1)
+                                      : nextQty,
+                                  };
+                                })
                               )
                             }
                           >
@@ -1764,16 +1876,22 @@ export function DashboardPage() {
           </>
         }
       >
-        {cafPickItem && (
+        {cafPickItem && (() => {
+          const pickVariant = (cafPickItem.variants ?? []).find((v) => v.id === cafPickVariantId);
+          const showStock = pickVariant ? needsManualStockDeduct(cafPickItem, pickVariant) : false;
+          return (
           <div className="space-y-3">
             <div>
               <label className="mb-1 block text-sm text-muted">
-                {t('inventory.variant', { defaultValue: 'Variant' })}
+                {t('inventory.variant')}
               </label>
               <select
                 className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                 value={cafPickVariantId}
-                onChange={(e) => setCafPickVariantId(e.target.value)}
+                onChange={(e) => {
+                  setCafPickVariantId(e.target.value);
+                  setCafPickStock(cafPickQty);
+                }}
               >
                 {(cafPickItem.variants ?? [])
                   .filter((v) => v.isActive)
@@ -1785,24 +1903,98 @@ export function DashboardPage() {
               </select>
             </div>
             <Input
-              label={t('inventory.sellQty', { defaultValue: 'Sell quantity' })}
+              label={t('inventory.sellQty')}
               type="number"
               min={1}
               value={cafPickQty}
-              onChange={(e) => setCafPickQty(e.target.value)}
+              onChange={(e) => {
+                setCafPickQty(e.target.value);
+                if (showStock) setCafPickStock(e.target.value);
+              }}
             />
-            <Input
-              label={t('inventory.askStockDeduct', {
-                defaultValue: 'How much stock to deduct?',
-              })}
-              type="number"
-              min={1}
-              value={cafPickStock}
-              onChange={(e) => setCafPickStock(e.target.value)}
-            />
-            <p className="text-xs text-muted">
-              {t('inventory.stockAvailable', { defaultValue: 'Available' })}: {cafPickItem.currentQuantity}
-            </p>
+            {showStock && (
+              <>
+                <Input
+                  label={t('inventory.stockDeduct')}
+                  type="number"
+                  min={1}
+                  value={cafPickStock}
+                  onChange={(e) => setCafPickStock(e.target.value)}
+                />
+                <p className="text-xs text-muted">
+                  {t('inventory.stockAvailable')}: {cafPickItem.currentQuantity}
+                </p>
+              </>
+            )}
+            {cafAddOns.length > 0 && (
+              <div className="space-y-2 border-t border-border pt-2">
+                <p className="text-sm font-medium">{t('inventory.addOns')}</p>
+                {cafAddOns.map((addon: CafeteriaAddOn) => (
+                  <div key={addon.id} className="flex items-center justify-between gap-2">
+                    <span className="text-sm">
+                      {addon.name} (+{formatCurrency(addon.sellPrice)})
+                    </span>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="w-20"
+                      value={cafPickAddOns[addon.id] ?? 0}
+                      onChange={(e) =>
+                        setCafPickAddOns((prev) => ({
+                          ...prev,
+                          [addon.id]: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          );
+        })()}
+      </Modal>
+
+      <Modal
+        open={!!cafMissingDialog}
+        onClose={() => setCafMissingDialog(null)}
+        title={t('inventory.missingIngredients')}
+      >
+        {cafMissingDialog && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">{t('inventory.skipMissingConfirm')}</p>
+            <ul className="space-y-1 text-sm">
+              {cafMissingDialog.missing.map((m) => (
+                <li key={m.warehouseItemId} className="rounded-lg border border-border px-3 py-2">
+                  <span className="font-medium">{m.name}</span>
+                  <span className="text-muted">
+                    {' '}
+                    — {t('inventory.required')}: {m.required}, {t('inventory.available')}: {m.available}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setCafMissingDialog(null)}>
+                {t('session.cancel')}
+              </Button>
+              <Button
+                loading={loading}
+                onClick={async () => {
+                  setLoading(true);
+                  setCafError('');
+                  try {
+                    await cafMissingDialog.retry();
+                  } catch (e) {
+                    setCafError(e instanceof Error ? e.message : t('common.error'));
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+              >
+                {t('inventory.skipAndContinue')}
+              </Button>
+            </div>
           </div>
         )}
       </Modal>

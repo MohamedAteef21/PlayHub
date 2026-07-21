@@ -87,6 +87,17 @@ export interface SessionCafeteriaLine {
   lineTotal: number;
   customerName: string | null;
   addedAt: string;
+  addOns: CafeteriaSaleLineAddOn[];
+}
+
+export interface CafeteriaSaleLineAddOn {
+  id: string;
+  addOnId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  stockDeductQuantity: number;
 }
 
 export interface SessionInvoice {
@@ -354,13 +365,30 @@ export interface StockVoucher {
   lines: StockVoucherLine[];
 }
 
+export interface RecipeLine {
+  id: string;
+  warehouseItemId: string;
+  warehouseItemName: string;
+  quantity: number;
+  availableQuantity: number;
+}
+
 export interface CafeteriaItemVariant {
   id: string;
   name: string;
   sellPrice: number;
   isActive: boolean;
   sortOrder: number;
+  recipeLines: RecipeLine[];
 }
+
+/** Matches backend CafeteriaItemKind */
+export const CafeteriaItemKind = {
+  Warehouse: 1,
+  Menu: 2,
+  SellAsIs: 3,
+} as const;
+export type CafeteriaItemKind = (typeof CafeteriaItemKind)[keyof typeof CafeteriaItemKind];
 
 export interface CafeteriaItem {
   id: string;
@@ -372,11 +400,32 @@ export interface CafeteriaItem {
   minThreshold: number;
   isLowStock: boolean;
   isActive: boolean;
+  kind: CafeteriaItemKind;
   baseUnitName: string;
   largeUnitName: string | null;
   unitsPerLarge: number;
   createdAt: string;
   variants: CafeteriaItemVariant[];
+}
+
+export interface CafeteriaAddOn {
+  id: string;
+  branchId: string;
+  name: string;
+  sellPrice: number;
+  warehouseItemId: string;
+  warehouseItemName: string;
+  deductQuantity: number;
+  availableQuantity: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface MissingIngredient {
+  warehouseItemId: string;
+  name: string;
+  required: number;
+  available: number;
 }
 
 /** Matches backend InventoryUnitKind */
@@ -397,6 +446,7 @@ export interface CafeteriaSaleLine {
   returnedQuantity: number;
   unitPrice: number;
   lineTotal: number;
+  addOns: CafeteriaSaleLineAddOn[];
 }
 
 export interface CafeteriaSale {

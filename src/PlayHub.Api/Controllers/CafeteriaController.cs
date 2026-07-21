@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PlayHub.Api.Authorization;
 using PlayHub.Application.Cafeteria;
+using PlayHub.Domain.Enums;
 
 namespace PlayHub.Api.Controllers;
 
@@ -16,8 +17,11 @@ public class CafeteriaController : ControllerBase
 
     [HttpGet("items")]
     [Authorize(Policy = PermissionPolicies.CafeteriaView)]
-    public async Task<IActionResult> GetItems(CancellationToken ct) =>
-        Ok(await _cafeteriaService.GetItemsAsync(ct));
+    public async Task<IActionResult> GetItems(
+        [FromQuery] CafeteriaItemKind? kind,
+        [FromQuery] bool forSaleOnly = false,
+        CancellationToken ct = default) =>
+        Ok(await _cafeteriaService.GetItemsAsync(kind, forSaleOnly, ct));
 
     [HttpGet("items/{id:guid}")]
     [Authorize(Policy = PermissionPolicies.CafeteriaView)]
@@ -56,6 +60,36 @@ public class CafeteriaController : ControllerBase
         }
     }
 
+    [HttpGet("addons")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaView)]
+    public async Task<IActionResult> GetAddOns([FromQuery] bool activeOnly = false, CancellationToken ct = default) =>
+        Ok(await _cafeteriaService.GetAddOnsAsync(activeOnly, ct));
+
+    [HttpPost("addons")]
+    [Authorize(Policy = PermissionPolicies.InventoryManageItems)]
+    public async Task<IActionResult> CreateAddOn([FromBody] CreateCafeteriaAddOnRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.CreateAddOnAsync(request, ct), StatusCodes.Status201Created);
+
+    [HttpPut("addons/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.InventoryManageItems)]
+    public async Task<IActionResult> UpdateAddOn(Guid id, [FromBody] UpdateCafeteriaAddOnRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.UpdateAddOnAsync(id, request, ct));
+
+    [HttpDelete("addons/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.InventoryManageItems)]
+    public async Task<IActionResult> DeleteAddOn(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await _cafeteriaService.SoftDeleteAddOnAsync(id, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("sales")]
     [Authorize(Policy = PermissionPolicies.CafeteriaView)]
     public async Task<IActionResult> GetSales([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct) =>
@@ -86,6 +120,15 @@ public class CafeteriaController : ControllerBase
             var result = await action();
             return successCode == StatusCodes.Status201Created ? Created(string.Empty, result) : Ok(result);
         }
+        catch (MissingIngredientsException ex)
+        {
+            return Conflict(new
+            {
+                code = MissingIngredientsException.ErrorCode,
+                message = ex.Message,
+                missing = ex.Missing
+            });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -93,6 +136,10 @@ public class CafeteriaController : ControllerBase
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
         }
     }
 }

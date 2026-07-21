@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cafeteriaApi, inventoryApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import type { CafeteriaItem, StockVoucher } from '@/types';
+import type { CafeteriaAddOn, CafeteriaItem, InventoryUnit, StockVoucher } from '@/types';
 import {
+  CafeteriaItemKind,
   InventoryMovementType,
   InventoryUnitKind,
   StockVoucherStatus,
@@ -21,7 +22,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'stock' | 'vouchers' | 'movements';
+type Tab = 'warehouse' | 'menu' | 'addons' | 'vouchers' | 'movements';
 
 type VariantFormRow = {
   key: string;
@@ -29,6 +30,14 @@ type VariantFormRow = {
   name: string;
   sellPrice: string;
   isActive: boolean;
+  recipeLines: RecipeLineFormRow[];
+};
+
+type RecipeLineFormRow = {
+  key: string;
+  id?: string;
+  warehouseItemId: string;
+  quantity: string;
 };
 
 const movementLabels: Record<number, string> = {
@@ -42,14 +51,23 @@ const movementLabels: Record<number, string> = {
   [InventoryMovementType.Settlement]: 'Settlement',
 };
 
+function newRecipeLineRow(partial?: Partial<RecipeLineFormRow>): RecipeLineFormRow {
+  return { key: crypto.randomUUID(), warehouseItemId: '', quantity: '1', ...partial };
+}
+
 function newVariantRow(partial?: Partial<VariantFormRow>): VariantFormRow {
   return {
     key: crypto.randomUUID(),
     name: '',
     sellPrice: '',
     isActive: true,
+    recipeLines: [],
     ...partial,
   };
+}
+
+function isStockKind(kind: number) {
+  return kind === CafeteriaItemKind.Warehouse || kind === CafeteriaItemKind.SellAsIs;
 }
 
 function itemMinVariantPrice(item: CafeteriaItem): number {
@@ -62,12 +80,21 @@ function itemStockValue(item: CafeteriaItem): number {
   return itemMinVariantPrice(item) * item.currentQuantity;
 }
 
+function unitName(unit: InventoryUnit, lang: string) {
+  return lang === 'ar' && unit.nameAr ? unit.nameAr : unit.name;
+}
+
+function resolveUnitId(units: InventoryUnit[], name: string | null | undefined) {
+  if (!name) return '';
+  return units.find((u) => u.name === name || u.nameAr === name)?.id ?? '';
+}
+
 export function InventoryPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
-  const [tab, setTab] = useState<Tab>('stock');
+  const [tab, setTab] = useState<Tab>('warehouse');
   const [adjustItem, setAdjustItem] = useState<CafeteriaItem | null>(null);
   const [newQty, setNewQty] = useState('');
   const [reason, setReason] = useState('');
@@ -76,23 +103,66 @@ export function InventoryPage() {
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [voucherNotes, setVoucherNotes] = useState('');
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
-  const [addItemOpen, setAddItemOpen] = useState(false);
+  const [itemFormOpen, setItemFormOpen] = useState(false);
+  const [formContext, setFormContext] = useState<'warehouse' | 'menu'>('warehouse');
   const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
+  const [itemKind, setItemKind] = useState<number>(CafeteriaItemKind.Warehouse);
   const [itemName, setItemName] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemQty, setItemQty] = useState('0');
   const [itemThreshold, setItemThreshold] = useState('5');
   const [itemIsActive, setItemIsActive] = useState(true);
+  const [baseUnitId, setBaseUnitId] = useState('');
+  const [largeUnitId, setLargeUnitId] = useState('');
+  const [unitsPerLarge, setUnitsPerLarge] = useState('1');
   const [variantRows, setVariantRows] = useState<VariantFormRow[]>([newVariantRow()]);
+  const [addonFormOpen, setAddonFormOpen] = useState(false);
+  const [editingAddon, setEditingAddon] = useState<CafeteriaAddOn | null>(null);
+  const [addonName, setAddonName] = useState('');
+  const [addonPrice, setAddonPrice] = useState('');
+  const [addonWarehouseId, setAddonWarehouseId] = useState('');
+  const [addonDeductQty, setAddonDeductQty] = useState('1');
+  const [addonIsActive, setAddonIsActive] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
   const canAdjust = hasPermission(user, Permissions.InventoryAdjust);
   const canManageItems = hasPermission(user, Permissions.InventoryManageItems);
 
-  const { data: items = [], isLoading: itemsLoading } = useQuery({
+  const { data: allItems = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['cafeteria-items', user?.id, activeBranchId],
-    queryFn: cafeteriaApi.getItems,
+    queryFn: () => cafeteriaApi.getItems(),
+  });
+
+  const { data: units = [] } = useQuery({
+    queryKey: ['inventory-units', user?.id, activeBranchId],
+    queryFn: () => inventoryApi.getUnits(),
+  });
+
+  const warehouseItems = useMemo(
+    () => allItems.filter((i) => i.kind === CafeteriaItemKind.Warehouse),
+    [allItems]
+  );
+
+  const stockItems = useMemo(
+    () => allItems.filter((i) => isStockKind(i.kind)),
+    [allItems]
+  );
+
+  const warehouseTabItems = useMemo(
+    () => allItems.filter((i) => i.kind === CafeteriaItemKind.Warehouse || i.kind === CafeteriaItemKind.SellAsIs),
+    [allItems]
+  );
+
+  const menuTabItems = useMemo(
+    () => allItems.filter((i) => i.kind === CafeteriaItemKind.Menu || i.kind === CafeteriaItemKind.SellAsIs),
+    [allItems]
+  );
+
+  const { data: addOns = [], isLoading: addOnsLoading } = useQuery({
+    queryKey: ['cafeteria-addons', user?.id, activeBranchId],
+    queryFn: () => cafeteriaApi.getAddOns(),
+    enabled: tab === 'addons',
   });
 
   const { data: movementsPage, isLoading: movLoading } = useQuery({
@@ -122,33 +192,68 @@ export function InventoryPage() {
     onError: (e: Error) => setError(e.message),
   });
 
-  const createItemMutation = useMutation({
+  function buildVariantsPayload(includeRecipes: boolean) {
+    return variantRows
+      .filter((row) => row.name.trim())
+      .map((row) => ({
+        ...(row.id ? { id: row.id } : {}),
+        name: row.name.trim(),
+        sellPrice: Number(row.sellPrice),
+        ...(editingItem ? { isActive: row.isActive } : {}),
+        ...(includeRecipes
+          ? {
+              recipeLines: row.recipeLines
+                .filter((rl) => rl.warehouseItemId && rl.quantity !== '')
+                .map((rl) => ({
+                  ...(rl.id ? { id: rl.id } : {}),
+                  warehouseItemId: rl.warehouseItemId,
+                  quantity: Number(rl.quantity),
+                })),
+            }
+          : {}),
+      }));
+  }
+
+  const saveItemMutation = useMutation({
     mutationFn: () => {
-      const variants = variantRows
-        .filter((row) => row.name.trim())
-        .map((row) => ({
-          ...(row.id ? { id: row.id } : {}),
-          name: row.name.trim(),
-          sellPrice: Number(row.sellPrice),
-          ...(editingItem ? { isActive: row.isActive } : {}),
-        }));
+      const includeRecipes = formContext === 'menu' && itemKind === CafeteriaItemKind.Menu;
+      const needsVariants =
+        itemKind === CafeteriaItemKind.SellAsIs ||
+        itemKind === CafeteriaItemKind.Menu;
+      const variants = needsVariants ? buildVariantsPayload(includeRecipes) : [];
+
+      const unitPayload = formContext === 'warehouse' && isStockKind(itemKind)
+        ? {
+            baseUnitId: baseUnitId || undefined,
+            largeUnitId: largeUnitId || undefined,
+            unitsPerLarge: largeUnitId ? Number(unitsPerLarge) || 1 : undefined,
+          }
+        : {};
 
       if (editingItem) {
         return cafeteriaApi.updateItem(editingItem.id, {
           name: itemName.trim(),
+          kind: itemKind,
           nameAr: itemNameAr.trim() || undefined,
           minThreshold: Number(itemThreshold) || 0,
           isActive: itemIsActive,
           variants,
+          ...unitPayload,
         });
       }
 
       return cafeteriaApi.createItem({
         name: itemName.trim(),
+        kind: itemKind,
         nameAr: itemNameAr.trim() || undefined,
-        currentQuantity: Number(itemQty) || 0,
+        currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
         minThreshold: Number(itemThreshold) || 0,
-        variants: variants.map(({ name, sellPrice }) => ({ name, sellPrice })),
+        variants: variants.map(({ name, sellPrice, recipeLines }) => ({
+          name,
+          sellPrice,
+          ...(recipeLines ? { recipeLines } : {}),
+        })),
+        ...unitPayload,
       });
     },
     onSuccess: () => {
@@ -162,6 +267,7 @@ export function InventoryPage() {
     mutationFn: (item: CafeteriaItem) =>
       cafeteriaApi.updateItem(item.id, {
         name: item.name,
+        kind: item.kind,
         nameAr: item.nameAr ?? undefined,
         minThreshold: item.minThreshold,
         isActive: !item.isActive,
@@ -170,6 +276,11 @@ export function InventoryPage() {
           name: v.name,
           sellPrice: v.sellPrice,
           isActive: v.isActive,
+          recipeLines: (v.recipeLines ?? []).map((rl) => ({
+            id: rl.id,
+            warehouseItemId: rl.warehouseItemId,
+            quantity: rl.quantity,
+          })),
         })),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] }),
@@ -180,18 +291,43 @@ export function InventoryPage() {
     mutationFn: (id: string) => cafeteriaApi.deleteItem(id),
     onSuccess: (_data, id) => {
       setError('');
-      queryClient.setQueriesData<import('@/types').CafeteriaItem[]>(
-        { queryKey: ['cafeteria-items'] },
-        (old) => old?.filter((i) => i.id !== id)
+      queryClient.setQueriesData<CafeteriaItem[]>({ queryKey: ['cafeteria-items'] }, (old) =>
+        old?.filter((i) => i.id !== id)
       );
       queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
     },
     onError: (e: Error) => setError(e.message),
   });
 
+  const saveAddonMutation = useMutation({
+    mutationFn: () => {
+      const payload = {
+        name: addonName.trim(),
+        sellPrice: Number(addonPrice),
+        warehouseItemId: addonWarehouseId,
+        deductQuantity: Number(addonDeductQty) || 1,
+      };
+      if (editingAddon) {
+        return cafeteriaApi.updateAddOn(editingAddon.id, { ...payload, isActive: addonIsActive });
+      }
+      return cafeteriaApi.createAddOn(payload);
+    },
+    onSuccess: () => {
+      resetAddonForm();
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-addons'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteAddonMutation = useMutation({
+    mutationFn: (id: string) => cafeteriaApi.deleteAddOn(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cafeteria-addons'] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
   const createVoucherMutation = useMutation({
     mutationFn: async () => {
-      const lines = items
+      const lines = stockItems
         .map((item) => {
           const raw = voucherLines[item.id];
           if (raw === undefined || raw === '') return null;
@@ -205,11 +341,7 @@ export function InventoryPage() {
             return { cafeteriaItemId: item.id, quantity: delta };
           }
           if (voucherType === StockVoucherType.StockIn) {
-            return {
-              cafeteriaItemId: item.id,
-              quantity: qty,
-              unit: InventoryUnitKind.Base,
-            };
+            return { cafeteriaItemId: item.id, quantity: qty, unit: InventoryUnitKind.Base };
           }
           return { cafeteriaItemId: item.id, quantity: qty };
         })
@@ -263,6 +395,12 @@ export function InventoryPage() {
     return i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
   }
 
+  function kindLabel(kind: number) {
+    if (kind === CafeteriaItemKind.Warehouse) return t('inventory.kindWarehouse');
+    if (kind === CafeteriaItemKind.Menu) return t('inventory.kindMenu');
+    return t('inventory.kindSellAsIs');
+  }
+
   function variantLine(item: CafeteriaItem) {
     return (item.variants ?? [])
       .filter((v) => v.isActive)
@@ -271,35 +409,48 @@ export function InventoryPage() {
   }
 
   function resetItemForm() {
-    setAddItemOpen(false);
+    setItemFormOpen(false);
     setEditingItem(null);
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
     setItemThreshold('5');
     setItemIsActive(true);
+    setBaseUnitId('');
+    setLargeUnitId('');
+    setUnitsPerLarge('1');
     setVariantRows([newVariantRow()]);
     setError('');
   }
 
-  function openCreateItem() {
-    setError('');
+  function openCreateItem(ctx: 'warehouse' | 'menu') {
+    setFormContext(ctx);
     setEditingItem(null);
+    setItemKind(ctx === 'warehouse' ? CafeteriaItemKind.Warehouse : CafeteriaItemKind.Menu);
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
     setItemThreshold('5');
     setItemIsActive(true);
+    setBaseUnitId(units[0]?.id ?? '');
+    setLargeUnitId('');
+    setUnitsPerLarge('1');
     setVariantRows([newVariantRow()]);
-    setAddItemOpen(true);
+    setError('');
+    setItemFormOpen(true);
   }
 
-  function openEditItem(item: CafeteriaItem) {
+  function openEditItem(item: CafeteriaItem, ctx: 'warehouse' | 'menu') {
+    setFormContext(ctx);
     setEditingItem(item);
+    setItemKind(item.kind);
     setItemName(item.name);
     setItemNameAr(item.nameAr ?? '');
     setItemThreshold(String(item.minThreshold));
     setItemIsActive(item.isActive);
+    setBaseUnitId(resolveUnitId(units, item.baseUnitName));
+    setLargeUnitId(resolveUnitId(units, item.largeUnitName));
+    setUnitsPerLarge(String(item.unitsPerLarge || 1));
     setVariantRows(
       (item.variants ?? []).length > 0
         ? (item.variants ?? []).map((v) =>
@@ -308,12 +459,52 @@ export function InventoryPage() {
               name: v.name,
               sellPrice: String(v.sellPrice),
               isActive: v.isActive,
+              recipeLines: (v.recipeLines ?? []).map((rl) =>
+                newRecipeLineRow({
+                  id: rl.id,
+                  warehouseItemId: rl.warehouseItemId,
+                  quantity: String(rl.quantity),
+                })
+              ),
             })
           )
         : [newVariantRow()]
     );
     setError('');
-    setAddItemOpen(true);
+    setItemFormOpen(true);
+  }
+
+  function resetAddonForm() {
+    setAddonFormOpen(false);
+    setEditingAddon(null);
+    setAddonName('');
+    setAddonPrice('');
+    setAddonWarehouseId('');
+    setAddonDeductQty('1');
+    setAddonIsActive(true);
+    setError('');
+  }
+
+  function openCreateAddon() {
+    setEditingAddon(null);
+    setAddonName('');
+    setAddonPrice('');
+    setAddonWarehouseId(warehouseItems[0]?.id ?? '');
+    setAddonDeductQty('1');
+    setAddonIsActive(true);
+    setError('');
+    setAddonFormOpen(true);
+  }
+
+  function openEditAddon(addon: CafeteriaAddOn) {
+    setEditingAddon(addon);
+    setAddonName(addon.name);
+    setAddonPrice(String(addon.sellPrice));
+    setAddonWarehouseId(addon.warehouseItemId);
+    setAddonDeductQty(String(addon.deductQuantity));
+    setAddonIsActive(addon.isActive);
+    setError('');
+    setAddonFormOpen(true);
   }
 
   function addVariantRow() {
@@ -328,8 +519,52 @@ export function InventoryPage() {
     setVariantRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   }
 
+  function addRecipeLine(variantKey: string) {
+    setVariantRows((prev) =>
+      prev.map((r) =>
+        r.key === variantKey ? { ...r, recipeLines: [...r.recipeLines, newRecipeLineRow()] } : r
+      )
+    );
+  }
+
+  function updateRecipeLine(variantKey: string, lineKey: string, patch: Partial<RecipeLineFormRow>) {
+    setVariantRows((prev) =>
+      prev.map((r) =>
+        r.key === variantKey
+          ? {
+              ...r,
+              recipeLines: r.recipeLines.map((rl) => (rl.key === lineKey ? { ...rl, ...patch } : rl)),
+            }
+          : r
+      )
+    );
+  }
+
+  function removeRecipeLine(variantKey: string, lineKey: string) {
+    setVariantRows((prev) =>
+      prev.map((r) =>
+        r.key === variantKey
+          ? { ...r, recipeLines: r.recipeLines.filter((rl) => rl.key !== lineKey) }
+          : r
+      )
+    );
+  }
+
   function validVariantRows() {
-    return variantRows.filter((row) => row.name.trim() && row.sellPrice !== '' && !Number.isNaN(Number(row.sellPrice)));
+    return variantRows.filter(
+      (row) => row.name.trim() && row.sellPrice !== '' && !Number.isNaN(Number(row.sellPrice))
+    );
+  }
+
+  function needsVariants() {
+    return itemKind === CafeteriaItemKind.SellAsIs || itemKind === CafeteriaItemKind.Menu;
+  }
+
+  function canSaveItem() {
+    if (!itemName.trim()) return false;
+    if (formContext === 'warehouse' && isStockKind(itemKind) && !baseUnitId) return false;
+    if (needsVariants() && validVariantRows().length === 0) return false;
+    return true;
   }
 
   function voucherTypeLabel(type: number) {
@@ -339,7 +574,9 @@ export function InventoryPage() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'stock', label: t('inventory.stock') },
+    { id: 'warehouse', label: t('inventory.warehouse') },
+    { id: 'menu', label: t('inventory.menuProducts') },
+    { id: 'addons', label: t('inventory.addons') },
     { id: 'vouchers', label: t('inventory.vouchers') },
     { id: 'movements', label: t('inventory.movements') },
   ];
@@ -347,10 +584,22 @@ export function InventoryPage() {
   return (
     <div>
       <PageHeader title={t('inventory.title')}>
-        {tab === 'stock' && canManageItems && (
-          <Button onClick={openCreateItem}>
+        {tab === 'warehouse' && canManageItems && (
+          <Button onClick={() => openCreateItem('warehouse')}>
             <Icon name="plus" className="h-4 w-4" />
             {t('inventory.addItem')}
+          </Button>
+        )}
+        {tab === 'menu' && canManageItems && (
+          <Button onClick={() => openCreateItem('menu')}>
+            <Icon name="plus" className="h-4 w-4" />
+            {t('inventory.addMenuProduct')}
+          </Button>
+        )}
+        {tab === 'addons' && canManageItems && (
+          <Button onClick={openCreateAddon}>
+            <Icon name="plus" className="h-4 w-4" />
+            {t('inventory.addAddOn')}
           </Button>
         )}
         {tab === 'vouchers' && canAdjust && (
@@ -391,6 +640,12 @@ export function InventoryPage() {
         )}
       </PageHeader>
 
+      <div className="mb-4 text-sm text-muted">
+        {tab === 'warehouse' && t('inventory.warehouseHint')}
+        {tab === 'menu' && t('inventory.menuHint')}
+        {tab === 'addons' && t('inventory.addonsHint')}
+      </div>
+
       <div className="mb-6 flex flex-wrap gap-2">
         {tabs.map(({ id, label }) => (
           <Button
@@ -407,19 +662,20 @@ export function InventoryPage() {
         ))}
       </div>
 
-      {error && (
+      {error && tab !== 'vouchers' && (
         <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       )}
 
-      {tab === 'stock' &&
+      {tab === 'warehouse' &&
         (itemsLoading ? (
           <PageLoader />
         ) : (
           <DataTable
             headers={[
               t('inventory.item'),
+              t('inventory.kind'),
               t('common.status'),
               t('inventory.qty'),
               t('inventory.threshold'),
@@ -427,16 +683,25 @@ export function InventoryPage() {
               '',
             ]}
           >
-            {items.map((item) => (
+            {warehouseTabItems.map((item) => (
               <tr key={item.id} className="hover:bg-surface-hover">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     {itemLabel(item)}
                     {item.isLowStock && <Badge status="paused">{t('cafeteria.lowStock')}</Badge>}
                   </div>
-                  {variantLine(item) && (
+                  {item.kind === CafeteriaItemKind.SellAsIs && variantLine(item) && (
                     <p className="text-xs text-muted">{variantLine(item)}</p>
                   )}
+                  {item.baseUnitName && (
+                    <p className="text-xs text-muted">
+                      {item.baseUnitName}
+                      {item.largeUnitName ? ` / ${item.largeUnitName}` : ''}
+                    </p>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <Badge status="idle">{kindLabel(item.kind)}</Badge>
                 </td>
                 <td className="px-4 py-3">
                   <Badge status={item.isActive ? 'gaming' : 'idle'}>
@@ -464,7 +729,7 @@ export function InventoryPage() {
                     )}
                     {canManageItems && (
                       <>
-                        <Button variant="ghost" size="sm" onClick={() => openEditItem(item)}>
+                        <Button variant="ghost" size="sm" onClick={() => openEditItem(item, 'warehouse')}>
                           {t('users.edit')}
                         </Button>
                         <Button
@@ -490,6 +755,124 @@ export function InventoryPage() {
                       </>
                     )}
                   </div>
+                </td>
+              </tr>
+            ))}
+          </DataTable>
+        ))}
+
+      {tab === 'menu' &&
+        (itemsLoading ? (
+          <PageLoader />
+        ) : (
+          <DataTable
+            headers={[t('inventory.item'), t('inventory.kind'), t('common.status'), t('inventory.variants'), '']}
+          >
+            {menuTabItems.map((item) => (
+              <tr key={item.id} className="hover:bg-surface-hover">
+                <td className="px-4 py-3 font-medium">{itemLabel(item)}</td>
+                <td className="px-4 py-3">
+                  <Badge status="idle">{kindLabel(item.kind)}</Badge>
+                </td>
+                <td className="px-4 py-3">
+                  <Badge status={item.isActive ? 'gaming' : 'idle'}>
+                    {item.isActive ? t('common.active') : t('common.inactive')}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-sm text-muted">
+                  {(item.variants ?? [])
+                    .filter((v) => v.isActive)
+                    .map((v) => {
+                      const recipes = (v.recipeLines ?? []).length;
+                      return `${v.name} · ${formatCurrency(v.sellPrice)}${recipes ? ` (${recipes} ${t('inventory.recipeLines')})` : ''}`;
+                    })
+                    .join(' · ') || '—'}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {canManageItems && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => openEditItem(item, 'menu')}>
+                          {t('users.edit')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={toggleActiveMutation.isPending}
+                          onClick={() => toggleActiveMutation.mutate(item)}
+                        >
+                          {item.isActive ? t('inventory.deactivate') : t('inventory.activate')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={deleteItemMutation.isPending}
+                          onClick={() => {
+                            if (window.confirm(t('common.confirmDelete'))) {
+                              deleteItemMutation.mutate(item.id);
+                            }
+                          }}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </DataTable>
+        ))}
+
+      {tab === 'addons' &&
+        (addOnsLoading ? (
+          <PageLoader />
+        ) : addOns.length === 0 ? (
+          <p className="text-muted">{t('inventory.noAddOns')}</p>
+        ) : (
+          <DataTable
+            headers={[
+              t('inventory.addOn'),
+              t('inventory.sellPrice'),
+              t('inventory.warehouseItem'),
+              t('inventory.deductQty'),
+              t('inventory.qty'),
+              t('common.status'),
+              '',
+            ]}
+          >
+            {addOns.map((addon) => (
+              <tr key={addon.id} className="hover:bg-surface-hover">
+                <td className="px-4 py-3 font-medium">{addon.name}</td>
+                <td className="px-4 py-3">{formatCurrency(addon.sellPrice)}</td>
+                <td className="px-4 py-3 text-sm">{addon.warehouseItemName}</td>
+                <td className="px-4 py-3">{addon.deductQuantity}</td>
+                <td className="px-4 py-3">{addon.availableQuantity}</td>
+                <td className="px-4 py-3">
+                  <Badge status={addon.isActive ? 'gaming' : 'idle'}>
+                    {addon.isActive ? t('common.active') : t('common.inactive')}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3">
+                  {canManageItems && (
+                    <div className="flex flex-wrap gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => openEditAddon(addon)}>
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        loading={deleteAddonMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deleteAddonMutation.mutate(addon.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -620,7 +1003,7 @@ export function InventoryPage() {
           </p>
           <Input label={t('inventory.notes')} value={voucherNotes} onChange={(e) => setVoucherNotes(e.target.value)} />
           <div className="max-h-72 space-y-2 overflow-y-auto">
-            {items
+            {stockItems
               .filter((i) => i.isActive)
               .map((item) => (
                 <div
@@ -650,106 +1033,331 @@ export function InventoryPage() {
       </Modal>
 
       <Modal
-        open={addItemOpen}
+        open={itemFormOpen}
         onClose={resetItemForm}
-        title={editingItem ? t('users.edit') : t('inventory.addItem')}
+        title={
+          editingItem
+            ? t('users.edit')
+            : formContext === 'warehouse'
+              ? t('inventory.addItem')
+              : t('inventory.addMenuProduct')
+        }
       >
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-text">{t('inventory.item')}</p>
-            <Input
-              label={t('inventory.itemNameAr')}
-              value={itemNameAr}
-              onChange={(e) => setItemNameAr(e.target.value)}
-            />
-            <Input label={t('inventory.itemName')} value={itemName} onChange={(e) => setItemName(e.target.value)} />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-text">
-                {t('inventory.variants', { defaultValue: 'Variants' })}
-              </p>
-              <Button type="button" size="sm" variant="secondary" onClick={addVariantRow}>
-                <Icon name="plus" className="h-3 w-3" />
-                {t('inventory.addVariant', { defaultValue: 'Add variant' })}
-              </Button>
-            </div>
-            {variantRows.map((row, index) => (
-              <div key={row.key} className="flex flex-wrap items-end gap-2 rounded-lg border border-border p-3">
-                <div className="min-w-[8rem] flex-1">
-                  <Input
-                    label={
-                      index === 0
-                        ? t('inventory.variant', { defaultValue: 'Variant' })
-                        : `${t('inventory.variant', { defaultValue: 'Variant' })} ${index + 1}`
-                    }
-                    value={row.name}
-                    onChange={(e) => updateVariantRow(row.key, { name: e.target.value })}
-                  />
-                </div>
-                <div className="w-28">
-                  <Input
-                    label={t('inventory.sellPrice')}
-                    type="number"
-                    value={row.sellPrice}
-                    onChange={(e) => updateVariantRow(row.key, { sellPrice: e.target.value })}
-                  />
-                </div>
-                {editingItem && (
-                  <label className="flex items-center gap-2 pb-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={row.isActive}
-                      onChange={(e) => updateVariantRow(row.key, { isActive: e.target.checked })}
-                    />
-                    {t('common.active')}
-                  </label>
-                )}
-                {variantRows.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="mb-1"
-                    onClick={() => removeVariantRow(row.key)}
-                  >
-                    {t('common.delete')}
-                  </Button>
-                )}
-              </div>
-            ))}
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto pe-1">
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('inventory.kind')}</label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+              value={itemKind}
+              onChange={(e) => {
+                const k = Number(e.target.value);
+                setItemKind(k);
+                if (k === CafeteriaItemKind.Warehouse) {
+                  setVariantRows([]);
+                } else if (variantRows.length === 0) {
+                  setVariantRows([newVariantRow()]);
+                }
+              }}
+              disabled={!!editingItem}
+            >
+              {formContext === 'warehouse' ? (
+                <>
+                  <option value={CafeteriaItemKind.Warehouse}>{t('inventory.kindWarehouse')}</option>
+                  <option value={CafeteriaItemKind.SellAsIs}>{t('inventory.kindSellAsIs')}</option>
+                </>
+              ) : (
+                <>
+                  <option value={CafeteriaItemKind.Menu}>{t('inventory.kindMenu')}</option>
+                  <option value={CafeteriaItemKind.SellAsIs}>{t('inventory.kindSellAsIs')}</option>
+                </>
+              )}
+            </select>
           </div>
 
           <Input
-            label={t('inventory.threshold')}
-            type="number"
-            value={itemThreshold}
-            onChange={(e) => setItemThreshold(e.target.value)}
+            label={t('inventory.itemNameAr')}
+            value={itemNameAr}
+            onChange={(e) => setItemNameAr(e.target.value)}
           />
-          {editingItem ? (
+          <Input label={t('inventory.itemName')} value={itemName} onChange={(e) => setItemName(e.target.value)} />
+
+          {formContext === 'warehouse' && isStockKind(itemKind) && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm text-muted">{t('inventory.baseUnit')}</label>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                  value={baseUnitId}
+                  onChange={(e) => setBaseUnitId(e.target.value)}
+                >
+                  <option value="">{t('inventory.selectBaseUnit')}</option>
+                  {units.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {unitName(u, i18n.language)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-muted">{t('inventory.largeUnit')}</label>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                  value={largeUnitId}
+                  onChange={(e) => setLargeUnitId(e.target.value)}
+                >
+                  <option value="">{t('inventory.none')}</option>
+                  {units
+                    .filter((u) => u.id !== baseUnitId)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {unitName(u, i18n.language)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              {largeUnitId && (
+                <Input
+                  label={t('inventory.unitsPerLarge')}
+                  type="number"
+                  min={2}
+                  value={unitsPerLarge}
+                  onChange={(e) => setUnitsPerLarge(e.target.value)}
+                />
+              )}
+              <Input
+                label={t('inventory.threshold')}
+                type="number"
+                value={itemThreshold}
+                onChange={(e) => setItemThreshold(e.target.value)}
+              />
+              {editingItem ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={itemIsActive}
+                    onChange={(e) => setItemIsActive(e.target.checked)}
+                  />
+                  {t('common.active')}
+                </label>
+              ) : (
+                <Input
+                  label={t('inventory.initialStock')}
+                  type="number"
+                  value={itemQty}
+                  onChange={(e) => setItemQty(e.target.value)}
+                />
+              )}
+            </>
+          )}
+
+          {formContext === 'menu' && (
+            <>
+              <Input
+                label={t('inventory.threshold')}
+                type="number"
+                value={itemThreshold}
+                onChange={(e) => setItemThreshold(e.target.value)}
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={itemIsActive}
+                  onChange={(e) => setItemIsActive(e.target.checked)}
+                />
+                {t('common.active')}
+              </label>
+              {itemKind === CafeteriaItemKind.SellAsIs && (
+                <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+              )}
+            </>
+          )}
+
+          {needsVariants() && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-text">{t('inventory.variants')}</p>
+                <Button type="button" size="sm" variant="secondary" onClick={addVariantRow}>
+                  <Icon name="plus" className="h-3 w-3" />
+                  {t('inventory.addVariant')}
+                </Button>
+              </div>
+              {variantRows.map((row, index) => (
+                <div key={row.key} className="space-y-2 rounded-lg border border-border p-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="min-w-[8rem] flex-1">
+                      <Input
+                        label={
+                          index === 0
+                            ? t('inventory.variant')
+                            : `${t('inventory.variant')} ${index + 1}`
+                        }
+                        value={row.name}
+                        onChange={(e) => updateVariantRow(row.key, { name: e.target.value })}
+                      />
+                    </div>
+                    <div className="w-28">
+                      <Input
+                        label={t('inventory.sellPrice')}
+                        type="number"
+                        value={row.sellPrice}
+                        onChange={(e) => updateVariantRow(row.key, { sellPrice: e.target.value })}
+                      />
+                    </div>
+                    {editingItem && (
+                      <label className="flex items-center gap-2 pb-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={row.isActive}
+                          onChange={(e) => updateVariantRow(row.key, { isActive: e.target.checked })}
+                        />
+                        {t('common.active')}
+                      </label>
+                    )}
+                    {variantRows.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="mb-1"
+                        onClick={() => removeVariantRow(row.key)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    )}
+                  </div>
+
+                  {formContext === 'menu' && itemKind === CafeteriaItemKind.Menu && (
+                    <div className="space-y-2 border-t border-border pt-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-muted">{t('inventory.recipe')}</p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => addRecipeLine(row.key)}
+                        >
+                          <Icon name="plus" className="h-3 w-3" />
+                          {t('inventory.addRecipeLine')}
+                        </Button>
+                      </div>
+                      {row.recipeLines.map((rl) => (
+                        <div key={rl.key} className="flex flex-wrap items-end gap-2">
+                          <div className="min-w-[10rem] flex-1">
+                            <label className="mb-1 block text-xs text-muted">
+                              {t('inventory.warehouseItem')}
+                            </label>
+                            <select
+                              className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                              value={rl.warehouseItemId}
+                              onChange={(e) =>
+                                updateRecipeLine(row.key, rl.key, { warehouseItemId: e.target.value })
+                              }
+                            >
+                              <option value="">{t('inventory.selectWarehouseItem')}</option>
+                              {warehouseItems
+                                .filter((w) => w.isActive)
+                                .map((w) => (
+                                  <option key={w.id} value={w.id}>
+                                    {itemLabel(w)} ({w.currentQuantity})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <div className="w-24">
+                            <Input
+                              label={t('inventory.qty')}
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={rl.quantity}
+                              onChange={(e) =>
+                                updateRecipeLine(row.key, rl.key, { quantity: e.target.value })
+                              }
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeRecipeLine(row.key, rl.key)}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            loading={saveItemMutation.isPending}
+            disabled={!canSaveItem()}
+            onClick={() => saveItemMutation.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={addonFormOpen}
+        onClose={resetAddonForm}
+        title={editingAddon ? t('users.edit') : t('inventory.addAddOn')}
+      >
+        <div className="space-y-3">
+          <Input label={t('inventory.addOn')} value={addonName} onChange={(e) => setAddonName(e.target.value)} />
+          <Input
+            label={t('inventory.sellPrice')}
+            type="number"
+            value={addonPrice}
+            onChange={(e) => setAddonPrice(e.target.value)}
+          />
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('inventory.warehouseItem')}</label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+              value={addonWarehouseId}
+              onChange={(e) => setAddonWarehouseId(e.target.value)}
+            >
+              <option value="">{t('inventory.selectWarehouseItem')}</option>
+              {warehouseItems
+                .filter((w) => w.isActive)
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {itemLabel(w)} ({w.currentQuantity})
+                  </option>
+                ))}
+            </select>
+          </div>
+          <Input
+            label={t('inventory.deductQty')}
+            type="number"
+            min={0}
+            step="0.01"
+            value={addonDeductQty}
+            onChange={(e) => setAddonDeductQty(e.target.value)}
+          />
+          {editingAddon && (
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={itemIsActive}
-                onChange={(e) => setItemIsActive(e.target.checked)}
+                checked={addonIsActive}
+                onChange={(e) => setAddonIsActive(e.target.checked)}
               />
               {t('common.active')}
             </label>
-          ) : (
-            <Input
-              label={t('inventory.initialStock')}
-              type="number"
-              value={itemQty}
-              onChange={(e) => setItemQty(e.target.value)}
-            />
           )}
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"
-            loading={createItemMutation.isPending}
-            disabled={!itemName.trim() || validVariantRows().length === 0}
-            onClick={() => createItemMutation.mutate()}
+            loading={saveAddonMutation.isPending}
+            disabled={!addonName.trim() || !addonWarehouseId || addonPrice === ''}
+            onClick={() => saveAddonMutation.mutate()}
           >
             {t('common.save')}
           </Button>

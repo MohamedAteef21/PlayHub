@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { cafeteriaApi, sessionsApi } from '@/api/client';
+import { ApiError, cafeteriaApi, sessionsApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import type { CafeteriaItem, CafeteriaItemVariant } from '@/types';
-import { PaymentMethod } from '@/types';
+import type { CafeteriaAddOn, CafeteriaItem, CafeteriaItemVariant, MissingIngredient } from '@/types';
+import { CafeteriaItemKind, PaymentMethod } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -15,17 +15,43 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { PageHeader } from '@/components/ui/PageHelpers';
 
+interface CartAddOn {
+  addOn: CafeteriaAddOn;
+  quantity: number;
+}
+
 interface CartLine {
   item: CafeteriaItem;
   variant: CafeteriaItemVariant;
   quantity: number;
   stockDeduct: number;
+  addOns: CartAddOn[];
 }
 
 type SaleMode = 'walkin' | 'session';
 
 function cartKey(itemId: string, variantId: string) {
   return `${itemId}:${variantId}`;
+}
+
+function variantHasRecipe(variant: CafeteriaItemVariant) {
+  return (variant.recipeLines ?? []).length > 0;
+}
+
+function needsManualStockDeduct(item: CafeteriaItem, variant: CafeteriaItemVariant) {
+  return item.kind === CafeteriaItemKind.SellAsIs && !variantHasRecipe(variant);
+}
+
+function parseMissingIngredients(err: unknown): MissingIngredient[] | null {
+  if (!(err instanceof ApiError) || err.code !== 'MISSING_INGREDIENTS') return null;
+  const body = err.data as { missing?: MissingIngredient[] } | undefined;
+  return body?.missing ?? null;
+}
+
+function lineTotal(line: CartLine) {
+  const base = line.variant.sellPrice * line.quantity;
+  const addons = line.addOns.reduce((sum, a) => sum + a.addOn.sellPrice * a.quantity, 0);
+  return base + addons;
 }
 
 export function CafeteriaPage() {
@@ -47,10 +73,20 @@ export function CafeteriaPage() {
   const [pickVariantId, setPickVariantId] = useState('');
   const [stockDeduct, setStockDeduct] = useState('1');
   const [sellQty, setSellQty] = useState('1');
+  const [pickAddOns, setPickAddOns] = useState<Record<string, number>>({});
+  const [missingDialog, setMissingDialog] = useState<{
+    missing: MissingIngredient[];
+    retry: () => Promise<void>;
+  } | null>(null);
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ['cafeteria-items', user?.id, activeBranchId],
-    queryFn: cafeteriaApi.getItems,
+    queryKey: ['cafeteria-items', 'for-sale', user?.id, activeBranchId],
+    queryFn: () => cafeteriaApi.getItems({ forSaleOnly: true }),
+  });
+
+  const { data: addOns = [] } = useQuery({
+    queryKey: ['cafeteria-addons', 'active', user?.id, activeBranchId],
+    queryFn: () => cafeteriaApi.getAddOns(true),
   });
 
   const { data: activeSessions = [] } = useQuery({
@@ -62,7 +98,7 @@ export function CafeteriaPage() {
   });
 
   const activeItems = useMemo(() => items.filter((i) => i.isActive), [items]);
-  const cartTotal = cart.reduce((sum, l) => sum + l.variant.sellPrice * l.quantity, 0);
+  const cartTotal = cart.reduce((sum, l) => sum + lineTotal(l), 0);
 
   function itemLabel(item: CafeteriaItem) {
     return i18n.language === 'ar' && item.nameAr ? item.nameAr : item.name;
@@ -73,30 +109,47 @@ export function CafeteriaPage() {
   }
 
   function openPick(item: CafeteriaItem) {
-    if (!canSell || item.currentQuantity <= 0) return;
+    if (!canSell) return;
     const variants = (item.variants ?? []).filter((v) => v.isActive);
     if (variants.length === 0) {
-      setError(t('inventory.noVariants', { defaultValue: 'No variants for this item.' }));
+      setError(t('inventory.noVariants'));
       return;
     }
+    const outOfStock =
+      item.kind === CafeteriaItemKind.SellAsIs &&
+      !variants.some((v) => variantHasRecipe(v)) &&
+      item.currentQuantity <= 0;
+    if (outOfStock) return;
+
     setPickItem(item);
     setPickVariantId(variants[0].id);
     setStockDeduct('1');
     setSellQty('1');
+    setPickAddOns({});
     setError('');
   }
 
+  const pickVariant = (pickItem?.variants ?? []).find((v) => v.id === pickVariantId);
+  const showStockDeduct = pickItem && pickVariant ? needsManualStockDeduct(pickItem, pickVariant) : false;
+
   function confirmPick() {
-    if (!pickItem) return;
-    const variant = (pickItem.variants ?? []).find((v) => v.id === pickVariantId);
-    if (!variant) return;
+    if (!pickItem || !pickVariant) return;
     const qty = Math.max(1, Number(sellQty) || 1);
-    const deduct = Math.max(1, Number(stockDeduct) || 1);
-    if (deduct > pickItem.currentQuantity) {
-      setError(t('inventory.insufficientStock', { defaultValue: 'Insufficient stock.' }));
+    const manual = needsManualStockDeduct(pickItem, pickVariant);
+    const deduct = manual ? Math.max(1, Number(stockDeduct) || qty) : qty;
+    if (manual && deduct > pickItem.currentQuantity) {
+      setError(t('inventory.insufficientStock'));
       return;
     }
-    const key = cartKey(pickItem.id, variant.id);
+
+    const selectedAddOns: CartAddOn[] = Object.entries(pickAddOns)
+      .filter(([, q]) => q > 0)
+      .map(([id, quantity]) => {
+        const addOn = addOns.find((a) => a.id === id)!;
+        return { addOn, quantity };
+      });
+
+    const key = cartKey(pickItem.id, pickVariant.id);
     setCart((prev) => {
       const existing = prev.find((l) => cartKey(l.item.id, l.variant.id) === key);
       if (existing) {
@@ -107,15 +160,35 @@ export function CafeteriaPage() {
                 quantity: l.quantity + qty,
                 stockDeduct: l.stockDeduct + deduct,
                 item: pickItem,
-                variant,
+                variant: pickVariant,
+                addOns: mergeAddOns(existing.addOns, selectedAddOns),
               }
             : l
         );
       }
-      return [...prev, { item: pickItem, variant, quantity: qty, stockDeduct: deduct }];
+      return [
+        ...prev,
+        {
+          item: pickItem,
+          variant: pickVariant,
+          quantity: qty,
+          stockDeduct: deduct,
+          addOns: selectedAddOns,
+        },
+      ];
     });
     setPickItem(null);
     setError('');
+  }
+
+  function mergeAddOns(existing: CartAddOn[], added: CartAddOn[]): CartAddOn[] {
+    const map = new Map(existing.map((a) => [a.addOn.id, { ...a }]));
+    for (const a of added) {
+      const prev = map.get(a.addOn.id);
+      if (prev) prev.quantity += a.quantity;
+      else map.set(a.addOn.id, { ...a });
+    }
+    return [...map.values()];
   }
 
   function updateQty(itemId: string, variantId: string, delta: number) {
@@ -124,57 +197,87 @@ export function CafeteriaPage() {
         .map((l) => {
           if (l.item.id !== itemId || l.variant.id !== variantId) return l;
           const next = Math.max(0, l.quantity + delta);
+          const manual = needsManualStockDeduct(l.item, l.variant);
           const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
           return {
             ...l,
             quantity: next,
-            stockDeduct: Math.max(next > 0 ? Math.round(deductPer * next) : 0, next > 0 ? 1 : 0),
+            stockDeduct: manual
+              ? Math.max(next > 0 ? Math.round(deductPer * next) : 0, next > 0 ? 1 : 0)
+              : next,
           };
         })
         .filter((l) => l.quantity > 0)
     );
   }
 
-  const saleMutation = useMutation({
-    mutationFn: async () => {
-      if (saleMode === 'session') {
-        if (!sessionId) throw new Error(t('cafeteria.selectSession'));
-        for (const line of cart) {
-          await sessionsApi.addCafeteria(
-            sessionId,
-            line.item.id,
-            line.variant.id,
-            line.quantity,
-            line.stockDeduct,
-            customerName.trim() || undefined
-          );
-        }
-        return;
+  async function executeSale(allowSkip = false) {
+    if (saleMode === 'session') {
+      if (!sessionId) throw new Error(t('cafeteria.selectSession'));
+      for (const line of cart) {
+        await sessionsApi.addCafeteria(
+          sessionId,
+          line.item.id,
+          line.variant.id,
+          line.quantity,
+          line.stockDeduct,
+          customerName.trim() || undefined,
+          line.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
+          allowSkip
+        );
       }
-      await cafeteriaApi.createSale(
-        cart.map((l) => ({
-          cafeteriaItemId: l.item.id,
-          variantId: l.variant.id,
-          quantity: l.quantity,
-          stockDeductQuantity: l.stockDeduct,
-        })),
-        {
-          paymentMethod,
-          debtorName: paymentMethod === PaymentMethod.Deferred ? debtorName : undefined,
-        },
-        customerName.trim() || undefined
-      );
-    },
+      return;
+    }
+    await cafeteriaApi.createSale(
+      cart.map((l) => ({
+        cafeteriaItemId: l.item.id,
+        variantId: l.variant.id,
+        quantity: l.quantity,
+        stockDeductQuantity: l.stockDeduct,
+        addOns: l.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
+      })),
+      {
+        paymentMethod,
+        debtorName: paymentMethod === PaymentMethod.Deferred ? debtorName : undefined,
+      },
+      customerName.trim() || undefined,
+      allowSkip
+    );
+  }
+
+  const saleMutation = useMutation({
+    mutationFn: () => executeSale(false),
     onSuccess: () => {
       setCart([]);
       setCheckoutOpen(false);
       setDebtorName('');
       setCustomerName('');
       setPaymentMethod(PaymentMethod.Cash);
+      setMissingDialog(null);
       queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: unknown) => {
+      const missing = parseMissingIngredients(e);
+      if (missing) {
+        setMissingDialog({
+          missing,
+          retry: async () => {
+            await executeSale(true);
+            setCart([]);
+            setCheckoutOpen(false);
+            setDebtorName('');
+            setCustomerName('');
+            setPaymentMethod(PaymentMethod.Cash);
+            setMissingDialog(null);
+            queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+          },
+        });
+        return;
+      }
+      setError(e instanceof Error ? e.message : t('common.error'));
+    },
   });
 
   if (isLoading) {
@@ -232,49 +335,76 @@ export function CafeteriaPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {activeItems.map((item) => (
-            <Card key={item.id} className="cursor-pointer" onClick={() => openPick(item)}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-medium">{itemLabel(item)}</p>
-                  <p className="text-xs text-muted">
-                    {(item.variants ?? []).filter((v) => v.isActive).length}{' '}
-                    {t('inventory.variants', { defaultValue: 'variants' })}
-                  </p>
+          {activeItems.map((item) => {
+            const variants = (item.variants ?? []).filter((v) => v.isActive);
+            const sellAsIsNoRecipe =
+              item.kind === CafeteriaItemKind.SellAsIs && variants.every((v) => !variantHasRecipe(v));
+            const disabled = sellAsIsNoRecipe && item.currentQuantity <= 0;
+            return (
+              <Card
+                key={item.id}
+                className={disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+                onClick={() => !disabled && openPick(item)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">{itemLabel(item)}</p>
+                    <p className="text-xs text-muted">
+                      {variants.length} {t('inventory.variants')}
+                    </p>
+                  </div>
+                  {item.isLowStock && <Badge status="inactive">{t('cafeteria.lowStock')}</Badge>}
                 </div>
-                {item.isLowStock && <Badge status="inactive">{t('inventory.lowStock')}</Badge>}
-              </div>
-              <p className="mt-2 text-sm text-muted">
-                {t('inventory.qty')}: {item.currentQuantity}
-              </p>
-            </Card>
-          ))}
+                {sellAsIsNoRecipe && (
+                  <p className="mt-2 text-sm text-muted">
+                    {t('inventory.qty')}: {item.currentQuantity}
+                  </p>
+                )}
+              </Card>
+            );
+          })}
         </div>
 
         <Card className="h-fit">
           <p className="mb-3 font-medium">{t('cafeteria.cart')}</p>
           {cart.length === 0 ? (
-            <p className="text-sm text-muted">{t('cafeteria.cartEmpty')}</p>
+            <p className="text-sm text-muted">{t('cafeteria.emptyCart')}</p>
           ) : (
             <div className="space-y-3">
               {cart.map((l) => (
-                <div key={cartKey(l.item.id, l.variant.id)} className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{lineLabel(l)}</p>
-                    <p className="text-xs text-muted">
-                      {formatCurrency(l.variant.sellPrice)} · {t('inventory.stockDeduct', { defaultValue: 'Stock' })}{' '}
-                      {l.stockDeduct}
-                    </p>
+                <div key={cartKey(l.item.id, l.variant.id)} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{lineLabel(l)}</p>
+                      <p className="text-xs text-muted">
+                        {formatCurrency(l.variant.sellPrice)}
+                        {needsManualStockDeduct(l.item, l.variant) && (
+                          <>
+                            {' · '}
+                            {t('inventory.stockDeduct')} {l.stockDeduct}
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, -1)}>
+                        -
+                      </Button>
+                      <span className="w-6 text-center text-sm">{l.quantity}</span>
+                      <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, 1)}>
+                        +
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, -1)}>
-                      -
-                    </Button>
-                    <span className="w-6 text-center text-sm">{l.quantity}</span>
-                    <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, 1)}>
-                      +
-                    </Button>
-                  </div>
+                  {l.addOns.length > 0 && (
+                    <ul className="ps-2 text-xs text-muted">
+                      {l.addOns.map((a) => (
+                        <li key={a.addOn.id}>
+                          + {a.addOn.name} ×{a.quantity} ({formatCurrency(a.addOn.sellPrice * a.quantity)})
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ))}
               <div className="flex items-center justify-between border-t border-border pt-3">
@@ -294,16 +424,17 @@ export function CafeteriaPage() {
         onClose={() => setPickItem(null)}
         title={pickItem ? itemLabel(pickItem) : ''}
       >
-        {pickItem && (
+        {pickItem && pickVariant && (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-sm text-muted">
-                {t('inventory.variant', { defaultValue: 'Variant' })}
-              </label>
+              <label className="mb-1 block text-sm text-muted">{t('inventory.variant')}</label>
               <select
                 className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                 value={pickVariantId}
-                onChange={(e) => setPickVariantId(e.target.value)}
+                onChange={(e) => {
+                  setPickVariantId(e.target.value);
+                  setStockDeduct(sellQty);
+                }}
               >
                 {pickVariants.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -313,24 +444,53 @@ export function CafeteriaPage() {
               </select>
             </div>
             <Input
-              label={t('inventory.sellQty', { defaultValue: 'Sell quantity' })}
+              label={t('inventory.sellQty')}
               type="number"
               min={1}
               value={sellQty}
-              onChange={(e) => setSellQty(e.target.value)}
+              onChange={(e) => {
+                setSellQty(e.target.value);
+                if (showStockDeduct) setStockDeduct(e.target.value);
+              }}
             />
-            <Input
-              label={t('inventory.askStockDeduct', {
-                defaultValue: 'How much stock to deduct?',
-              })}
-              type="number"
-              min={1}
-              value={stockDeduct}
-              onChange={(e) => setStockDeduct(e.target.value)}
-            />
-            <p className="text-xs text-muted">
-              {t('inventory.stockAvailable', { defaultValue: 'Available' })}: {pickItem.currentQuantity}
-            </p>
+            {showStockDeduct && (
+              <>
+                <Input
+                  label={t('inventory.stockDeduct')}
+                  type="number"
+                  min={1}
+                  value={stockDeduct}
+                  onChange={(e) => setStockDeduct(e.target.value)}
+                />
+                <p className="text-xs text-muted">
+                  {t('inventory.stockAvailable')}: {pickItem.currentQuantity}
+                </p>
+              </>
+            )}
+            {addOns.length > 0 && (
+              <div className="space-y-2 border-t border-border pt-2">
+                <p className="text-sm font-medium">{t('inventory.addOns')}</p>
+                {addOns.map((addon) => (
+                  <div key={addon.id} className="flex items-center justify-between gap-2">
+                    <span className="text-sm">
+                      {addon.name} (+{formatCurrency(addon.sellPrice)})
+                    </span>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="w-20"
+                      value={pickAddOns[addon.id] ?? 0}
+                      onChange={(e) =>
+                        setPickAddOns((prev) => ({
+                          ...prev,
+                          [addon.id]: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
             {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setPickItem(null)}>
@@ -382,6 +542,46 @@ export function CafeteriaPage() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!missingDialog}
+        onClose={() => setMissingDialog(null)}
+        title={t('inventory.missingIngredients')}
+      >
+        {missingDialog && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">{t('inventory.skipMissingConfirm')}</p>
+            <ul className="space-y-1 text-sm">
+              {missingDialog.missing.map((m) => (
+                <li key={m.warehouseItemId} className="rounded-lg border border-border px-3 py-2">
+                  <span className="font-medium">{m.name}</span>
+                  <span className="text-muted">
+                    {' '}
+                    — {t('inventory.required')}: {m.required}, {t('inventory.available')}: {m.available}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setMissingDialog(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                loading={saleMutation.isPending}
+                onClick={async () => {
+                  try {
+                    await missingDialog.retry();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : t('common.error'));
+                  }
+                }}
+              >
+                {t('inventory.skipAndContinue')}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
