@@ -5,7 +5,7 @@ namespace PlayHub.Application.Assets;
 public interface IAssetService
 {
     // Rooms
-    Task<IReadOnlyList<RoomDto>> GetRoomsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<RoomDto>> GetRoomsAsync(Guid? branchId = null, CancellationToken ct = default);
     Task<RoomDto?> GetRoomByIdAsync(Guid id, CancellationToken ct = default);
     Task<RoomDto> CreateRoomAsync(CreateRoomRequest request, CancellationToken ct = default);
     Task<RoomDto> UpdateRoomAsync(Guid id, UpdateRoomRequest request, CancellationToken ct = default);
@@ -29,6 +29,8 @@ public interface IAssetService
     Task<DeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken ct = default);
     Task<DeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken ct = default);
     Task SoftDeleteDeviceAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Master-only: move device to another owned branch.</summary>
+    Task<DeviceDto> MoveDeviceAsync(Guid id, MoveDeviceRequest request, CancellationToken ct = default);
 
     // Dashboard
     Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default);

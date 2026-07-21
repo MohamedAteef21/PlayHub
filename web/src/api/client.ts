@@ -239,7 +239,10 @@ export const sessionsApi = {
 
 export const assetsApi = {
   getDashboard: () => apiFetch<import('@/types').AssetDashboard>('/assets/dashboard'),
-  getRooms: () => apiFetch<import('@/types').Room[]>('/assets/rooms'),
+  getRooms: (branchId?: string) =>
+    apiFetch<import('@/types').Room[]>(
+      `/assets/rooms${branchId ? `?branchId=${branchId}` : ''}`
+    ),
   createRoom: (data: {
     name: string;
     roomNumber?: string;
@@ -296,6 +299,14 @@ export const assetsApi = {
       body: JSON.stringify({ ...data, roomId: data.roomId || null }),
     }),
   deleteDevice: (id: string) => apiFetch<void>(`/assets/devices/${id}`, { method: 'DELETE' }),
+  moveDevice: (id: string, data: { targetBranchId: string; targetRoomId?: string | null }) =>
+    apiFetch<import('@/types').Device>(`/assets/devices/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({
+        targetBranchId: data.targetBranchId,
+        targetRoomId: data.targetRoomId || null,
+      }),
+    }),
   getControllerTypes: () =>
     apiFetch<import('@/types').ControllerType[]>('/assets/controller-types'),
   createControllerType: (data: { name: string; description?: string }) =>
