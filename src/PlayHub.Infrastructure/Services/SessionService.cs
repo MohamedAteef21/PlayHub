@@ -16,19 +16,22 @@ public class SessionService : ISessionService
     private readonly IAuditService _audit;
     private readonly ISessionCostCalculator _costCalculator;
     private readonly ISessionNotifier _notifier;
+    private readonly LowStockNotifier _lowStock;
 
     public SessionService(
         PlayHubDbContext db,
         TenantContext tenantContext,
         IAuditService audit,
         ISessionCostCalculator costCalculator,
-        ISessionNotifier notifier)
+        ISessionNotifier notifier,
+        LowStockNotifier lowStock)
     {
         _db = db;
         _tenantContext = tenantContext;
         _audit = audit;
         _costCalculator = costCalculator;
         _notifier = notifier;
+        _lowStock = lowStock;
     }
 
     public async Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default)
@@ -679,57 +682,59 @@ public class SessionService : ISessionService
         if (session.Status == SessionStatus.Closed)
             throw new InvalidOperationException("Cannot add items to a closed session.");
 
-        if (request.Quantity <= 0)
-            throw new InvalidOperationException("Quantity must be at least 1.");
-        if (request.StockDeductQuantity <= 0)
-            throw new InvalidOperationException("Stock deduct quantity must be at least 1.");
+        var plan = await CafeteriaStockPlanner.PlanAsync(
+            _db,
+            branchId,
+            request.CafeteriaItemId,
+            request.VariantId,
+            request.Quantity,
+            request.StockDeductQuantity,
+            request.Unit,
+            request.AddOns,
+            request.AllowSkipMissingIngredients,
+            ct);
 
-        var item = await _db.CafeteriaItems
-            .Include(i => i.Variants)
-            .FirstOrDefaultAsync(i => i.Id == request.CafeteriaItemId && i.BranchId == branchId && i.IsActive, ct)
-            ?? throw new KeyNotFoundException("Cafeteria item not found.");
-
-        var variant = item.Variants.FirstOrDefault(v => v.Id == request.VariantId && v.IsActive)
-            ?? throw new KeyNotFoundException("Variant not found for this item.");
-
-        var stockDeduct = request.StockDeductQuantity;
-        if (item.CurrentQuantity < stockDeduct)
-            throw new InvalidOperationException($"Insufficient stock for {item.Name}. Available: {item.CurrentQuantity}.");
-
-        var qty = request.Quantity;
         var line = new SessionCafeteriaLine
         {
-            CafeteriaItemId = item.Id,
-            VariantId = variant.Id,
-            VariantName = variant.Name,
-            Quantity = qty,
-            StockDeductQuantity = stockDeduct,
-            UnitPrice = variant.SellPrice,
-            LineTotal = variant.SellPrice * qty,
+            CafeteriaItemId = plan.Item.Id,
+            VariantId = plan.Variant.Id,
+            VariantName = plan.Variant.Name,
+            Quantity = plan.Quantity,
+            StockDeductQuantity = plan.ParentStockDeduct,
+            UnitPrice = plan.UnitPrice,
+            LineTotal = plan.LineTotal,
             CustomerName = string.IsNullOrWhiteSpace(request.CustomerName) ? null : request.CustomerName.Trim(),
             AddedByUserId = _tenantContext.UserId
         };
 
-        session.CafeteriaLines.Add(line);
-        item.CurrentQuantity -= stockDeduct;
-
-        _db.InventoryMovements.Add(new InventoryMovement
+        foreach (var a in plan.AddOns)
         {
-            TenantId = _tenantContext.TenantId,
-            BranchId = branchId,
-            CafeteriaItemId = item.Id,
-            MovementType = InventoryMovementType.Sale,
-            QuantityChange = -stockDeduct,
-            ReferenceType = "Session",
-            ReferenceId = session.Id,
-            Notes = $"{item.Name} — {variant.Name}; sold {qty}, stock -{stockDeduct}"
-                + (line.CustomerName is null ? "" : $"; {line.CustomerName}"),
-            PerformedByUserId = _tenantContext.UserId
-        });
+            line.AddOns.Add(new SessionCafeteriaLineAddOn
+            {
+                AddOnId = a.AddOn.Id,
+                Name = a.AddOn.Name,
+                Quantity = a.Quantity,
+                UnitPrice = a.AddOn.SellPrice,
+                LineTotal = a.LineTotal,
+                StockDeductQuantity = a.StockDeduct
+            });
+        }
+
+        session.CafeteriaLines.Add(line);
+
+        CafeteriaStockPlanner.ApplyDeducts(
+            _db, _tenantContext, branchId, plan, "Session", session.Id,
+            trackSessionIngredient: d => line.IngredientDeducts.Add(d),
+            sessionMode: true);
 
         await _db.SaveChangesAsync(ct);
+
+        foreach (var wh in plan.Ingredients.Select(i => i.WarehouseItem).Append(plan.Item).DistinctBy(x => x.Id))
+            await _lowStock.CheckAndNotifyAsync(wh, ct);
+
         await _audit.LogAsync("Session.CafeteriaAdded", "Session", session.Id,
-            new { Item = item.Name, Variant = variant.Name, qty, stockDeduct, line.CustomerName }, ct: ct);
+            new { Item = plan.Item.Name, Variant = plan.Variant.Name, plan.Quantity, plan.ParentStockDeduct, line.CustomerName }, ct: ct);
+        await _db.SaveChangesAsync(ct);
 
         await LoadSessionGraphAsync(session, ct);
         var live = MapLive(session, billingRoundUp);
@@ -751,6 +756,8 @@ public class SessionService : ISessionService
         var session = await _db.Sessions
             .Include(s => s.Pauses)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.IngredientDeducts).ThenInclude(d => d.WarehouseItem)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.AddOns)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found. Returns are only allowed on open sessions.");
 
@@ -761,16 +768,48 @@ public class SessionService : ISessionService
         if (request.Quantity > returnable)
             throw new InvalidOperationException($"Invalid return quantity. Maximum returnable: {returnable}.");
 
-        var stockOnLine = line.StockDeductQuantity > 0 ? line.StockDeductQuantity : line.Quantity;
+        var stockOnLine = line.StockDeductQuantity;
         var stockReturnable = stockOnLine - line.ReturnedStockQuantity;
-        var stockRestore = (int)Math.Round((double)stockOnLine * request.Quantity / line.Quantity);
-        stockRestore = Math.Clamp(stockRestore, 0, stockReturnable);
+        var stockRestore = line.Quantity == 0
+            ? 0
+            : (int)Math.Round((double)stockOnLine * request.Quantity / line.Quantity);
+        stockRestore = Math.Clamp(stockRestore, 0, Math.Max(0, stockReturnable));
 
         var refundAmount = line.UnitPrice * request.Quantity;
+        // Add-ons refund (proportional by returned sell qty)
+        var addOnRefund = line.AddOns.Sum(a => a.UnitPrice * a.Quantity) * request.Quantity / Math.Max(line.Quantity, 1);
+        refundAmount += addOnRefund;
+
         line.ReturnedQuantity += request.Quantity;
         line.ReturnedStockQuantity += stockRestore;
-        line.LineTotal = line.UnitPrice * (line.Quantity - line.ReturnedQuantity);
-        line.CafeteriaItem.CurrentQuantity += stockRestore;
+        var remainingQty = line.Quantity - line.ReturnedQuantity;
+        line.LineTotal = line.UnitPrice * remainingQty
+            + line.AddOns.Sum(a => a.UnitPrice * a.Quantity) * remainingQty / Math.Max(line.Quantity, 1);
+        if (stockRestore > 0)
+            line.CafeteriaItem.CurrentQuantity += stockRestore;
+
+        // Restore recipe/add-on ingredient deducts proportionally
+        foreach (var ded in line.IngredientDeducts.Where(d => !d.WasSkipped && d.Quantity > 0))
+        {
+            var restoreable = ded.Quantity - ded.ReturnedQuantity;
+            var restore = (int)Math.Round((double)ded.Quantity * request.Quantity / line.Quantity);
+            restore = Math.Clamp(restore, 0, restoreable);
+            if (restore <= 0) continue;
+            ded.ReturnedQuantity += restore;
+            ded.WarehouseItem.CurrentQuantity += restore;
+            _db.InventoryMovements.Add(new InventoryMovement
+            {
+                TenantId = _tenantContext.TenantId,
+                BranchId = branchId,
+                CafeteriaItemId = ded.WarehouseItemId,
+                MovementType = InventoryMovementType.Return,
+                QuantityChange = restore,
+                ReferenceType = "SessionCafeteriaReturn",
+                ReferenceId = session.Id,
+                Notes = request.Reason.Trim(),
+                PerformedByUserId = _tenantContext.UserId
+            });
+        }
 
         var cafeteriaReturn = new SessionCafeteriaReturn
         {
@@ -782,18 +821,21 @@ public class SessionService : ISessionService
         };
         _db.SessionCafeteriaReturns.Add(cafeteriaReturn);
 
-        _db.InventoryMovements.Add(new InventoryMovement
+        if (stockRestore > 0)
         {
-            TenantId = _tenantContext.TenantId,
-            BranchId = branchId,
-            CafeteriaItemId = line.CafeteriaItemId,
-            MovementType = InventoryMovementType.Return,
-            QuantityChange = stockRestore,
-            ReferenceType = "SessionCafeteriaReturn",
-            ReferenceId = cafeteriaReturn.Id,
-            Notes = request.Reason.Trim(),
-            PerformedByUserId = _tenantContext.UserId
-        });
+            _db.InventoryMovements.Add(new InventoryMovement
+            {
+                TenantId = _tenantContext.TenantId,
+                BranchId = branchId,
+                CafeteriaItemId = line.CafeteriaItemId,
+                MovementType = InventoryMovementType.Return,
+                QuantityChange = stockRestore,
+                ReferenceType = "SessionCafeteriaReturn",
+                ReferenceId = cafeteriaReturn.Id,
+                Notes = request.Reason.Trim(),
+                PerformedByUserId = _tenantContext.UserId
+            });
+        }
 
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Session.CafeteriaReturned", "Session", session.Id, new
@@ -818,6 +860,7 @@ public class SessionService : ISessionService
             .Include(s => s.Customer)
             .Include(s => s.Pauses)
             .Include(s => s.CafeteriaLines).ThenInclude(l => l.CafeteriaItem)
+            .Include(s => s.CafeteriaLines).ThenInclude(l => l.AddOns)
             .Where(s => s.BranchId == branchId && s.Status != SessionStatus.Closed);
 
     private async Task<Session> GetMutableActiveSessionAsync(Guid id, Guid branchId, CancellationToken ct)
@@ -986,12 +1029,16 @@ public class SessionService : ISessionService
             l.VariantId,
             l.VariantName,
             l.Quantity,
-            l.StockDeductQuantity > 0 ? l.StockDeductQuantity : l.Quantity,
+            l.StockDeductQuantity,
             l.ReturnedQuantity,
             l.UnitPrice,
             l.LineTotal,
             l.CustomerName,
-            l.AddedAt);
+            l.AddedAt,
+            (l.AddOns ?? [])
+                .Select(a => new CafeteriaSaleLineAddOnDto(
+                    a.Id, a.AddOnId, a.Name, a.Quantity, a.UnitPrice, a.LineTotal, a.StockDeductQuantity))
+                .ToList());
 
     private static SessionHistoryDto MapHistory(Session session)
     {

@@ -9,11 +9,14 @@ class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code?: string
+    public code?: string,
+    public data?: unknown
   ) {
     super(message);
   }
 }
+
+export { ApiError };
 
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -109,7 +112,7 @@ export async function apiFetch<T>(
     if (isSubscriptionExpiredPayload(body)) {
       useAuthStore.getState().logout();
     }
-    throw new ApiError(message, res.status, body.code);
+    throw new ApiError(message, res.status, body.code, body);
   }
 
   if (res.status === 204) return undefined as T;
@@ -225,7 +228,9 @@ export const sessionsApi = {
     variantId: string,
     quantity: number,
     stockDeductQuantity: number,
-    customerName?: string
+    customerName?: string,
+    addOns?: { addOnId: string; quantity: number }[],
+    allowSkipMissingIngredients?: boolean
   ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${sessionId}/cafeteria`, {
       method: 'POST',
@@ -235,6 +240,8 @@ export const sessionsApi = {
         quantity,
         stockDeductQuantity,
         customerName: customerName || undefined,
+        addOns: addOns?.length ? addOns : undefined,
+        allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
       }),
     }),
   returnCafeteria: (sessionId: string, sessionCafeteriaLineId: string, quantity: number, reason: string) =>
@@ -394,13 +401,32 @@ export const notificationsApi = {
 };
 
 export const cafeteriaApi = {
-  getItems: () => apiFetch<import('@/types').CafeteriaItem[]>('/cafeteria/items'),
+  getItems: (opts?: { kind?: number; forSaleOnly?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.kind != null) params.set('kind', String(opts.kind));
+    if (opts?.forSaleOnly) params.set('forSaleOnly', 'true');
+    const q = params.toString();
+    return apiFetch<import('@/types').CafeteriaItem[]>(`/cafeteria/items${q ? `?${q}` : ''}`);
+  },
   createItem: (data: {
     name: string;
+    kind: number;
     nameAr?: string;
-    currentQuantity: number;
-    minThreshold: number;
-    variants: { id?: string; name: string; sellPrice: number; isActive?: boolean; sortOrder?: number }[];
+    currentQuantity?: number;
+    minThreshold?: number;
+    sellPrice?: number;
+    baseUnitId?: string;
+    largeUnitId?: string;
+    unitsPerLarge?: number;
+    initialStockUnit?: number;
+    variants?: {
+      id?: string;
+      name: string;
+      sellPrice: number;
+      isActive?: boolean;
+      sortOrder?: number;
+      recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+    }[];
   }) =>
     apiFetch<import('@/types').CafeteriaItem>('/cafeteria/items', {
       method: 'POST',
@@ -410,10 +436,22 @@ export const cafeteriaApi = {
     id: string,
     data: {
       name: string;
+      kind: number;
       nameAr?: string;
       minThreshold: number;
       isActive: boolean;
-      variants: { id?: string; name: string; sellPrice: number; isActive?: boolean; sortOrder?: number }[];
+      sellPrice?: number;
+      baseUnitId?: string;
+      largeUnitId?: string;
+      unitsPerLarge?: number;
+      variants?: {
+        id?: string;
+        name: string;
+        sellPrice: number;
+        isActive?: boolean;
+        sortOrder?: number;
+        recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+      }[];
     }
   ) =>
     apiFetch<import('@/types').CafeteriaItem>(`/cafeteria/items/${id}`, {
@@ -422,6 +460,36 @@ export const cafeteriaApi = {
     }),
   deleteItem: (id: string) =>
     apiFetch<void>(`/cafeteria/items/${id}`, { method: 'DELETE' }),
+  getAddOns: (activeOnly = false) =>
+    apiFetch<import('@/types').CafeteriaAddOn[]>(
+      `/cafeteria/addons${activeOnly ? '?activeOnly=true' : ''}`
+    ),
+  createAddOn: (data: {
+    name: string;
+    sellPrice: number;
+    warehouseItemId: string;
+    deductQuantity: number;
+  }) =>
+    apiFetch<import('@/types').CafeteriaAddOn>('/cafeteria/addons', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateAddOn: (
+    id: string,
+    data: {
+      name: string;
+      sellPrice: number;
+      warehouseItemId: string;
+      deductQuantity: number;
+      isActive: boolean;
+    }
+  ) =>
+    apiFetch<import('@/types').CafeteriaAddOn>(`/cafeteria/addons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteAddOn: (id: string) =>
+    apiFetch<void>(`/cafeteria/addons/${id}`, { method: 'DELETE' }),
   getSales: (from?: string, to?: string) => {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
@@ -434,14 +502,21 @@ export const cafeteriaApi = {
       cafeteriaItemId: string;
       variantId: string;
       quantity: number;
-      stockDeductQuantity: number;
+      stockDeductQuantity?: number;
+      addOns?: { addOnId: string; quantity: number }[];
     }[],
     payment: import('@/types').PaymentRequest,
-    customerName?: string
+    customerName?: string,
+    allowSkipMissingIngredients?: boolean
   ) =>
     apiFetch<import('@/types').CafeteriaSale>('/cafeteria/sales', {
       method: 'POST',
-      body: JSON.stringify({ lines, payment, customerName: customerName || undefined }),
+      body: JSON.stringify({
+        lines,
+        payment,
+        customerName: customerName || undefined,
+        allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
+      }),
     }),
 };
 
@@ -823,5 +898,3 @@ export const whatsappApi = {
       body: JSON.stringify(data),
     }),
 };
-
-export { ApiError };

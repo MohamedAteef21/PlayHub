@@ -85,6 +85,18 @@ public enum CafeteriaSaleStatus : short
     FullyReturned = 3
 }
 
+/// <summary>
+/// Warehouse = ingredients/packaged stock.
+/// Menu = sold via variants (recipe deducts ingredients).
+/// SellAsIs = buy &amp; sell same item (own stock + unit conversion).
+/// </summary>
+public enum CafeteriaItemKind : short
+{
+    Warehouse = 1,
+    Menu = 2,
+    SellAsIs = 3
+}
+
 public enum PurchaseOrderStatus : short
 {
     Draft = 1,

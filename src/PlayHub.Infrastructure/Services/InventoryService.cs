@@ -377,11 +377,17 @@ public class InventoryService : IInventoryService
 
     private static CafeteriaItemDto MapItem(CafeteriaItem i) =>
         new(i.Id, i.BranchId, i.Name, i.NameAr, i.SellPrice, i.CurrentQuantity, i.MinThreshold,
-            i.CurrentQuantity <= i.MinThreshold, i.IsActive,
+            i.CurrentQuantity <= i.MinThreshold, i.IsActive, i.Kind,
             i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge, i.CreatedAt,
             (i.Variants ?? [])
                 .OrderBy(v => v.SortOrder)
                 .ThenBy(v => v.Name)
-                .Select(v => new CafeteriaItemVariantDto(v.Id, v.Name, v.SellPrice, v.IsActive, v.SortOrder))
+                .Select(v => new CafeteriaItemVariantDto(
+                    v.Id, v.Name, v.SellPrice, v.IsActive, v.SortOrder,
+                    (v.RecipeLines ?? [])
+                        .Select(r => new RecipeLineDto(
+                            r.Id, r.WarehouseItemId, r.WarehouseItem?.Name ?? "", r.Quantity,
+                            r.WarehouseItem?.CurrentQuantity ?? 0))
+                        .ToList()))
                 .ToList());
 }

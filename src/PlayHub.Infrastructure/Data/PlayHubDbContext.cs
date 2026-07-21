@@ -67,6 +67,12 @@ public class PlayHubDbContext : DbContext
     public DbSet<CustomerOffer> CustomerOffers => Set<CustomerOffer>();
     public DbSet<CafeteriaItem> CafeteriaItems => Set<CafeteriaItem>();
     public DbSet<CafeteriaItemVariant> CafeteriaItemVariants => Set<CafeteriaItemVariant>();
+    public DbSet<CafeteriaVariantRecipeLine> CafeteriaVariantRecipeLines => Set<CafeteriaVariantRecipeLine>();
+    public DbSet<CafeteriaAddOn> CafeteriaAddOns => Set<CafeteriaAddOn>();
+    public DbSet<CafeteriaSaleLineAddOn> CafeteriaSaleLineAddOns => Set<CafeteriaSaleLineAddOn>();
+    public DbSet<CafeteriaSaleLineIngredientDeduct> CafeteriaSaleLineIngredientDeducts => Set<CafeteriaSaleLineIngredientDeduct>();
+    public DbSet<SessionCafeteriaLineAddOn> SessionCafeteriaLineAddOns => Set<SessionCafeteriaLineAddOn>();
+    public DbSet<SessionCafeteriaLineIngredientDeduct> SessionCafeteriaLineIngredientDeducts => Set<SessionCafeteriaLineIngredientDeduct>();
     public DbSet<InventoryUnit> InventoryUnits => Set<InventoryUnit>();
     public DbSet<ItemUnitConversionLog> ItemUnitConversionLogs => Set<ItemUnitConversionLog>();
     public DbSet<CafeteriaSale> CafeteriaSales => Set<CafeteriaSale>();
@@ -248,6 +254,12 @@ public class PlayHubDbContext : DbContext
              || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
 
         modelBuilder.Entity<CafeteriaItem>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+
+        modelBuilder.Entity<CafeteriaAddOn>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)

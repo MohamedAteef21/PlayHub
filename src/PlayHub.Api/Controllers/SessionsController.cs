@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PlayHub.Api.Authorization;
+using PlayHub.Application.Cafeteria;
 using PlayHub.Application.Sessions;
 
 namespace PlayHub.Api.Controllers;
@@ -109,6 +110,15 @@ public class SessionsController : ControllerBase
                 StatusCodes.Status201Created => Created(string.Empty, result),
                 _ => Ok(result)
             };
+        }
+        catch (MissingIngredientsException ex)
+        {
+            return Conflict(new
+            {
+                code = MissingIngredientsException.ErrorCode,
+                message = ex.Message,
+                missing = ex.Missing
+            });
         }
         catch (InvalidOperationException ex)
         {

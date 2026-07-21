@@ -74,7 +74,7 @@ public class SessionCafeteriaLine : BaseEntity
     public string? VariantName { get; set; }
     /// <summary>Number of variant portions sold (drives price).</summary>
     public int Quantity { get; set; }
-    /// <summary>Stock deducted from the parent product for this line.</summary>
+    /// <summary>Stock deducted from the parent product (sell-as-is). 0 for recipe menu items.</summary>
     public int StockDeductQuantity { get; set; }
     public int ReturnedQuantity { get; set; }
     public int ReturnedStockQuantity { get; set; }
@@ -89,6 +89,35 @@ public class SessionCafeteriaLine : BaseEntity
     public CafeteriaItemVariant? Variant { get; set; }
     public User AddedByUser { get; set; } = null!;
     public ICollection<SessionCafeteriaReturn> Returns { get; set; } = [];
+    public ICollection<SessionCafeteriaLineAddOn> AddOns { get; set; } = [];
+    public ICollection<SessionCafeteriaLineIngredientDeduct> IngredientDeducts { get; set; } = [];
+}
+
+public class SessionCafeteriaLineAddOn : BaseEntity
+{
+    public Guid SessionCafeteriaLineId { get; set; }
+    public Guid AddOnId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal LineTotal { get; set; }
+    public int StockDeductQuantity { get; set; }
+    public int ReturnedStockQuantity { get; set; }
+
+    public SessionCafeteriaLine SessionCafeteriaLine { get; set; } = null!;
+    public CafeteriaAddOn AddOn { get; set; } = null!;
+}
+
+public class SessionCafeteriaLineIngredientDeduct : BaseEntity
+{
+    public Guid SessionCafeteriaLineId { get; set; }
+    public Guid WarehouseItemId { get; set; }
+    public int Quantity { get; set; }
+    public int ReturnedQuantity { get; set; }
+    public bool WasSkipped { get; set; }
+
+    public SessionCafeteriaLine SessionCafeteriaLine { get; set; } = null!;
+    public CafeteriaItem WarehouseItem { get; set; } = null!;
 }
 
 public class SessionCafeteriaReturn : BaseEntity

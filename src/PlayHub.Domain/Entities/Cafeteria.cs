@@ -11,11 +11,11 @@ public class CafeteriaItem : BaseEntity, IBranchEntity, ISoftDelete
     public string? NameAr { get; set; }
     /// <summary>Legacy / min variant price for display. Selling uses variant prices.</summary>
     public decimal SellPrice { get; set; }
-    /// <summary>On-hand stock on the parent product (shared across variants).</summary>
+    /// <summary>On-hand stock in base units (warehouse / sell-as-is). Menu recipe products usually keep 0.</summary>
     public int CurrentQuantity { get; set; }
     public int MinThreshold { get; set; }
     public bool IsActive { get; set; } = true;
-    /// <summary>Kept for compatibility; units UI removed — always piece.</summary>
+    public CafeteriaItemKind Kind { get; set; } = CafeteriaItemKind.SellAsIs;
     public string BaseUnitName { get; set; } = "قطعة";
     public string? LargeUnitName { get; set; }
     public int UnitsPerLarge { get; set; } = 1;
@@ -27,7 +27,7 @@ public class CafeteriaItem : BaseEntity, IBranchEntity, ISoftDelete
     public ICollection<CafeteriaItemVariant> Variants { get; set; } = [];
 }
 
-/// <summary>Priced option under a product (e.g. قهوة → سنجل / دبل). Stock lives on the parent item.</summary>
+/// <summary>Priced option under a menu/sell-as-is product (e.g. قهوة → عادي / باللبن).</summary>
 public class CafeteriaItemVariant : BaseEntity
 {
     public Guid CafeteriaItemId { get; set; }
@@ -37,6 +37,36 @@ public class CafeteriaItemVariant : BaseEntity
     public int SortOrder { get; set; }
 
     public CafeteriaItem CafeteriaItem { get; set; } = null!;
+    public ICollection<CafeteriaVariantRecipeLine> RecipeLines { get; set; } = [];
+}
+
+/// <summary>Ingredient line on a variant recipe. Quantity is per one sold portion, in warehouse base units.</summary>
+public class CafeteriaVariantRecipeLine : BaseEntity
+{
+    public Guid VariantId { get; set; }
+    public Guid WarehouseItemId { get; set; }
+    public int Quantity { get; set; }
+
+    public CafeteriaItemVariant Variant { get; set; } = null!;
+    public CafeteriaItem WarehouseItem { get; set; } = null!;
+}
+
+/// <summary>Optional add-on at order time (ketchup, extra cheese…). Has its own sell price + stock deduct.</summary>
+public class CafeteriaAddOn : BaseEntity, IBranchEntity, ISoftDelete
+{
+    public Guid TenantId { get; set; }
+    public Guid BranchId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal SellPrice { get; set; }
+    public Guid WarehouseItemId { get; set; }
+    public int DeductQuantity { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public Guid? DeletedByUserId { get; set; }
+
+    public Branch Branch { get; set; } = null!;
+    public CafeteriaItem WarehouseItem { get; set; } = null!;
 }
 
 /// <summary>Per-master unit names (piece, carton, …) picked when creating items.</summary>
@@ -104,7 +134,7 @@ public class CafeteriaSaleLine : BaseEntity
     public string? VariantName { get; set; }
     /// <summary>Number of variant portions sold (drives price).</summary>
     public int Quantity { get; set; }
-    /// <summary>Stock deducted from the parent product for this line.</summary>
+    /// <summary>Stock deducted from the parent product (sell-as-is). 0 for recipe menu items.</summary>
     public int StockDeductQuantity { get; set; }
     public int ReturnedQuantity { get; set; }
     public int ReturnedStockQuantity { get; set; }
@@ -114,6 +144,35 @@ public class CafeteriaSaleLine : BaseEntity
     public CafeteriaSale Sale { get; set; } = null!;
     public CafeteriaItem CafeteriaItem { get; set; } = null!;
     public CafeteriaItemVariant? Variant { get; set; }
+    public ICollection<CafeteriaSaleLineAddOn> AddOns { get; set; } = [];
+    public ICollection<CafeteriaSaleLineIngredientDeduct> IngredientDeducts { get; set; } = [];
+}
+
+public class CafeteriaSaleLineAddOn : BaseEntity
+{
+    public Guid SaleLineId { get; set; }
+    public Guid AddOnId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal LineTotal { get; set; }
+    public int StockDeductQuantity { get; set; }
+    public int ReturnedStockQuantity { get; set; }
+
+    public CafeteriaSaleLine SaleLine { get; set; } = null!;
+    public CafeteriaAddOn AddOn { get; set; } = null!;
+}
+
+public class CafeteriaSaleLineIngredientDeduct : BaseEntity
+{
+    public Guid SaleLineId { get; set; }
+    public Guid WarehouseItemId { get; set; }
+    public int Quantity { get; set; }
+    public int ReturnedQuantity { get; set; }
+    public bool WasSkipped { get; set; }
+
+    public CafeteriaSaleLine SaleLine { get; set; } = null!;
+    public CafeteriaItem WarehouseItem { get; set; } = null!;
 }
 
 public class CafeteriaReturn : BaseEntity
