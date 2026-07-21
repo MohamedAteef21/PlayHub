@@ -720,7 +720,7 @@ export interface PermissionInfo {
 export const PaymentAccountType = { BankTransfer: 1, DigitalWallet: 2 } as const;
 
 export { NotificationChannel } from './alerts';
-export type { MasterAlertSettings, DeviceMaintenance } from './alerts';
+export type { MasterAlertSettings, MasterAlertRecipient, DeviceMaintenance } from './alerts';
 
 export interface BranchPaymentAccount {
   id: string;

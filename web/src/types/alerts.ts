@@ -5,19 +5,23 @@ export const NotificationChannel = {
   EmailAndWhatsApp: 3,
 } as const;
 
-export interface MasterAlertSettings {
+export interface MasterAlertRecipient {
   id: string;
-  userId: string;
-  smtpHost: string | null;
-  smtpPort: number;
-  smtpUsername: string | null;
-  hasSmtpPassword: boolean;
-  senderDisplayName: string | null;
-  alertRecipientEmail: string | null;
-  ownerWhatsAppPhone: string | null;
+  email: string;
+  displayName: string | null;
   notifyLowStock: boolean;
   notifySubscription: boolean;
   notifyDeviceMaintenance: boolean;
+}
+
+export interface MasterAlertSettings {
+  id: string;
+  userId: string;
+  smtpUsername: string | null;
+  hasSmtpPassword: boolean;
+  senderDisplayName: string;
+  ownerWhatsAppPhone: string | null;
+  recipients: MasterAlertRecipient[];
   allowedChannels: number;
 }
 

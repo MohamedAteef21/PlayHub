@@ -88,16 +88,19 @@ export function SettingsPage() {
     { venueAssetTypeId: string; quantity: number; workingCount: number }[]
   >([]);
 
-  const [smtpHost, setSmtpHost] = useState('smtp.gmail.com');
-  const [smtpPort, setSmtpPort] = useState('587');
+  type DraftRecipient = {
+    key: string;
+    email: string;
+    displayName: string;
+    notifyLowStock: boolean;
+    notifySubscription: boolean;
+    notifyDeviceMaintenance: boolean;
+  };
+
   const [smtpUsername, setSmtpUsername] = useState('');
   const [smtpPassword, setSmtpPassword] = useState('');
-  const [senderDisplayName, setSenderDisplayName] = useState('');
-  const [alertRecipientEmail, setAlertRecipientEmail] = useState('');
   const [ownerWhatsAppPhone, setOwnerWhatsAppPhone] = useState('');
-  const [notifyLowStock, setNotifyLowStock] = useState(true);
-  const [notifySubscription, setNotifySubscription] = useState(true);
-  const [notifyDeviceMaintenance, setNotifyDeviceMaintenance] = useState(true);
+  const [draftRecipients, setDraftRecipients] = useState<DraftRecipient[]>([]);
   const [alertsMsg, setAlertsMsg] = useState('');
   const [maintDeviceId, setMaintDeviceId] = useState('');
   const [maintReason, setMaintReason] = useState('');
@@ -153,15 +156,18 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (!alertSettings) return;
-    setSmtpHost(alertSettings.smtpHost || 'smtp.gmail.com');
-    setSmtpPort(String(alertSettings.smtpPort || 587));
     setSmtpUsername(alertSettings.smtpUsername || '');
-    setSenderDisplayName(alertSettings.senderDisplayName || '');
-    setAlertRecipientEmail(alertSettings.alertRecipientEmail || '');
     setOwnerWhatsAppPhone(alertSettings.ownerWhatsAppPhone || '');
-    setNotifyLowStock(alertSettings.notifyLowStock);
-    setNotifySubscription(alertSettings.notifySubscription);
-    setNotifyDeviceMaintenance(alertSettings.notifyDeviceMaintenance);
+    setDraftRecipients(
+      (alertSettings.recipients ?? []).map((r) => ({
+        key: r.id || crypto.randomUUID(),
+        email: r.email,
+        displayName: r.displayName || '',
+        notifyLowStock: r.notifyLowStock,
+        notifySubscription: r.notifySubscription,
+        notifyDeviceMaintenance: r.notifyDeviceMaintenance,
+      }))
+    );
     setSmtpPassword('');
   }, [alertSettings]);
 
@@ -458,16 +464,16 @@ export function SettingsPage() {
   const alertsMutation = useMutation({
     mutationFn: () =>
       alertsApi.saveSettings({
-        smtpHost,
-        smtpPort: Number(smtpPort) || 587,
         smtpUsername,
         smtpPassword: smtpPassword || undefined,
-        senderDisplayName,
-        alertRecipientEmail,
         ownerWhatsAppPhone,
-        notifyLowStock,
-        notifySubscription,
-        notifyDeviceMaintenance,
+        recipients: draftRecipients.map((r) => ({
+          email: r.email.trim(),
+          displayName: r.displayName.trim() || undefined,
+          notifyLowStock: r.notifyLowStock,
+          notifySubscription: r.notifySubscription,
+          notifyDeviceMaintenance: r.notifyDeviceMaintenance,
+        })),
       }),
     onSuccess: () => {
       setAlertsMsg(t('settings.alertsSaved'));
@@ -476,6 +482,32 @@ export function SettingsPage() {
     },
     onError: (e: Error) => setError(e.message),
   });
+
+  function updateRecipient(key: string, patch: Partial<DraftRecipient>) {
+    setDraftRecipients((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  function setRecipientAllTypes(key: string, all: boolean) {
+    updateRecipient(key, {
+      notifyLowStock: all,
+      notifySubscription: all,
+      notifyDeviceMaintenance: all,
+    });
+  }
+
+  function addRecipient() {
+    setDraftRecipients((prev) => [
+      ...prev,
+      {
+        key: crypto.randomUUID(),
+        email: '',
+        displayName: '',
+        notifyLowStock: true,
+        notifySubscription: true,
+        notifyDeviceMaintenance: true,
+      },
+    ]);
+  }
 
   const testEmailMutation = useMutation({
     mutationFn: alertsApi.testEmail,
@@ -1227,12 +1259,23 @@ export function SettingsPage() {
       {tab === 'alerts' && isMaster && alertSettings && alertSettings.allowedChannels !== NotificationChannel.None && (
         <section className="space-y-4">
           <p className="max-w-2xl text-sm text-muted">{t('settings.alertsHint')}</p>
-          <Card className="max-w-2xl space-y-3">
+          <Card className="max-w-3xl space-y-4">
             {(alertSettings.allowedChannels & NotificationChannel.Email) !== 0 && (
-              <>
-                <Input label={t('settings.smtpHost')} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
-                <Input label={t('settings.smtpPort')} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
-                <Input label={t('settings.smtpUsername')} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} placeholder="venue@gmail.com" />
+              <div className="space-y-3">
+                <p className="text-sm font-medium">{t('settings.senderGmail')}</p>
+                <p className="text-xs text-muted">
+                  {t('settings.fixedSmtpNote', {
+                    host: 'smtp.gmail.com',
+                    port: 587,
+                    sender: 'PlayHub System',
+                  })}
+                </p>
+                <Input
+                  label={t('settings.smtpUsername')}
+                  value={smtpUsername}
+                  onChange={(e) => setSmtpUsername(e.target.value)}
+                  placeholder="venue@gmail.com"
+                />
                 <Input
                   label={t('settings.smtpPassword')}
                   type="password"
@@ -1240,25 +1283,103 @@ export function SettingsPage() {
                   onChange={(e) => setSmtpPassword(e.target.value)}
                   placeholder={alertSettings?.hasSmtpPassword ? t('settings.smtpPasswordKeep') : ''}
                 />
-                <Input label={t('settings.senderDisplayName')} value={senderDisplayName} onChange={(e) => setSenderDisplayName(e.target.value)} />
-                <Input label={t('settings.alertRecipientEmail')} value={alertRecipientEmail} onChange={(e) => setAlertRecipientEmail(e.target.value)} />
-              </>
+
+                <div className="space-y-3 border-t border-border pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">{t('settings.alertRecipients')}</p>
+                      <p className="text-xs text-muted">{t('settings.alertRecipientsHint')}</p>
+                    </div>
+                    <Button size="sm" variant="secondary" onClick={addRecipient}>
+                      <Icon name="plus" className="h-4 w-4" />
+                      {t('settings.addRecipient')}
+                    </Button>
+                  </div>
+
+                  {draftRecipients.length === 0 && (
+                    <p className="text-sm text-muted">{t('settings.noRecipients')}</p>
+                  )}
+
+                  {draftRecipients.map((r) => {
+                    const allSelected =
+                      r.notifyLowStock && r.notifySubscription && r.notifyDeviceMaintenance;
+                    return (
+                      <div key={r.key} className="space-y-2 rounded-lg border border-border p-3">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Input
+                            label={t('settings.recipientEmail')}
+                            value={r.email}
+                            onChange={(e) => updateRecipient(r.key, { email: e.target.value })}
+                            placeholder="name@example.com"
+                          />
+                          <Input
+                            label={t('settings.recipientName')}
+                            value={r.displayName}
+                            onChange={(e) => updateRecipient(r.key, { displayName: e.target.value })}
+                            placeholder={t('settings.recipientNameOptional')}
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-xs text-muted">{t('settings.recipientNotifyTypes')}</span>
+                          <label className="flex items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={(e) => setRecipientAllTypes(r.key, e.target.checked)}
+                            />
+                            {t('settings.notifyAll')}
+                          </label>
+                          <label className="flex items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={r.notifyLowStock}
+                              onChange={(e) => updateRecipient(r.key, { notifyLowStock: e.target.checked })}
+                            />
+                            {t('settings.notifyLowStock')}
+                          </label>
+                          <label className="flex items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={r.notifySubscription}
+                              onChange={(e) => updateRecipient(r.key, { notifySubscription: e.target.checked })}
+                            />
+                            {t('settings.notifySubscription')}
+                          </label>
+                          <label className="flex items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={r.notifyDeviceMaintenance}
+                              onChange={(e) =>
+                                updateRecipient(r.key, { notifyDeviceMaintenance: e.target.checked })
+                              }
+                            />
+                            {t('settings.notifyDeviceMaintenance')}
+                          </label>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            className="ms-auto"
+                            onClick={() =>
+                              setDraftRecipients((prev) => prev.filter((x) => x.key !== r.key))
+                            }
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             {(alertSettings.allowedChannels & NotificationChannel.WhatsApp) !== 0 && (
-              <Input label={t('settings.ownerWhatsAppPhone')} value={ownerWhatsAppPhone} onChange={(e) => setOwnerWhatsAppPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+              <Input
+                label={t('settings.ownerWhatsAppPhone')}
+                value={ownerWhatsAppPhone}
+                onChange={(e) => setOwnerWhatsAppPhone(e.target.value)}
+                placeholder="01xxxxxxxxx"
+              />
             )}
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={notifyLowStock} onChange={(e) => setNotifyLowStock(e.target.checked)} />
-              {t('settings.notifyLowStock')}
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={notifySubscription} onChange={(e) => setNotifySubscription(e.target.checked)} />
-              {t('settings.notifySubscription')}
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={notifyDeviceMaintenance} onChange={(e) => setNotifyDeviceMaintenance(e.target.checked)} />
-              {t('settings.notifyDeviceMaintenance')}
-            </label>
             {error && <p className="text-sm text-danger">{error}</p>}
             {alertsMsg && <p className="text-sm text-success">{alertsMsg}</p>}
             <div className="flex flex-wrap gap-2">

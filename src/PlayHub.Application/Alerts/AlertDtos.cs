@@ -3,33 +3,37 @@ using PlayHub.Domain.Enums;
 
 namespace PlayHub.Application.Alerts;
 
-public record MasterAlertSettingsDto(
+public record MasterAlertRecipientDto(
     Guid Id,
-    Guid UserId,
-    string? SmtpHost,
-    int SmtpPort,
-    string? SmtpUsername,
-    bool HasSmtpPassword,
-    string? SenderDisplayName,
-    string? AlertRecipientEmail,
-    string? OwnerWhatsAppPhone,
-    bool NotifyLowStock,
-    bool NotifySubscription,
-    bool NotifyDeviceMaintenance,
-    NotificationChannel AllowedChannels);
-
-public record UpsertMasterAlertSettingsRequest(
-    string? SmtpHost,
-    int SmtpPort,
-    string? SmtpUsername,
-    /// <summary>Null/empty keeps existing password.</summary>
-    string? SmtpPassword,
-    string? SenderDisplayName,
-    string? AlertRecipientEmail,
-    string? OwnerWhatsAppPhone,
+    string Email,
+    string? DisplayName,
     bool NotifyLowStock,
     bool NotifySubscription,
     bool NotifyDeviceMaintenance);
+
+public record UpsertMasterAlertRecipientRequest(
+    string Email,
+    string? DisplayName,
+    bool NotifyLowStock,
+    bool NotifySubscription,
+    bool NotifyDeviceMaintenance);
+
+public record MasterAlertSettingsDto(
+    Guid Id,
+    Guid UserId,
+    string? SmtpUsername,
+    bool HasSmtpPassword,
+    string SenderDisplayName,
+    string? OwnerWhatsAppPhone,
+    IReadOnlyList<MasterAlertRecipientDto> Recipients,
+    NotificationChannel AllowedChannels);
+
+public record UpsertMasterAlertSettingsRequest(
+    string? SmtpUsername,
+    /// <summary>Null/empty keeps existing password.</summary>
+    string? SmtpPassword,
+    string? OwnerWhatsAppPhone,
+    IReadOnlyList<UpsertMasterAlertRecipientRequest> Recipients);
 
 public record DeviceMaintenanceDto(
     Guid Id,

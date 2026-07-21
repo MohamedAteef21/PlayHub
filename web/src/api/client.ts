@@ -734,16 +734,16 @@ export const usersApi = {
 export const alertsApi = {
   getSettings: () => apiFetch<import('@/types').MasterAlertSettings>('/alerts/settings'),
   saveSettings: (data: {
-    smtpHost?: string;
-    smtpPort: number;
     smtpUsername?: string;
     smtpPassword?: string;
-    senderDisplayName?: string;
-    alertRecipientEmail?: string;
     ownerWhatsAppPhone?: string;
-    notifyLowStock: boolean;
-    notifySubscription: boolean;
-    notifyDeviceMaintenance: boolean;
+    recipients: {
+      email: string;
+      displayName?: string;
+      notifyLowStock: boolean;
+      notifySubscription: boolean;
+      notifyDeviceMaintenance: boolean;
+    }[];
   }) =>
     apiFetch<import('@/types').MasterAlertSettings>('/alerts/settings', {
       method: 'PUT',
