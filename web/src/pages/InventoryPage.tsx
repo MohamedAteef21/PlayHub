@@ -13,6 +13,12 @@ import {
   StockVoucherStatus,
   StockVoucherType,
 } from '@/types';
+import {
+  isWeightItem,
+  recipeQtyFromBase,
+  recipeQtyToBase,
+  type RecipeDeductUnit,
+} from '@/lib/itemUnits';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -22,7 +28,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'warehouse' | 'menu' | 'addons' | 'vouchers' | 'movements';
+type Tab = 'warehouse' | 'menu' | 'units' | 'addons' | 'vouchers' | 'movements';
 
 type VariantFormRow = {
   key: string;
@@ -38,6 +44,7 @@ type RecipeLineFormRow = {
   id?: string;
   warehouseItemId: string;
   quantity: string;
+  deductUnit: RecipeDeductUnit;
 };
 
 const movementLabels: Record<number, string> = {
@@ -52,7 +59,13 @@ const movementLabels: Record<number, string> = {
 };
 
 function newRecipeLineRow(partial?: Partial<RecipeLineFormRow>): RecipeLineFormRow {
-  return { key: crypto.randomUUID(), warehouseItemId: '', quantity: '1', ...partial };
+  return {
+    key: crypto.randomUUID(),
+    warehouseItemId: '',
+    quantity: '1',
+    deductUnit: 'base',
+    ...partial,
+  };
 }
 
 function newVariantRow(partial?: Partial<VariantFormRow>): VariantFormRow {
@@ -110,7 +123,7 @@ export function InventoryPage() {
   const [itemName, setItemName] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemQty, setItemQty] = useState('0');
-  const [itemThreshold, setItemThreshold] = useState('5');
+  const [itemThreshold, setItemThreshold] = useState('0');
   const [itemIsActive, setItemIsActive] = useState(true);
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
@@ -123,6 +136,12 @@ export function InventoryPage() {
   const [addonWarehouseId, setAddonWarehouseId] = useState('');
   const [addonDeductQty, setAddonDeductQty] = useState('1');
   const [addonIsActive, setAddonIsActive] = useState(true);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [newUnitNameAr, setNewUnitNameAr] = useState('');
+  const [editingUnit, setEditingUnit] = useState<InventoryUnit | null>(null);
+  const [editUnitName, setEditUnitName] = useState('');
+  const [editUnitNameAr, setEditUnitNameAr] = useState('');
+  const [editUnitActive, setEditUnitActive] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -134,9 +153,15 @@ export function InventoryPage() {
     queryFn: () => cafeteriaApi.getItems(),
   });
 
-  const { data: units = [] } = useQuery({
-    queryKey: ['inventory-units', user?.id, activeBranchId],
-    queryFn: () => inventoryApi.getUnits(),
+  const { data: units = [], isLoading: unitsLoading } = useQuery({
+    queryKey: ['inventory-units', user?.id, activeBranchId, tab === 'units'],
+    queryFn: () => inventoryApi.getUnits(tab !== 'units'),
+  });
+
+  const { data: conversionLogs = [], isLoading: logsLoading } = useQuery({
+    queryKey: ['inventory-conversion-logs', user?.id, activeBranchId],
+    queryFn: () => inventoryApi.getConversionLogs(),
+    enabled: tab === 'units' && canManageItems,
   });
 
   const warehouseItems = useMemo(
@@ -204,11 +229,18 @@ export function InventoryPage() {
           ? {
               recipeLines: row.recipeLines
                 .filter((rl) => rl.warehouseItemId && rl.quantity !== '')
-                .map((rl) => ({
-                  ...(rl.id ? { id: rl.id } : {}),
-                  warehouseItemId: rl.warehouseItemId,
-                  quantity: Number(rl.quantity),
-                })),
+                .map((rl) => {
+                  const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                  const baseQty = warehouse
+                    ? recipeQtyToBase(warehouse, Number(rl.quantity), rl.deductUnit)
+                    : Math.round(Number(rl.quantity) || 0);
+                  return {
+                    ...(rl.id ? { id: rl.id } : {}),
+                    warehouseItemId: rl.warehouseItemId,
+                    quantity: baseQty,
+                  };
+                })
+                .filter((rl) => rl.quantity > 0),
             }
           : {}),
       }));
@@ -235,7 +267,8 @@ export function InventoryPage() {
           name: itemName.trim(),
           kind: itemKind,
           nameAr: itemNameAr.trim() || undefined,
-          minThreshold: Number(itemThreshold) || 0,
+          // Menu/sell products have no stock of their own — never require a min threshold.
+          minThreshold: formContext === 'menu' ? 0 : Number(itemThreshold) || 0,
           isActive: itemIsActive,
           variants,
           ...unitPayload,
@@ -247,7 +280,7 @@ export function InventoryPage() {
         kind: itemKind,
         nameAr: itemNameAr.trim() || undefined,
         currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
-        minThreshold: Number(itemThreshold) || 0,
+        minThreshold: formContext === 'menu' ? 0 : Number(itemThreshold) || 0,
         variants: variants.map(({ name, sellPrice, recipeLines }) => ({
           name,
           sellPrice,
@@ -298,6 +331,68 @@ export function InventoryPage() {
     },
     onError: (e: Error) => setError(e.message),
   });
+
+  const createUnitMutation = useMutation({
+    mutationFn: () =>
+      inventoryApi.createUnit({
+        name: newUnitName.trim(),
+        nameAr: newUnitNameAr.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setNewUnitName('');
+      setNewUnitNameAr('');
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const updateUnitMutation = useMutation({
+    mutationFn: () =>
+      inventoryApi.updateUnit(editingUnit!.id, {
+        name: editUnitName.trim(),
+        nameAr: editUnitNameAr.trim() || null,
+        isActive: editUnitActive,
+      }),
+    onSuccess: () => {
+      setEditingUnit(null);
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const toggleUnitMutation = useMutation({
+    mutationFn: (unit: InventoryUnit) =>
+      inventoryApi.updateUnit(unit.id, {
+        name: unit.name,
+        nameAr: unit.nameAr,
+        isActive: !unit.isActive,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory-units'] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteUnitMutation = useMutation({
+    mutationFn: (id: string) => inventoryApi.deleteUnit(id),
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<InventoryUnit[]>({ queryKey: ['inventory-units'] }, (old) =>
+        old?.filter((u) => u.id !== id)
+      );
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function openEditUnit(unit: InventoryUnit) {
+    setEditingUnit(unit);
+    setEditUnitName(unit.name);
+    setEditUnitNameAr(unit.nameAr ?? '');
+    setEditUnitActive(unit.isActive);
+    setError('');
+  }
 
   const saveAddonMutation = useMutation({
     mutationFn: () => {
@@ -430,11 +525,11 @@ export function InventoryPage() {
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
-    setItemThreshold('5');
+    setItemThreshold('0');
     setItemIsActive(true);
-    setBaseUnitId(units[0]?.id ?? '');
+    setBaseUnitId(units.find((u) => u.isActive)?.id ?? units[0]?.id ?? '');
     setLargeUnitId('');
-    setUnitsPerLarge('1');
+    setUnitsPerLarge(ctx === 'warehouse' ? '1000' : '1');
     setVariantRows([newVariantRow()]);
     setError('');
     setItemFormOpen(true);
@@ -459,13 +554,18 @@ export function InventoryPage() {
               name: v.name,
               sellPrice: String(v.sellPrice),
               isActive: v.isActive,
-              recipeLines: (v.recipeLines ?? []).map((rl) =>
-                newRecipeLineRow({
+              recipeLines: (v.recipeLines ?? []).map((rl) => {
+                const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                const mapped = warehouse
+                  ? recipeQtyFromBase(warehouse, rl.quantity)
+                  : { quantity: String(rl.quantity), deductUnit: 'base' as RecipeDeductUnit };
+                return newRecipeLineRow({
                   id: rl.id,
                   warehouseItemId: rl.warehouseItemId,
-                  quantity: String(rl.quantity),
-                })
-              ),
+                  quantity: mapped.quantity,
+                  deductUnit: mapped.deductUnit,
+                });
+              }),
             })
           )
         : [newVariantRow()]
@@ -576,6 +676,7 @@ export function InventoryPage() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'warehouse', label: t('inventory.warehouse') },
     { id: 'menu', label: t('inventory.menuProducts') },
+    { id: 'units', label: t('inventory.units') },
     { id: 'addons', label: t('inventory.addons') },
     { id: 'vouchers', label: t('inventory.vouchers') },
     { id: 'movements', label: t('inventory.movements') },
@@ -595,6 +696,9 @@ export function InventoryPage() {
             <Icon name="plus" className="h-4 w-4" />
             {t('inventory.addMenuProduct')}
           </Button>
+        )}
+        {tab === 'units' && canManageItems && (
+          <span className="text-sm text-muted">{t('inventory.unitsHint')}</span>
         )}
         {tab === 'addons' && canManageItems && (
           <Button onClick={openCreateAddon}>
@@ -643,6 +747,7 @@ export function InventoryPage() {
       <div className="mb-4 text-sm text-muted">
         {tab === 'warehouse' && t('inventory.warehouseHint')}
         {tab === 'menu' && t('inventory.menuHint')}
+        {tab === 'units' && t('inventory.unitsHint')}
         {tab === 'addons' && t('inventory.addonsHint')}
       </div>
 
@@ -822,6 +927,116 @@ export function InventoryPage() {
               </tr>
             ))}
           </DataTable>
+        ))}
+
+      {tab === 'units' &&
+        (canManageItems ? (
+          unitsLoading ? (
+            <PageLoader />
+          ) : (
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <Input
+                    label={t('inventory.unitName')}
+                    value={newUnitName}
+                    onChange={(e) => setNewUnitName(e.target.value)}
+                    placeholder={t('inventory.unitNamePlaceholder')}
+                  />
+                </div>
+                <div className="min-w-[10rem] flex-1">
+                  <Input
+                    label={t('inventory.unitNameAr')}
+                    value={newUnitNameAr}
+                    onChange={(e) => setNewUnitNameAr(e.target.value)}
+                  />
+                </div>
+                <Button
+                  loading={createUnitMutation.isPending}
+                  disabled={!newUnitName.trim()}
+                  onClick={() => createUnitMutation.mutate()}
+                >
+                  <Icon name="plus" className="h-4 w-4" />
+                  {t('inventory.addUnit')}
+                </Button>
+              </div>
+
+              {units.length === 0 ? (
+                <p className="text-muted">{t('inventory.noUnits')}</p>
+              ) : (
+                <DataTable headers={[t('inventory.unitName'), t('common.status'), '']}>
+                  {units.map((unit) => (
+                    <tr key={unit.id} className="hover:bg-surface-hover">
+                      <td className="px-4 py-3">{unitName(unit, i18n.language)}</td>
+                      <td className="px-4 py-3">
+                        <Badge status={unit.isActive ? 'gaming' : 'idle'}>
+                          {unit.isActive ? t('common.active') : t('common.inactive')}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEditUnit(unit)}>
+                            {t('users.edit')}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={toggleUnitMutation.isPending}
+                            onClick={() => toggleUnitMutation.mutate(unit)}
+                          >
+                            {unit.isActive ? t('inventory.deactivate') : t('inventory.activate')}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={deleteUnitMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(t('inventory.confirmDeleteUnit'))) {
+                                deleteUnitMutation.mutate(unit.id);
+                              }
+                            }}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </DataTable>
+              )}
+
+              <div>
+                <h3 className="mb-3 text-sm font-medium">{t('inventory.conversionLogs')}</h3>
+                {logsLoading ? (
+                  <PageLoader />
+                ) : conversionLogs.length === 0 ? (
+                  <p className="text-sm text-muted">—</p>
+                ) : (
+                  <ul className="space-y-2 text-sm text-muted">
+                    {conversionLogs.map((log) => (
+                      <li key={log.id} className="rounded-lg border border-border px-3 py-2">
+                        <p className="font-medium text-text">{log.itemName}</p>
+                        <p>
+                          {log.oldUnitsPerLarge} → {log.newUnitsPerLarge}
+                          {' · '}
+                          {log.oldBaseUnitName}
+                          {log.oldLargeUnitName ? ` / ${log.oldLargeUnitName}` : ''}
+                          {' → '}
+                          {log.newBaseUnitName}
+                          {log.newLargeUnitName ? ` / ${log.newLargeUnitName}` : ''}
+                        </p>
+                        <p className="text-xs">
+                          {log.changedByName} · {new Date(log.createdAt).toLocaleString()}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )
+        ) : (
+          <p className="text-muted">{t('inventory.units')}</p>
         ))}
 
       {tab === 'addons' &&
@@ -1124,9 +1339,11 @@ export function InventoryPage() {
                   onChange={(e) => setUnitsPerLarge(e.target.value)}
                 />
               )}
+              <p className="text-xs text-muted">{t('inventory.weightStockHint')}</p>
               <Input
-                label={t('inventory.threshold')}
+                label={t('inventory.thresholdOptional')}
                 type="number"
+                min={0}
                 value={itemThreshold}
                 onChange={(e) => setItemThreshold(e.target.value)}
               />
@@ -1140,24 +1357,21 @@ export function InventoryPage() {
                   {t('common.active')}
                 </label>
               ) : (
-                <Input
-                  label={t('inventory.initialStock')}
-                  type="number"
-                  value={itemQty}
-                  onChange={(e) => setItemQty(e.target.value)}
-                />
+                <>
+                  <Input
+                    label={t('inventory.initialStock')}
+                    type="number"
+                    value={itemQty}
+                    onChange={(e) => setItemQty(e.target.value)}
+                  />
+                  <p className="text-xs text-muted">{t('inventory.stockAlwaysBase')}</p>
+                </>
               )}
             </>
           )}
 
           {formContext === 'menu' && (
             <>
-              <Input
-                label={t('inventory.threshold')}
-                type="number"
-                value={itemThreshold}
-                onChange={(e) => setItemThreshold(e.target.value)}
-              />
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -1168,6 +1382,9 @@ export function InventoryPage() {
               </label>
               {itemKind === CafeteriaItemKind.SellAsIs && (
                 <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+              )}
+              {itemKind === CafeteriaItemKind.Menu && (
+                <p className="text-xs text-muted">{t('inventory.recipeWeightHint')}</p>
               )}
             </>
           )}
@@ -1240,51 +1457,103 @@ export function InventoryPage() {
                           {t('inventory.addRecipeLine')}
                         </Button>
                       </div>
-                      {row.recipeLines.map((rl) => (
-                        <div key={rl.key} className="flex flex-wrap items-end gap-2">
-                          <div className="min-w-[10rem] flex-1">
-                            <label className="mb-1 block text-xs text-muted">
-                              {t('inventory.warehouseItem')}
-                            </label>
-                            <select
-                              className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
-                              value={rl.warehouseItemId}
-                              onChange={(e) =>
-                                updateRecipeLine(row.key, rl.key, { warehouseItemId: e.target.value })
-                              }
-                            >
-                              <option value="">{t('inventory.selectWarehouseItem')}</option>
-                              {warehouseItems
-                                .filter((w) => w.isActive)
-                                .map((w) => (
-                                  <option key={w.id} value={w.id}>
-                                    {itemLabel(w)} ({w.currentQuantity})
-                                  </option>
-                                ))}
-                            </select>
+                      {row.recipeLines.map((rl) => {
+                        const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                        const weight = warehouse ? isWeightItem(warehouse) : false;
+                        const basePreview =
+                          warehouse && rl.quantity !== ''
+                            ? recipeQtyToBase(warehouse, Number(rl.quantity), rl.deductUnit)
+                            : 0;
+                        return (
+                          <div key={rl.key} className="space-y-1">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <div className="min-w-[10rem] flex-1">
+                                <label className="mb-1 block text-xs text-muted">
+                                  {t('inventory.warehouseItem')}
+                                </label>
+                                <select
+                                  className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                                  value={rl.warehouseItemId}
+                                  onChange={(e) => {
+                                    const id = e.target.value;
+                                    const wh = warehouseItems.find((w) => w.id === id);
+                                    const deductUnit: RecipeDeductUnit = wh && isWeightItem(wh) ? 'gram' : 'base';
+                                    updateRecipeLine(row.key, rl.key, {
+                                      warehouseItemId: id,
+                                      deductUnit,
+                                    });
+                                  }}
+                                >
+                                  <option value="">{t('inventory.selectWarehouseItem')}</option>
+                                  {warehouseItems
+                                    .filter((w) => w.isActive)
+                                    .map((w) => (
+                                      <option key={w.id} value={w.id}>
+                                        {itemLabel(w)} ({w.currentQuantity} {w.baseUnitName})
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                              <div className="w-24">
+                                <Input
+                                  label={t('inventory.deductQty')}
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={rl.quantity}
+                                  onChange={(e) =>
+                                    updateRecipeLine(row.key, rl.key, { quantity: e.target.value })
+                                  }
+                                />
+                              </div>
+                              <div className="w-28">
+                                <label className="mb-1 block text-xs text-muted">
+                                  {t('inventory.deductUnit')}
+                                </label>
+                                <select
+                                  className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                                  value={rl.deductUnit}
+                                  onChange={(e) =>
+                                    updateRecipeLine(row.key, rl.key, {
+                                      deductUnit: e.target.value as RecipeDeductUnit,
+                                    })
+                                  }
+                                >
+                                  {weight ? (
+                                    <>
+                                      <option value="gram">{t('inventory.unitGram')}</option>
+                                      <option value="kilogram">{t('inventory.unitKilogram')}</option>
+                                    </>
+                                  ) : (
+                                    <option value="base">
+                                      {warehouse?.baseUnitName || t('inventory.baseUnit')}
+                                    </option>
+                                  )}
+                                  {weight && warehouse?.baseUnitName && (
+                                    <option value="base">{warehouse.baseUnitName}</option>
+                                  )}
+                                </select>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeRecipeLine(row.key, rl.key)}
+                              >
+                                {t('common.delete')}
+                              </Button>
+                            </div>
+                            {warehouse && basePreview > 0 && (
+                              <p className="text-xs text-muted">
+                                {t('inventory.deductPreview', {
+                                  qty: basePreview,
+                                  unit: warehouse.baseUnitName,
+                                })}
+                              </p>
+                            )}
                           </div>
-                          <div className="w-24">
-                            <Input
-                              label={t('inventory.qty')}
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={rl.quantity}
-                              onChange={(e) =>
-                                updateRecipeLine(row.key, rl.key, { quantity: e.target.value })
-                              }
-                            />
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeRecipeLine(row.key, rl.key)}
-                          >
-                            {t('common.delete')}
-                          </Button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1358,6 +1627,42 @@ export function InventoryPage() {
             loading={saveAddonMutation.isPending}
             disabled={!addonName.trim() || !addonWarehouseId || addonPrice === ''}
             onClick={() => saveAddonMutation.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editingUnit}
+        onClose={() => setEditingUnit(null)}
+        title={t('inventory.editUnit')}
+      >
+        <div className="space-y-3">
+          <Input
+            label={t('inventory.unitName')}
+            value={editUnitName}
+            onChange={(e) => setEditUnitName(e.target.value)}
+          />
+          <Input
+            label={t('inventory.unitNameAr')}
+            value={editUnitNameAr}
+            onChange={(e) => setEditUnitNameAr(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={editUnitActive}
+              onChange={(e) => setEditUnitActive(e.target.checked)}
+            />
+            {t('common.active')}
+          </label>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            loading={updateUnitMutation.isPending}
+            disabled={!editUnitName.trim()}
+            onClick={() => updateUnitMutation.mutate()}
           >
             {t('common.save')}
           </Button>

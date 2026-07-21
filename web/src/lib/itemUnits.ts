@@ -1,8 +1,76 @@
 import type { CafeteriaItem } from '@/types';
 import { InventoryUnitKind } from '@/types';
 
+/** How a recipe line quantity is entered in the UI (converted to warehouse base units on save). */
+export type RecipeDeductUnit = 'base' | 'gram' | 'kilogram';
+
+const GRAMS_PER_KG = 1000;
+
 export function hasLargeUnit(item: CafeteriaItem): boolean {
   return !!item.largeUnitName && item.unitsPerLarge > 1;
+}
+
+function normalizeUnitName(name: string | null | undefined): string {
+  return (name ?? '').trim().toLowerCase();
+}
+
+export function isGramUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return n === 'جرام' || n === 'جم' || n === 'g' || n === 'gram' || n === 'grams';
+}
+
+export function isKilogramUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return (
+    n === 'كجم' ||
+    n === 'كيلو' ||
+    n === 'كيلوجرام' ||
+    n === 'كيلو جرام' ||
+    n === 'kg' ||
+    n === 'kilo' ||
+    n === 'kilogram' ||
+    n === 'kilograms'
+  );
+}
+
+export function isWeightItem(item: Pick<CafeteriaItem, 'baseUnitName' | 'largeUnitName'>): boolean {
+  return isGramUnitName(item.baseUnitName) || isKilogramUnitName(item.baseUnitName)
+    || isGramUnitName(item.largeUnitName) || isKilogramUnitName(item.largeUnitName);
+}
+
+/** Convert a recipe UI quantity (gram/kg/base) into integer warehouse base units. */
+export function recipeQtyToBase(
+  item: Pick<CafeteriaItem, 'baseUnitName'>,
+  quantity: number,
+  deductUnit: RecipeDeductUnit
+): number {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+
+  if (deductUnit === 'base') return Math.round(qty);
+
+  const asGrams = deductUnit === 'kilogram' ? qty * GRAMS_PER_KG : qty;
+
+  if (isGramUnitName(item.baseUnitName)) return Math.round(asGrams);
+  if (isKilogramUnitName(item.baseUnitName)) {
+    // Prefer جرام as base for weight stock; fall back to rounded kg.
+    return Math.max(0, Math.round(asGrams / GRAMS_PER_KG));
+  }
+  return Math.round(qty);
+}
+
+/** Prefer showing weight recipe lines in grams when the warehouse item is weight-based. */
+export function recipeQtyFromBase(
+  item: Pick<CafeteriaItem, 'baseUnitName'>,
+  baseQuantity: number
+): { quantity: string; deductUnit: RecipeDeductUnit } {
+  if (isGramUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'gram' };
+  }
+  if (isKilogramUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'kilogram' };
+  }
+  return { quantity: String(baseQuantity), deductUnit: 'base' };
 }
 
 export function toBaseQuantity(
