@@ -74,14 +74,34 @@ export function recipeQtyFromBase(
 }
 
 export function toBaseQuantity(
-  item: CafeteriaItem,
+  item: Pick<CafeteriaItem, 'largeUnitName' | 'unitsPerLarge'> | CafeteriaItem,
   quantity: number,
   unit: InventoryUnitKind
 ): number {
-  if (unit === InventoryUnitKind.Large && hasLargeUnit(item)) {
-    return quantity * item.unitsPerLarge;
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty)) return 0;
+  const factor = item.unitsPerLarge > 1 ? item.unitsPerLarge : 1;
+  const canLarge = !!item.largeUnitName && factor > 1;
+  if (unit === InventoryUnitKind.Large && canLarge) {
+    return Math.round(qty * factor);
   }
-  return quantity;
+  return Math.round(qty);
+}
+
+/** Convert an entered qty to warehouse base using form unit ids (before item exists). */
+export function enteredQtyToBase(
+  quantity: number,
+  unit: InventoryUnitKind,
+  unitsPerLarge: number,
+  hasLarge: boolean
+): number {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty)) return 0;
+  const factor = unitsPerLarge > 1 ? unitsPerLarge : 1;
+  if (unit === InventoryUnitKind.Large && hasLarge && factor > 1) {
+    return Math.round(qty * factor);
+  }
+  return Math.round(qty);
 }
 
 export function maxSellQuantity(item: CafeteriaItem, unit: InventoryUnitKind): number {

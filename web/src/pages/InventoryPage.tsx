@@ -14,9 +14,15 @@ import {
   StockVoucherType,
 } from '@/types';
 import {
+  enteredQtyToBase,
+  formatStockDisplay,
+  hasLargeUnit,
+  isGramUnitName,
+  isKilogramUnitName,
   isWeightItem,
   recipeQtyFromBase,
   recipeQtyToBase,
+  toBaseQuantity,
   type RecipeDeductUnit,
 } from '@/lib/itemUnits';
 import { Badge } from '@/components/ui/Badge';
@@ -116,6 +122,7 @@ export function InventoryPage() {
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [voucherNotes, setVoucherNotes] = useState('');
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
+  const [voucherLineUnits, setVoucherLineUnits] = useState<Record<string, number>>({});
   const [itemFormOpen, setItemFormOpen] = useState(false);
   const [formContext, setFormContext] = useState<'warehouse' | 'menu'>('warehouse');
   const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
@@ -123,7 +130,9 @@ export function InventoryPage() {
   const [itemName, setItemName] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemQty, setItemQty] = useState('0');
+  const [itemQtyUnit, setItemQtyUnit] = useState<number>(InventoryUnitKind.Base);
   const [itemThreshold, setItemThreshold] = useState('0');
+  const [itemThresholdUnit, setItemThresholdUnit] = useState<number>(InventoryUnitKind.Base);
   const [itemIsActive, setItemIsActive] = useState(true);
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
@@ -262,13 +271,24 @@ export function InventoryPage() {
           }
         : {};
 
+      const hasLarge = !!largeUnitId && Number(unitsPerLarge) > 1;
+      const thresholdBase =
+        formContext === 'menu'
+          ? 0
+          : enteredQtyToBase(
+              Number(itemThreshold) || 0,
+              itemThresholdUnit as InventoryUnitKind,
+              Number(unitsPerLarge) || 1,
+              hasLarge
+            );
+
       if (editingItem) {
         return cafeteriaApi.updateItem(editingItem.id, {
           name: itemName.trim(),
           kind: itemKind,
           nameAr: itemNameAr.trim() || undefined,
           // Menu/sell products have no stock of their own — never require a min threshold.
-          minThreshold: formContext === 'menu' ? 0 : Number(itemThreshold) || 0,
+          minThreshold: thresholdBase,
           isActive: itemIsActive,
           variants,
           ...unitPayload,
@@ -280,7 +300,9 @@ export function InventoryPage() {
         kind: itemKind,
         nameAr: itemNameAr.trim() || undefined,
         currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
-        minThreshold: formContext === 'menu' ? 0 : Number(itemThreshold) || 0,
+        initialStockUnit:
+          formContext === 'warehouse' && hasLarge ? itemQtyUnit : InventoryUnitKind.Base,
+        minThreshold: thresholdBase,
         variants: variants.map(({ name, sellPrice, recipeLines }) => ({
           name,
           sellPrice,
@@ -431,13 +453,18 @@ export function InventoryPage() {
           if (voucherType === StockVoucherType.StockIn && qty <= 0) return null;
           if (voucherType === StockVoucherType.StockCount && qty < 0) return null;
           if (voucherType === StockVoucherType.Settlement) {
+            // Absolute on-hand always entered in small (base) unit.
             const delta = qty - item.currentQuantity;
             if (delta === 0) return null;
             return { cafeteriaItemId: item.id, quantity: delta };
           }
           if (voucherType === StockVoucherType.StockIn) {
-            return { cafeteriaItemId: item.id, quantity: qty, unit: InventoryUnitKind.Base };
+            const unit = hasLargeUnit(item)
+              ? (voucherLineUnits[item.id] ?? InventoryUnitKind.Base)
+              : InventoryUnitKind.Base;
+            return { cafeteriaItemId: item.id, quantity: qty, unit };
           }
+          // Stock count: absolute qty in small unit.
           return { cafeteriaItemId: item.id, quantity: qty };
         })
         .filter(Boolean) as { cafeteriaItemId: string; quantity: number; unit?: number }[];
@@ -454,6 +481,7 @@ export function InventoryPage() {
     onSuccess: () => {
       setVoucherOpen(false);
       setVoucherLines({});
+      setVoucherLineUnits({});
       setVoucherNotes('');
       setError('');
       queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
@@ -509,7 +537,9 @@ export function InventoryPage() {
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
-    setItemThreshold('5');
+    setItemQtyUnit(InventoryUnitKind.Base);
+    setItemThreshold('0');
+    setItemThresholdUnit(InventoryUnitKind.Base);
     setItemIsActive(true);
     setBaseUnitId('');
     setLargeUnitId('');
@@ -525,14 +555,30 @@ export function InventoryPage() {
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
+    setItemQtyUnit(InventoryUnitKind.Base);
     setItemThreshold('0');
+    setItemThresholdUnit(InventoryUnitKind.Base);
     setItemIsActive(true);
     setBaseUnitId(units.find((u) => u.isActive)?.id ?? units[0]?.id ?? '');
     setLargeUnitId('');
-    setUnitsPerLarge(ctx === 'warehouse' ? '1000' : '1');
+    setUnitsPerLarge('1');
     setVariantRows([newVariantRow()]);
     setError('');
     setItemFormOpen(true);
+  }
+
+  function applyWeightPreset() {
+    const gram =
+      units.find((u) => u.isActive && (isGramUnitName(u.name) || isGramUnitName(u.nameAr))) ??
+      units.find((u) => isGramUnitName(u.name) || isGramUnitName(u.nameAr));
+    const kg =
+      units.find((u) => u.isActive && (isKilogramUnitName(u.name) || isKilogramUnitName(u.nameAr))) ??
+      units.find((u) => isKilogramUnitName(u.name) || isKilogramUnitName(u.nameAr));
+    if (gram) setBaseUnitId(gram.id);
+    if (kg) setLargeUnitId(kg.id);
+    setUnitsPerLarge('1000');
+    setItemQtyUnit(InventoryUnitKind.Large);
+    setItemThresholdUnit(InventoryUnitKind.Base);
   }
 
   function openEditItem(item: CafeteriaItem, ctx: 'warehouse' | 'menu') {
@@ -542,6 +588,8 @@ export function InventoryPage() {
     setItemName(item.name);
     setItemNameAr(item.nameAr ?? '');
     setItemThreshold(String(item.minThreshold));
+    setItemThresholdUnit(InventoryUnitKind.Base);
+    setItemQtyUnit(InventoryUnitKind.Base);
     setItemIsActive(item.isActive);
     setBaseUnitId(resolveUnitId(units, item.baseUnitName));
     setLargeUnitId(resolveUnitId(units, item.largeUnitName));
@@ -813,8 +861,13 @@ export function InventoryPage() {
                     {item.isActive ? t('common.active') : t('common.inactive')}
                   </Badge>
                 </td>
-                <td className="px-4 py-3">{item.currentQuantity}</td>
-                <td className="px-4 py-3">{item.minThreshold}</td>
+                <td className="px-4 py-3">
+                  <span className="text-sm">{formatStockDisplay(item)}</span>
+                </td>
+                <td className="px-4 py-3">
+                  {item.minThreshold}
+                  {item.baseUnitName ? ` ${item.baseUnitName}` : ''}
+                </td>
                 <td className="px-4 py-3">{formatCurrency(itemStockValue(item))}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
@@ -1175,8 +1228,12 @@ export function InventoryPage() {
         {adjustItem && (
           <div className="space-y-4">
             <p className="font-medium">{itemLabel(adjustItem)}</p>
+            <p className="text-sm text-muted">
+              {t('inventory.stockAvailable')}: {formatStockDisplay(adjustItem)}
+            </p>
+            <p className="text-xs text-muted">{t('inventory.absoluteBaseHint')}</p>
             <Input
-              label={t('inventory.newQty')}
+              label={`${t('inventory.newQty')} (${adjustItem.baseUnitName || t('inventory.baseUnit')})`}
               type="number"
               value={newQty}
               onChange={(e) => setNewQty(e.target.value)}
@@ -1197,11 +1254,22 @@ export function InventoryPage() {
 
       <Modal
         open={voucherOpen}
-        onClose={() => setVoucherOpen(false)}
+        onClose={() => {
+          setVoucherOpen(false);
+          setVoucherLines({});
+          setVoucherLineUnits({});
+        }}
         title={voucherTypeLabel(voucherType)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setVoucherOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setVoucherOpen(false);
+                setVoucherLines({});
+                setVoucherLineUnits({});
+              }}
+            >
               {t('session.cancel')}
             </Button>
             <Button loading={createVoucherMutation.isPending} onClick={() => createVoucherMutation.mutate()}>
@@ -1220,28 +1288,77 @@ export function InventoryPage() {
           <div className="max-h-72 space-y-2 overflow-y-auto">
             {stockItems
               .filter((i) => i.isActive)
-              .map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{itemLabel(item)}</p>
-                    <p className="text-xs text-muted">
-                      {t('inventory.systemQty')}: {item.currentQuantity}
-                    </p>
+              .map((item) => {
+                const allowLarge =
+                  voucherType === StockVoucherType.StockIn && hasLargeUnit(item);
+                const lineUnit = allowLarge
+                  ? (voucherLineUnits[item.id] ?? InventoryUnitKind.Base)
+                  : InventoryUnitKind.Base;
+                const entered = voucherLines[item.id];
+                const basePreview =
+                  entered !== undefined && entered !== '' && !Number.isNaN(Number(entered))
+                    ? toBaseQuantity(item, Number(entered), lineUnit as InventoryUnitKind)
+                    : null;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-end justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{itemLabel(item)}</p>
+                      <p className="text-xs text-muted">
+                        {t('inventory.systemQty')}: {formatStockDisplay(item)}
+                      </p>
+                      {basePreview != null && allowLarge && lineUnit === InventoryUnitKind.Large && (
+                        <p className="text-xs text-muted">
+                          {t('inventory.storesAsBase', {
+                            qty: basePreview,
+                            unit: item.baseUnitName || t('inventory.baseUnit'),
+                          })}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-end gap-2">
+                      <Input
+                        type="number"
+                        className="w-24"
+                        placeholder={
+                          voucherType === StockVoucherType.Settlement
+                            ? String(item.currentQuantity)
+                            : '0'
+                        }
+                        value={voucherLines[item.id] ?? ''}
+                        onChange={(e) =>
+                          setVoucherLines((prev) => ({ ...prev, [item.id]: e.target.value }))
+                        }
+                      />
+                      {allowLarge ? (
+                        <select
+                          className="w-28 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                          value={lineUnit}
+                          onChange={(e) =>
+                            setVoucherLineUnits((prev) => ({
+                              ...prev,
+                              [item.id]: Number(e.target.value),
+                            }))
+                          }
+                        >
+                          <option value={InventoryUnitKind.Base}>
+                            {item.baseUnitName || t('inventory.baseUnit')}
+                          </option>
+                          <option value={InventoryUnitKind.Large}>
+                            {item.largeUnitName || t('inventory.largeUnit')}
+                          </option>
+                        </select>
+                      ) : (
+                        <span className="mb-2 w-20 text-xs text-muted">
+                          {item.baseUnitName || t('inventory.baseUnit')}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <Input
-                    type="number"
-                    className="w-24 shrink-0"
-                    placeholder={
-                      voucherType === StockVoucherType.Settlement ? String(item.currentQuantity) : '0'
-                    }
-                    value={voucherLines[item.id] ?? ''}
-                    onChange={(e) => setVoucherLines((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                  />
-                </div>
-              ))}
+                );
+              })}
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
         </div>
@@ -1298,6 +1415,14 @@ export function InventoryPage() {
 
           {formContext === 'warehouse' && isStockKind(itemKind) && (
             <>
+              <p className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">
+                {t('inventory.qtyRule')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={applyWeightPreset}>
+                  {t('inventory.weightPreset')}
+                </Button>
+              </div>
               <div>
                 <label className="mb-1 block text-sm text-muted">{t('inventory.baseUnit')}</label>
                 <select
@@ -1318,7 +1443,14 @@ export function InventoryPage() {
                 <select
                   className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                   value={largeUnitId}
-                  onChange={(e) => setLargeUnitId(e.target.value)}
+                  onChange={(e) => {
+                    setLargeUnitId(e.target.value);
+                    if (!e.target.value) {
+                      setItemQtyUnit(InventoryUnitKind.Base);
+                      setItemThresholdUnit(InventoryUnitKind.Base);
+                      setUnitsPerLarge('1');
+                    }
+                  }}
                 >
                   <option value="">{t('inventory.none')}</option>
                   {units
@@ -1340,33 +1472,98 @@ export function InventoryPage() {
                 />
               )}
               <p className="text-xs text-muted">{t('inventory.weightStockHint')}</p>
-              <Input
-                label={t('inventory.thresholdOptional')}
-                type="number"
-                min={0}
-                value={itemThreshold}
-                onChange={(e) => setItemThreshold(e.target.value)}
-              />
-              {editingItem ? (
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={itemIsActive}
-                    onChange={(e) => setItemIsActive(e.target.checked)}
-                  />
-                  {t('common.active')}
-                </label>
-              ) : (
-                <>
-                  <Input
-                    label={t('inventory.initialStock')}
-                    type="number"
-                    value={itemQty}
-                    onChange={(e) => setItemQty(e.target.value)}
-                  />
-                  <p className="text-xs text-muted">{t('inventory.stockAlwaysBase')}</p>
-                </>
-              )}
+              {(() => {
+                const baseU = units.find((u) => u.id === baseUnitId);
+                const largeU = units.find((u) => u.id === largeUnitId);
+                const baseLabel = baseU ? unitName(baseU, i18n.language) : t('inventory.baseUnit');
+                const largeLabel = largeU ? unitName(largeU, i18n.language) : t('inventory.largeUnit');
+                const hasLarge = !!largeUnitId && Number(unitsPerLarge) > 1;
+                const factor = Number(unitsPerLarge) || 1;
+                const thresholdBase = enteredQtyToBase(
+                  Number(itemThreshold) || 0,
+                  itemThresholdUnit as InventoryUnitKind,
+                  factor,
+                  hasLarge
+                );
+                const stockBase = enteredQtyToBase(
+                  Number(itemQty) || 0,
+                  itemQtyUnit as InventoryUnitKind,
+                  factor,
+                  hasLarge
+                );
+                return (
+                  <>
+                    <div className="space-y-1">
+                      <label className="block text-sm text-muted">{t('inventory.thresholdOptional')}</label>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          className="min-w-[8rem] flex-1"
+                          value={itemThreshold}
+                          onChange={(e) => setItemThreshold(e.target.value)}
+                        />
+                        {hasLarge ? (
+                          <select
+                            className="w-32 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                            value={itemThresholdUnit}
+                            onChange={(e) => setItemThresholdUnit(Number(e.target.value))}
+                          >
+                            <option value={InventoryUnitKind.Base}>{baseLabel}</option>
+                            <option value={InventoryUnitKind.Large}>{largeLabel}</option>
+                          </select>
+                        ) : (
+                          <span className="self-center text-xs text-muted">{baseLabel}</span>
+                        )}
+                      </div>
+                      {hasLarge && itemThresholdUnit === InventoryUnitKind.Large && (
+                        <p className="text-xs text-muted">
+                          {t('inventory.storesAsBase', { qty: thresholdBase, unit: baseLabel })}
+                        </p>
+                      )}
+                    </div>
+                    {editingItem ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={itemIsActive}
+                          onChange={(e) => setItemIsActive(e.target.checked)}
+                        />
+                        {t('common.active')}
+                      </label>
+                    ) : (
+                      <div className="space-y-1">
+                        <label className="block text-sm text-muted">{t('inventory.initialStock')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <Input
+                            type="number"
+                            className="min-w-[8rem] flex-1"
+                            value={itemQty}
+                            onChange={(e) => setItemQty(e.target.value)}
+                          />
+                          {hasLarge ? (
+                            <select
+                              className="w-32 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                              value={itemQtyUnit}
+                              onChange={(e) => setItemQtyUnit(Number(e.target.value))}
+                            >
+                              <option value={InventoryUnitKind.Base}>{baseLabel}</option>
+                              <option value={InventoryUnitKind.Large}>{largeLabel}</option>
+                            </select>
+                          ) : (
+                            <span className="self-center text-xs text-muted">{baseLabel}</span>
+                          )}
+                        </div>
+                        {hasLarge && (
+                          <p className="text-xs text-muted">
+                            {t('inventory.storesAsBase', { qty: stockBase, unit: baseLabel })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </>
           )}
 
@@ -1716,7 +1913,10 @@ function VoucherCard({
       <ul className="mb-3 space-y-1 text-sm text-muted">
         {voucher.lines.map((l) => (
           <li key={l.id}>
-            {l.itemName}: {l.quantity}
+            {l.itemName}:{' '}
+            {l.enteredQuantity != null && l.enteredUnit === InventoryUnitKind.Large
+              ? `${l.enteredQuantity} → ${l.quantity}`
+              : l.quantity}
             {l.systemQuantity != null && ` · ${t('inventory.systemQty')} ${l.systemQuantity}`}
             {l.variance != null &&
               l.variance !== 0 &&
