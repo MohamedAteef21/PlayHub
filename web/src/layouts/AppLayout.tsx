@@ -249,7 +249,7 @@ export function AppLayout() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="chrome-topbar sticky top-0 z-20 flex h-14 items-center gap-2 px-3 sm:px-4 lg:px-5">
+          <header className="chrome-topbar sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 px-3 sm:px-4 lg:px-5">
             {/* Mobile open */}
             <button
               type="button"
