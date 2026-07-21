@@ -6,7 +6,15 @@ import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import type { CafeteriaAddOn, CafeteriaHold, CafeteriaItem, CafeteriaItemVariant, MissingIngredient } from '@/types';
-import { CafeteriaItemKind, PaymentMethod } from '@/types';
+import { CafeteriaItemKind, InventoryUnitKind, PaymentMethod } from '@/types';
+import {
+  formatStockDisplay,
+  hasLargeUnit,
+  maxSellQuantity,
+  toBaseQuantity,
+  unitLabel,
+  variantUnitPrice,
+} from '@/lib/itemUnits';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -25,13 +33,14 @@ interface CartLine {
   variant: CafeteriaItemVariant;
   quantity: number;
   stockDeduct: number;
+  unit: number;
   addOns: CartAddOn[];
 }
 
 type SaleMode = 'walkin' | 'session' | 'waiting';
 
-function cartKey(itemId: string, variantId: string) {
-  return `${itemId}:${variantId}`;
+function cartKey(itemId: string, variantId: string, unit: number) {
+  return `${itemId}:${variantId}:${unit}`;
 }
 
 function variantHasRecipe(variant: CafeteriaItemVariant) {
@@ -49,7 +58,8 @@ function parseMissingIngredients(err: unknown): MissingIngredient[] | null {
 }
 
 function lineTotal(line: CartLine) {
-  const base = line.variant.sellPrice * line.quantity;
+  const unitPrice = variantUnitPrice(line.variant.sellPrice, line.item, line.unit as InventoryUnitKind);
+  const base = unitPrice * line.quantity;
   const addons = line.addOns.reduce((sum, a) => sum + a.addOn.sellPrice * a.quantity, 0);
   return base + addons;
 }
@@ -77,6 +87,7 @@ export function CafeteriaPage() {
   const [pickVariantId, setPickVariantId] = useState('');
   const [stockDeduct, setStockDeduct] = useState('1');
   const [sellQty, setSellQty] = useState('1');
+  const [pickUnit, setPickUnit] = useState<number>(InventoryUnitKind.Base);
   const [pickAddOns, setPickAddOns] = useState<Record<string, number>>({});
   const [missingDialog, setMissingDialog] = useState<{
     missing: MissingIngredient[];
@@ -137,19 +148,25 @@ export function CafeteriaPage() {
     setPickVariantId(variants[0].id);
     setStockDeduct('1');
     setSellQty('1');
+    setPickUnit(InventoryUnitKind.Base);
     setPickAddOns({});
     setError('');
   }
 
   const pickVariant = (pickItem?.variants ?? []).find((v) => v.id === pickVariantId);
   const showStockDeduct = pickItem && pickVariant ? needsManualStockDeduct(pickItem, pickVariant) : false;
+  const pickAllowLarge = !!(pickItem && showStockDeduct && hasLargeUnit(pickItem));
+  const effectivePickUnit = pickAllowLarge ? pickUnit : InventoryUnitKind.Base;
 
   function confirmPick() {
     if (!pickItem || !pickVariant) return;
     const qty = Math.max(1, Number(sellQty) || 1);
     const manual = needsManualStockDeduct(pickItem, pickVariant);
+    const unit = manual && hasLargeUnit(pickItem) ? effectivePickUnit : InventoryUnitKind.Base;
     const deduct = manual ? Math.max(1, Number(stockDeduct) || qty) : qty;
-    if (manual && deduct > pickItem.currentQuantity) {
+    const maxAvail = manual ? maxSellQuantity(pickItem, unit as InventoryUnitKind) : Infinity;
+    const baseNeeded = manual ? toBaseQuantity(pickItem, deduct, unit as InventoryUnitKind) : 0;
+    if (manual && (deduct > maxAvail || baseNeeded > pickItem.currentQuantity)) {
       setError(t('inventory.insufficientStock'));
       return;
     }
@@ -161,18 +178,19 @@ export function CafeteriaPage() {
         return { addOn, quantity };
       });
 
-    const key = cartKey(pickItem.id, pickVariant.id);
+    const key = cartKey(pickItem.id, pickVariant.id, unit);
     setCart((prev) => {
-      const existing = prev.find((l) => cartKey(l.item.id, l.variant.id) === key);
+      const existing = prev.find((l) => cartKey(l.item.id, l.variant.id, l.unit) === key);
       if (existing) {
         return prev.map((l) =>
-          cartKey(l.item.id, l.variant.id) === key
+          cartKey(l.item.id, l.variant.id, l.unit) === key
             ? {
                 ...l,
                 quantity: l.quantity + qty,
                 stockDeduct: l.stockDeduct + deduct,
                 item: pickItem,
                 variant: pickVariant,
+                unit,
                 addOns: mergeAddOns(existing.addOns, selectedAddOns),
               }
             : l
@@ -185,6 +203,7 @@ export function CafeteriaPage() {
           variant: pickVariant,
           quantity: qty,
           stockDeduct: deduct,
+          unit,
           addOns: selectedAddOns,
         },
       ];
@@ -203,11 +222,11 @@ export function CafeteriaPage() {
     return [...map.values()];
   }
 
-  function updateQty(itemId: string, variantId: string, delta: number) {
+  function updateQty(itemId: string, variantId: string, unit: number, delta: number) {
     setCart((prev) =>
       prev
         .map((l) => {
-          if (l.item.id !== itemId || l.variant.id !== variantId) return l;
+          if (l.item.id !== itemId || l.variant.id !== variantId || l.unit !== unit) return l;
           const next = Math.max(0, l.quantity + delta);
           const manual = needsManualStockDeduct(l.item, l.variant);
           const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
@@ -231,6 +250,7 @@ export function CafeteriaPage() {
           variantId: l.variant.id,
           quantity: l.quantity,
           stockDeductQuantity: l.stockDeduct,
+          unit: l.unit,
           addOns: l.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
         })),
         { guestName: guestName.trim() || undefined, allowSkipMissingIngredients: allowSkip }
@@ -248,7 +268,8 @@ export function CafeteriaPage() {
           line.stockDeduct,
           customerName.trim() || undefined,
           line.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
-          allowSkip
+          allowSkip,
+          line.unit
         );
       }
       return;
@@ -259,6 +280,7 @@ export function CafeteriaPage() {
         variantId: l.variant.id,
         quantity: l.quantity,
         stockDeductQuantity: l.stockDeduct,
+        unit: l.unit,
         addOns: l.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
       })),
       {
@@ -502,7 +524,7 @@ export function CafeteriaPage() {
                 </div>
                 {sellAsIsNoRecipe && (
                   <p className="mt-2 text-sm text-muted">
-                    {t('inventory.qty')}: {item.currentQuantity}
+                    {t('inventory.qty')}: {formatStockDisplay(item)}
                   </p>
                 )}
               </Card>
@@ -517,26 +539,37 @@ export function CafeteriaPage() {
           ) : (
             <div className="space-y-3">
               {cart.map((l) => (
-                <div key={cartKey(l.item.id, l.variant.id)} className="space-y-1">
+                <div key={cartKey(l.item.id, l.variant.id, l.unit)} className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{lineLabel(l)}</p>
                       <p className="text-xs text-muted">
-                        {formatCurrency(l.variant.sellPrice)}
+                        {formatCurrency(
+                          variantUnitPrice(l.variant.sellPrice, l.item, l.unit as InventoryUnitKind)
+                        )}
                         {needsManualStockDeduct(l.item, l.variant) && (
                           <>
                             {' · '}
-                            {t('inventory.stockDeduct')} {l.stockDeduct}
+                            {t('inventory.stockDeduct')} {l.stockDeduct}{' '}
+                            {unitLabel(l.item, l.unit as InventoryUnitKind)}
                           </>
                         )}
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, -1)}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => updateQty(l.item.id, l.variant.id, l.unit, -1)}
+                      >
                         -
                       </Button>
                       <span className="w-6 text-center text-sm">{l.quantity}</span>
-                      <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, 1)}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => updateQty(l.item.id, l.variant.id, l.unit, 1)}
+                      >
                         +
                       </Button>
                     </div>
@@ -600,16 +633,53 @@ export function CafeteriaPage() {
             />
             {showStockDeduct && (
               <>
-                <Input
-                  label={t('inventory.stockDeduct')}
-                  type="number"
-                  min={1}
-                  value={stockDeduct}
-                  onChange={(e) => setStockDeduct(e.target.value)}
-                />
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[8rem] flex-1">
+                    <Input
+                      label={t('inventory.stockDeduct')}
+                      type="number"
+                      min={1}
+                      value={stockDeduct}
+                      onChange={(e) => setStockDeduct(e.target.value)}
+                    />
+                  </div>
+                  {pickAllowLarge ? (
+                    <div className="w-32">
+                      <label className="mb-1 block text-xs text-muted">{t('inventory.deductUnit')}</label>
+                      <select
+                        className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                        value={effectivePickUnit}
+                        onChange={(e) => setPickUnit(Number(e.target.value))}
+                      >
+                        <option value={InventoryUnitKind.Base}>
+                          {pickItem.baseUnitName || t('inventory.baseUnit')}
+                        </option>
+                        <option value={InventoryUnitKind.Large}>
+                          {pickItem.largeUnitName || t('inventory.largeUnit')}
+                        </option>
+                      </select>
+                    </div>
+                  ) : (
+                    <span className="mb-2 text-xs text-muted">
+                      {pickItem.baseUnitName || t('inventory.baseUnit')}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-muted">
-                  {t('inventory.stockAvailable')}: {pickItem.currentQuantity}
+                  {t('inventory.stockAvailable')}: {formatStockDisplay(pickItem)}
                 </p>
+                {pickAllowLarge && effectivePickUnit === InventoryUnitKind.Large && (
+                  <p className="text-xs text-muted">
+                    {t('inventory.storesAsBase', {
+                      qty: toBaseQuantity(
+                        pickItem,
+                        Number(stockDeduct) || 0,
+                        InventoryUnitKind.Large
+                      ),
+                      unit: pickItem.baseUnitName || t('inventory.baseUnit'),
+                    })}
+                  </p>
+                )}
               </>
             )}
             {addOns.length > 0 && (

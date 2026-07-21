@@ -14,11 +14,15 @@ import {
   StockVoucherType,
 } from '@/types';
 import {
+  defaultDeductUnit,
   enteredQtyToBase,
   formatStockDisplay,
   hasLargeUnit,
   isGramUnitName,
   isKilogramUnitName,
+  isLiterUnitName,
+  isMilliliterUnitName,
+  isVolumeItem,
   isWeightItem,
   recipeQtyFromBase,
   recipeQtyToBase,
@@ -144,6 +148,7 @@ export function InventoryPage() {
   const [addonPrice, setAddonPrice] = useState('');
   const [addonWarehouseId, setAddonWarehouseId] = useState('');
   const [addonDeductQty, setAddonDeductQty] = useState('1');
+  const [addonDeductUnit, setAddonDeductUnit] = useState<RecipeDeductUnit>('base');
   const [addonIsActive, setAddonIsActive] = useState(true);
   const [newUnitName, setNewUnitName] = useState('');
   const [newUnitNameAr, setNewUnitNameAr] = useState('');
@@ -263,7 +268,7 @@ export function InventoryPage() {
         itemKind === CafeteriaItemKind.Menu;
       const variants = needsVariants ? buildVariantsPayload(includeRecipes) : [];
 
-      const unitPayload = formContext === 'warehouse' && isStockKind(itemKind)
+      const unitPayload = isStockKind(itemKind)
         ? {
             baseUnitId: baseUnitId || undefined,
             largeUnitId: largeUnitId || undefined,
@@ -418,11 +423,16 @@ export function InventoryPage() {
 
   const saveAddonMutation = useMutation({
     mutationFn: () => {
+      const warehouse = warehouseItems.find((w) => w.id === addonWarehouseId);
+      const deductQuantity = warehouse
+        ? recipeQtyToBase(warehouse, Number(addonDeductQty) || 0, addonDeductUnit)
+        : Math.round(Number(addonDeductQty) || 1);
+      if (deductQuantity <= 0) throw new Error(t('inventory.deductQty'));
       const payload = {
         name: addonName.trim(),
         sellPrice: Number(addonPrice),
         warehouseItemId: addonWarehouseId,
-        deductQuantity: Number(addonDeductQty) || 1,
+        deductQuantity,
       };
       if (editingAddon) {
         return cafeteriaApi.updateAddOn(editingAddon.id, { ...payload, isActive: addonIsActive });
@@ -581,6 +591,20 @@ export function InventoryPage() {
     setItemThresholdUnit(InventoryUnitKind.Base);
   }
 
+  function applyVolumePreset() {
+    const ml =
+      units.find((u) => u.isActive && (isMilliliterUnitName(u.name) || isMilliliterUnitName(u.nameAr))) ??
+      units.find((u) => isMilliliterUnitName(u.name) || isMilliliterUnitName(u.nameAr));
+    const liter =
+      units.find((u) => u.isActive && (isLiterUnitName(u.name) || isLiterUnitName(u.nameAr))) ??
+      units.find((u) => isLiterUnitName(u.name) || isLiterUnitName(u.nameAr));
+    if (ml) setBaseUnitId(ml.id);
+    if (liter) setLargeUnitId(liter.id);
+    setUnitsPerLarge('1000');
+    setItemQtyUnit(InventoryUnitKind.Large);
+    setItemThresholdUnit(InventoryUnitKind.Base);
+  }
+
   function openEditItem(item: CafeteriaItem, ctx: 'warehouse' | 'menu') {
     setFormContext(ctx);
     setEditingItem(item);
@@ -629,6 +653,7 @@ export function InventoryPage() {
     setAddonPrice('');
     setAddonWarehouseId('');
     setAddonDeductQty('1');
+    setAddonDeductUnit('base');
     setAddonIsActive(true);
     setError('');
   }
@@ -637,8 +662,10 @@ export function InventoryPage() {
     setEditingAddon(null);
     setAddonName('');
     setAddonPrice('');
-    setAddonWarehouseId(warehouseItems[0]?.id ?? '');
+    const first = warehouseItems.find((w) => w.isActive) ?? warehouseItems[0];
+    setAddonWarehouseId(first?.id ?? '');
     setAddonDeductQty('1');
+    setAddonDeductUnit(first ? defaultDeductUnit(first) : 'base');
     setAddonIsActive(true);
     setError('');
     setAddonFormOpen(true);
@@ -649,7 +676,12 @@ export function InventoryPage() {
     setAddonName(addon.name);
     setAddonPrice(String(addon.sellPrice));
     setAddonWarehouseId(addon.warehouseItemId);
-    setAddonDeductQty(String(addon.deductQuantity));
+    const warehouse = warehouseItems.find((w) => w.id === addon.warehouseItemId);
+    const mapped = warehouse
+      ? recipeQtyFromBase(warehouse, addon.deductQuantity)
+      : { quantity: String(addon.deductQuantity), deductUnit: 'base' as RecipeDeductUnit };
+    setAddonDeductQty(mapped.quantity);
+    setAddonDeductUnit(mapped.deductUnit);
     setAddonIsActive(addon.isActive);
     setError('');
     setAddonFormOpen(true);
@@ -1422,6 +1454,9 @@ export function InventoryPage() {
                 <Button type="button" size="sm" variant="secondary" onClick={applyWeightPreset}>
                   {t('inventory.weightPreset')}
                 </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={applyVolumePreset}>
+                  {t('inventory.volumePreset')}
+                </Button>
               </div>
               <div>
                 <label className="mb-1 block text-sm text-muted">{t('inventory.baseUnit')}</label>
@@ -1463,13 +1498,21 @@ export function InventoryPage() {
                 </select>
               </div>
               {largeUnitId && (
-                <Input
-                  label={t('inventory.unitsPerLarge')}
-                  type="number"
-                  min={2}
-                  value={unitsPerLarge}
-                  onChange={(e) => setUnitsPerLarge(e.target.value)}
-                />
+                <>
+                  <Input
+                    label={t('inventory.unitsPerLarge')}
+                    type="number"
+                    min={2}
+                    value={unitsPerLarge}
+                    onChange={(e) => setUnitsPerLarge(e.target.value)}
+                  />
+                  {editingItem &&
+                    Number(unitsPerLarge) !== (editingItem.unitsPerLarge || 1) && (
+                      <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                        {t('inventory.conversionChangeWarn')}
+                      </p>
+                    )}
+                </>
               )}
               <p className="text-xs text-muted">{t('inventory.weightStockHint')}</p>
               {(() => {
@@ -1657,6 +1700,7 @@ export function InventoryPage() {
                       {row.recipeLines.map((rl) => {
                         const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
                         const weight = warehouse ? isWeightItem(warehouse) : false;
+                        const volume = warehouse ? isVolumeItem(warehouse) : false;
                         const basePreview =
                           warehouse && rl.quantity !== ''
                             ? recipeQtyToBase(warehouse, Number(rl.quantity), rl.deductUnit)
@@ -1674,10 +1718,9 @@ export function InventoryPage() {
                                   onChange={(e) => {
                                     const id = e.target.value;
                                     const wh = warehouseItems.find((w) => w.id === id);
-                                    const deductUnit: RecipeDeductUnit = wh && isWeightItem(wh) ? 'gram' : 'base';
                                     updateRecipeLine(row.key, rl.key, {
                                       warehouseItemId: id,
-                                      deductUnit,
+                                      deductUnit: wh ? defaultDeductUnit(wh) : 'base',
                                     });
                                   }}
                                 >
@@ -1716,19 +1759,21 @@ export function InventoryPage() {
                                     })
                                   }
                                 >
-                                  {weight ? (
+                                  {weight && (
                                     <>
                                       <option value="gram">{t('inventory.unitGram')}</option>
                                       <option value="kilogram">{t('inventory.unitKilogram')}</option>
                                     </>
-                                  ) : (
-                                    <option value="base">
-                                      {warehouse?.baseUnitName || t('inventory.baseUnit')}
-                                    </option>
                                   )}
-                                  {weight && warehouse?.baseUnitName && (
-                                    <option value="base">{warehouse.baseUnitName}</option>
+                                  {volume && (
+                                    <>
+                                      <option value="milliliter">{t('inventory.unitMilliliter')}</option>
+                                      <option value="liter">{t('inventory.unitLiter')}</option>
+                                    </>
                                   )}
+                                  <option value="base">
+                                    {warehouse?.baseUnitName || t('inventory.baseUnit')}
+                                  </option>
                                 </select>
                               </div>
                               <Button
@@ -1788,26 +1833,79 @@ export function InventoryPage() {
             <select
               className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
               value={addonWarehouseId}
-              onChange={(e) => setAddonWarehouseId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                setAddonWarehouseId(id);
+                const wh = warehouseItems.find((w) => w.id === id);
+                if (wh) setAddonDeductUnit(defaultDeductUnit(wh));
+              }}
             >
               <option value="">{t('inventory.selectWarehouseItem')}</option>
               {warehouseItems
                 .filter((w) => w.isActive)
                 .map((w) => (
                   <option key={w.id} value={w.id}>
-                    {itemLabel(w)} ({w.currentQuantity})
+                    {itemLabel(w)} ({w.currentQuantity} {w.baseUnitName})
                   </option>
                 ))}
             </select>
           </div>
-          <Input
-            label={t('inventory.deductQty')}
-            type="number"
-            min={0}
-            step="0.01"
-            value={addonDeductQty}
-            onChange={(e) => setAddonDeductQty(e.target.value)}
-          />
+          {(() => {
+            const warehouse = warehouseItems.find((w) => w.id === addonWarehouseId);
+            const weight = warehouse ? isWeightItem(warehouse) : false;
+            const volume = warehouse ? isVolumeItem(warehouse) : false;
+            const basePreview = warehouse
+              ? recipeQtyToBase(warehouse, Number(addonDeductQty) || 0, addonDeductUnit)
+              : 0;
+            return (
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[8rem] flex-1">
+                    <Input
+                      label={t('inventory.deductQty')}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={addonDeductQty}
+                      onChange={(e) => setAddonDeductQty(e.target.value)}
+                    />
+                  </div>
+                  <div className="w-28">
+                    <label className="mb-1 block text-xs text-muted">{t('inventory.deductUnit')}</label>
+                    <select
+                      className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                      value={addonDeductUnit}
+                      onChange={(e) => setAddonDeductUnit(e.target.value as RecipeDeductUnit)}
+                    >
+                      {weight && (
+                        <>
+                          <option value="gram">{t('inventory.unitGram')}</option>
+                          <option value="kilogram">{t('inventory.unitKilogram')}</option>
+                        </>
+                      )}
+                      {volume && (
+                        <>
+                          <option value="milliliter">{t('inventory.unitMilliliter')}</option>
+                          <option value="liter">{t('inventory.unitLiter')}</option>
+                        </>
+                      )}
+                      <option value="base">
+                        {warehouse?.baseUnitName || t('inventory.baseUnit')}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+                {warehouse && basePreview > 0 && (
+                  <p className="text-xs text-muted">
+                    {t('inventory.deductPreview', {
+                      qty: basePreview,
+                      unit: warehouse.baseUnitName,
+                    })}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           {editingAddon && (
             <label className="flex items-center gap-2 text-sm">
               <input

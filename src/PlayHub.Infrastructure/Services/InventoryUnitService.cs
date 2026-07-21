@@ -226,6 +226,8 @@ public class InventoryUnitService : IInventoryUnitService
             ("كرتونة", "كرتونة"),
             ("جرام", "جرام"),
             ("كجم", "كجم"),
+            ("مل", "مل"),
+            ("لتر", "لتر"),
         };
         foreach (var (name, nameAr) in defaults)
         {
