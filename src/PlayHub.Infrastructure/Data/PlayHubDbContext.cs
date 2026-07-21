@@ -193,35 +193,19 @@ public class PlayHubDbContext : DbContext
 
     private void ApplyGlobalQueryFilters(ModelBuilder modelBuilder)
     {
+        // --- Tenant-scoped ---
         modelBuilder.Entity<Branch>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
-
-        modelBuilder.Entity<BranchPaymentAccount>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
 
         modelBuilder.Entity<User>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
 
-        modelBuilder.Entity<ControllerType>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
-
-        modelBuilder.Entity<VenueAssetType>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
+        modelBuilder.Entity<Notification>().HasQueryFilter(e => e.TenantId == _tenantContext.TenantId);
+        modelBuilder.Entity<AuditLog>().HasQueryFilter(e => e.TenantId == _tenantContext.TenantId);
 
         modelBuilder.Entity<MasterAlertSettings>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId);
-
-        modelBuilder.Entity<DeviceMaintenance>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
-            !e.IsDeleted &&
-            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
-
-        modelBuilder.Entity<PricingPlan>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
-
-        modelBuilder.Entity<ExpenseCategory>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
+            (_tenantContext.IsSuperAdmin || e.UserId == _tenantContext.UserId));
 
         modelBuilder.Entity<Customer>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
@@ -229,94 +213,227 @@ public class PlayHubDbContext : DbContext
         modelBuilder.Entity<WalletTransaction>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId);
 
-        modelBuilder.Entity<CustomerOffer>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
+        // --- Owner-scoped catalogs (masters share one TenantId) ---
+        modelBuilder.Entity<VenueAssetType>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
 
-        modelBuilder.Entity<Notification>().HasQueryFilter(e => e.TenantId == _tenantContext.TenantId);
-        modelBuilder.Entity<AuditLog>().HasQueryFilter(e => e.TenantId == _tenantContext.TenantId);
+        modelBuilder.Entity<ControllerType>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<ExpenseCategory>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<InventoryUnit>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<CustomerOffer>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<PricingPlan>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null
+                 && (e.BranchId == null || e.BranchId == _tenantContext.BranchId))
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && (e.BranchId == null || _tenantContext.AllowedBranchIds.Contains(e.BranchId.Value)))));
+
+        // --- Branch-scoped ---
+        modelBuilder.Entity<BranchPaymentAccount>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
+
+        modelBuilder.Entity<DeviceMaintenance>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<Room>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<Device>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<Session>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<CafeteriaItem>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<CafeteriaAddOn>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
-
-        modelBuilder.Entity<InventoryUnit>().HasQueryFilter(e =>
-            e.TenantId == _tenantContext.TenantId && !e.IsDeleted);
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<ItemUnitConversionLog>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<CafeteriaSale>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<InventoryMovement>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<PurchaseOrder>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<StockVoucher>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<Invoice>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<RevenueEntry>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<Expense>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<CashCollection>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
-             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)));
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
+
+        // --- Child entities filtered via parent navigation (critical for cash drawer / assets) ---
+        modelBuilder.Entity<RoomAsset>().HasQueryFilter(e =>
+            e.Room.TenantId == _tenantContext.TenantId &&
+            !e.Room.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Room.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Room.BranchId))));
+
+        modelBuilder.Entity<DeviceController>().HasQueryFilter(e =>
+            e.Device.TenantId == _tenantContext.TenantId &&
+            !e.Device.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Device.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Device.BranchId))));
+
+        modelBuilder.Entity<Screen>().HasQueryFilter(e =>
+            e.Device.TenantId == _tenantContext.TenantId &&
+            !e.Device.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Device.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Device.BranchId))));
+
+        modelBuilder.Entity<InvoicePayment>().HasQueryFilter(e =>
+            e.Invoice.TenantId == _tenantContext.TenantId &&
+            !e.Invoice.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Invoice.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Invoice.BranchId))));
+
+        modelBuilder.Entity<PaymentProof>().HasQueryFilter(e =>
+            e.InvoicePayment.Invoice.TenantId == _tenantContext.TenantId &&
+            !e.InvoicePayment.Invoice.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.InvoicePayment.Invoice.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.InvoicePayment.Invoice.BranchId))));
+
+        modelBuilder.Entity<SessionCafeteriaLine>().HasQueryFilter(e =>
+            e.Session.TenantId == _tenantContext.TenantId &&
+            !e.Session.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Session.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Session.BranchId))));
+
+        modelBuilder.Entity<SessionPause>().HasQueryFilter(e =>
+            e.Session.TenantId == _tenantContext.TenantId &&
+            !e.Session.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Session.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Session.BranchId))));
     }
 }

@@ -27,15 +27,12 @@ public class ReportsService : IReportsService
 
         var fromDate = from.Date;
         var toDate = to.Date.AddDays(1).AddTicks(-1);
-        var effectiveBranchId = branchId ?? _tenantContext.BranchId;
+        var effectiveBranchId = await ResolveReportBranchIdAsync(branchId, ct);
 
-        var query = _db.RevenueEntries
-            .Where(r => r.RecordedAt >= fromDate && r.RecordedAt <= toDate);
-
-        if (effectiveBranchId.HasValue)
-            query = query.Where(r => r.BranchId == effectiveBranchId.Value);
-
-        var entries = await query.ToListAsync(ct);
+        var entries = await _db.RevenueEntries
+            .Where(r => r.BranchId == effectiveBranchId
+                && r.RecordedAt >= fromDate && r.RecordedAt <= toDate)
+            .ToListAsync(ct);
         var sessionRev = entries.Where(e => e.RevenueType == RevenueType.Session).Sum(e => e.Amount);
         var cafeteriaRev = entries.Where(e => e.RevenueType == RevenueType.Cafeteria).Sum(e => e.Amount);
 
@@ -57,7 +54,7 @@ public class ReportsService : IReportsService
         DateTime from, DateTime to, int top = 10, CancellationToken ct = default)
     {
         EnsureMaster();
-        var branchId = _tenantContext.BranchId;
+        var branchId = await ResolveReportBranchIdAsync(null, ct);
 
         var fromDate = from.Date;
         var toDate = to.Date.AddDays(1).AddTicks(-1);
@@ -65,18 +62,14 @@ public class ReportsService : IReportsService
         var saleLines = _db.CafeteriaSaleLines
             .Include(l => l.Sale)
             .Include(l => l.CafeteriaItem)
-            .Where(l => l.Sale.SoldAt >= fromDate && l.Sale.SoldAt <= toDate);
-
-        if (branchId.HasValue)
-            saleLines = saleLines.Where(l => l.Sale.BranchId == branchId.Value);
+            .Where(l => l.Sale.BranchId == branchId
+                && l.Sale.SoldAt >= fromDate && l.Sale.SoldAt <= toDate);
 
         var sessionLines = _db.SessionCafeteriaLines
             .Include(l => l.Session)
             .Include(l => l.CafeteriaItem)
-            .Where(l => l.Session.ClosedAt >= fromDate && l.Session.ClosedAt <= toDate);
-
-        if (branchId.HasValue)
-            sessionLines = sessionLines.Where(l => l.Session.BranchId == branchId.Value);
+            .Where(l => l.Session.BranchId == branchId
+                && l.Session.ClosedAt >= fromDate && l.Session.ClosedAt <= toDate);
 
         var standalone = await saleLines
             .GroupBy(l => new { l.CafeteriaItemId, l.CafeteriaItem.Name })
@@ -136,7 +129,7 @@ public class ReportsService : IReportsService
         DateOnly date, int tzOffsetMinutes, Guid? branchId = null, CancellationToken ct = default)
     {
         EnsureMaster();
-        var effectiveBranchId = branchId ?? _tenantContext.BranchId;
+        var effectiveBranchId = await ResolveReportBranchIdAsync(branchId, ct);
 
         // Local business day converted to the UTC window it covers.
         var dayStartUtc = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddMinutes(-tzOffsetMinutes);
@@ -144,10 +137,8 @@ public class ReportsService : IReportsService
 
         var paymentsQuery = _db.InvoicePayments
             .Where(p => !p.Invoice.IsDeleted
+                && p.Invoice.BranchId == effectiveBranchId
                 && p.Invoice.ClosedAt >= dayStartUtc && p.Invoice.ClosedAt < dayEndUtc);
-
-        if (effectiveBranchId.HasValue)
-            paymentsQuery = paymentsQuery.Where(p => p.Invoice.BranchId == effectiveBranchId.Value);
 
         var payments = await paymentsQuery
             .Select(p => new { p.PaymentMethod, p.Amount, p.Status, p.Invoice.InvoiceType })
@@ -173,34 +164,28 @@ public class ReportsService : IReportsService
             .Sum(p => p.Amount);
 
         // Old debts collected in cash during this day (regardless of when the invoice was closed).
-        var collectedQuery = _db.InvoicePayments
+        var cashCollectedDebts = await _db.InvoicePayments
             .Where(p => !p.Invoice.IsDeleted
+                && p.Invoice.BranchId == effectiveBranchId
                 && p.Status == PaymentStatus.Collected
                 && p.CollectionMethod == PaymentMethod.Cash
-                && p.CollectedAt >= dayStartUtc && p.CollectedAt < dayEndUtc);
-        if (effectiveBranchId.HasValue)
-            collectedQuery = collectedQuery.Where(p => p.Invoice.BranchId == effectiveBranchId.Value);
-        var cashCollectedDebts = await collectedQuery.SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+                && p.CollectedAt >= dayStartUtc && p.CollectedAt < dayEndUtc)
+            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
 
         // Wallet top-ups are handed over in cash at the counter (bonus credit is excluded — no cash moves).
-        var topUpsDayQuery = _db.WalletTransactions
+        var cashWalletTopUps = await _db.WalletTransactions
             .Where(w => w.Type == WalletTransactionType.TopUp
-                && w.CreatedAt >= dayStartUtc && w.CreatedAt < dayEndUtc);
-        if (effectiveBranchId.HasValue)
-            topUpsDayQuery = topUpsDayQuery.Where(w => w.BranchId == effectiveBranchId.Value || w.BranchId == null);
-        var cashWalletTopUps = await topUpsDayQuery.SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
+                && w.CreatedAt >= dayStartUtc && w.CreatedAt < dayEndUtc
+                && (w.BranchId == effectiveBranchId || w.BranchId == null))
+            .SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
 
-        var expensesQuery = _db.Expenses.Where(e => e.ExpenseDate == date);
-        if (effectiveBranchId.HasValue)
-            expensesQuery = expensesQuery.Where(e => e.BranchId == effectiveBranchId.Value);
-        var cashExpenses = await expensesQuery.SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
+        var cashExpenses = await _db.Expenses
+            .Where(e => e.ExpenseDate == date && e.BranchId == effectiveBranchId)
+            .SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
 
-        var dayCollectionsQuery = _db.CashCollections
-            .Where(c => c.CollectedAt >= dayStartUtc && c.CollectedAt < dayEndUtc);
-        if (effectiveBranchId.HasValue)
-            dayCollectionsQuery = dayCollectionsQuery.Where(c => c.BranchId == effectiveBranchId.Value);
-
-        var dayCollections = await dayCollectionsQuery
+        var dayCollections = await _db.CashCollections
+            .Where(c => c.BranchId == effectiveBranchId
+                && c.CollectedAt >= dayStartUtc && c.CollectedAt < dayEndUtc)
             .OrderByDescending(c => c.CollectedAt)
             .Select(c => new CashCollectionDto(
                 c.Id, c.Amount, c.Note,
@@ -265,31 +250,55 @@ public class ReportsService : IReportsService
     }
 
     /// <summary>Running till balance: all cash ever received minus expenses and master collections.</summary>
-    private async Task<decimal> ComputeDrawerBalanceAsync(Guid? branchId, CancellationToken ct)
+    private async Task<decimal> ComputeDrawerBalanceAsync(Guid branchId, CancellationToken ct)
     {
-        var cashPaymentsQuery = _db.InvoicePayments.Where(p => !p.Invoice.IsDeleted
+        var cashIn = await _db.InvoicePayments.Where(p => !p.Invoice.IsDeleted
+            && p.Invoice.BranchId == branchId
             && ((p.PaymentMethod == PaymentMethod.Cash && p.Status == PaymentStatus.Completed)
-                || (p.Status == PaymentStatus.Collected && p.CollectionMethod == PaymentMethod.Cash)));
-        if (branchId.HasValue)
-            cashPaymentsQuery = cashPaymentsQuery.Where(p => p.Invoice.BranchId == branchId.Value);
-        var cashIn = await cashPaymentsQuery.SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+                || (p.Status == PaymentStatus.Collected && p.CollectionMethod == PaymentMethod.Cash)))
+            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
 
-        var topUpsQuery = _db.WalletTransactions.Where(w => w.Type == WalletTransactionType.TopUp);
-        if (branchId.HasValue)
-            topUpsQuery = topUpsQuery.Where(w => w.BranchId == branchId.Value || w.BranchId == null);
-        var topUps = await topUpsQuery.SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
+        var topUps = await _db.WalletTransactions
+            .Where(w => w.Type == WalletTransactionType.TopUp
+                && (w.BranchId == branchId || w.BranchId == null))
+            .SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
 
-        var expensesQuery = _db.Expenses.AsQueryable();
-        if (branchId.HasValue)
-            expensesQuery = expensesQuery.Where(e => e.BranchId == branchId.Value);
-        var expenses = await expensesQuery.SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
+        var expenses = await _db.Expenses
+            .Where(e => e.BranchId == branchId)
+            .SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
 
-        var collectionsQuery = _db.CashCollections.AsQueryable();
-        if (branchId.HasValue)
-            collectionsQuery = collectionsQuery.Where(c => c.BranchId == branchId.Value);
-        var collected = await collectionsQuery.SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
+        var collected = await _db.CashCollections
+            .Where(c => c.BranchId == branchId)
+            .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
 
         return decimal.Round(cashIn + topUps - expenses - collected, 2);
+    }
+
+    /// <summary>
+    /// Masters must always report against an owned branch — never tenant-wide aggregates.
+    /// </summary>
+    private async Task<Guid> ResolveReportBranchIdAsync(Guid? requestedBranchId, CancellationToken ct)
+    {
+        if (requestedBranchId is Guid requested)
+        {
+            if (!_tenantContext.IsSuperAdmin && !_tenantContext.AllowedBranchIds.Contains(requested))
+                throw new UnauthorizedAccessException("You do not have access to this branch.");
+
+            if (!_tenantContext.IsSuperAdmin)
+            {
+                var businessOwnerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+                var branchOwnerId = await _db.Branches.AsNoTracking()
+                    .Where(b => b.Id == requested)
+                    .Select(b => b.OwnerUserId)
+                    .FirstOrDefaultAsync(ct);
+                if (branchOwnerId.HasValue && branchOwnerId.Value != businessOwnerId)
+                    throw new UnauthorizedAccessException("You do not have access to this branch.");
+            }
+
+            return requested;
+        }
+
+        return await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
     }
 
     private void EnsureMaster()
