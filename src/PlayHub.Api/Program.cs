@@ -277,18 +277,19 @@ using (var scope = app.Services.CreateScope())
         WHERE b.OwnerUserId IS NULL
         """);
     // Infer catalog owners from room/device usage so masters don't see each other's stock.
+    // Table names must match EF mappings (mixed Pascal/snake in this schema).
     await db.Database.ExecuteSqlRawAsync("""
         UPDATE vat
         SET OwnerUserId = (
             SELECT TOP 1 b.OwnerUserId
-            FROM RoomAssets ra
+            FROM room_assets ra
             INNER JOIN Rooms r ON r.Id = ra.RoomId
-            INNER JOIN Branches b ON b.Id = r.BranchId
+            INNER JOIN branches b ON b.Id = r.BranchId
             WHERE ra.VenueAssetTypeId = vat.Id
               AND b.OwnerUserId IS NOT NULL
             ORDER BY b.CreatedAt
         )
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
     await db.Database.ExecuteSqlRawAsync("""
@@ -297,7 +298,7 @@ using (var scope = app.Services.CreateScope())
             SELECT TOP 1 b.OwnerUserId
             FROM Devices d
             INNER JOIN DeviceControllers dc ON dc.DeviceId = d.Id
-            INNER JOIN Branches b ON b.Id = d.BranchId
+            INNER JOIN branches b ON b.Id = d.BranchId
             WHERE dc.ControllerTypeId = ct.Id
               AND b.OwnerUserId IS NOT NULL
             ORDER BY b.CreatedAt
@@ -309,12 +310,12 @@ using (var scope = app.Services.CreateScope())
     await db.Database.ExecuteSqlRawAsync("""
         UPDATE vat
         SET OwnerUserId = owners.OwnerUserId
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         INNER JOIN (
             SELECT ra.VenueAssetTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
-            FROM RoomAssets ra
+            FROM room_assets ra
             INNER JOIN Rooms r ON r.Id = ra.RoomId
-            INNER JOIN Branches b ON b.Id = r.BranchId
+            INNER JOIN branches b ON b.Id = r.BranchId
             WHERE b.OwnerUserId IS NOT NULL
             GROUP BY ra.VenueAssetTypeId
             HAVING COUNT(DISTINCT b.OwnerUserId) = 1
@@ -329,7 +330,7 @@ using (var scope = app.Services.CreateScope())
             SELECT dc.ControllerTypeId AS Id, MIN(b.OwnerUserId) AS OwnerUserId
             FROM DeviceControllers dc
             INNER JOIN Devices d ON d.Id = dc.DeviceId
-            INNER JOIN Branches b ON b.Id = d.BranchId
+            INNER JOIN branches b ON b.Id = d.BranchId
             WHERE b.OwnerUserId IS NOT NULL
             GROUP BY dc.ControllerTypeId
             HAVING COUNT(DISTINCT b.OwnerUserId) = 1
@@ -346,7 +347,7 @@ using (var scope = app.Services.CreateScope())
               AND u.IsDeleted = 0
             ORDER BY u.CreatedAt
         )
-        FROM VenueAssetTypes vat
+        FROM venue_asset_types vat
         WHERE vat.OwnerUserId IS NULL
         """);
     await db.Database.ExecuteSqlRawAsync("""
@@ -398,7 +399,7 @@ using (var scope = app.Services.CreateScope())
     // Do not touch SuperAdmin assignments.
     await db.Database.ExecuteSqlRawAsync("""
         DELETE ub
-        FROM UserBranches ub
+        FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
         INNER JOIN branches b ON b.Id = ub.BranchId
         WHERE u.Role = 1
@@ -409,7 +410,7 @@ using (var scope = app.Services.CreateScope())
     // Staff must not keep branches owned by a different master than their parent.
     await db.Database.ExecuteSqlRawAsync("""
         DELETE ub
-        FROM UserBranches ub
+        FROM user_branches ub
         INNER JOIN users u ON u.Id = ub.UserId
         INNER JOIN branches b ON b.Id = ub.BranchId
         WHERE u.Role = 0
