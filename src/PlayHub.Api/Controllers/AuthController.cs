@@ -14,22 +14,13 @@ public class AuthController : ControllerBase
 
     public AuthController(IAuthService authService) => _authService = authService;
 
-    /// <summary>Register a new tenant with master user and first branch.</summary>
+    /// <summary>
+    /// Public self-registration is disabled. Only SuperAdmin creates accounts via Users API.
+    /// </summary>
     [HttpPost("register")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status201Created)]
-    public async Task<IActionResult> Register([FromBody] RegisterTenantRequest request, CancellationToken ct)
-    {
-        try
-        {
-            var result = await _authService.RegisterTenantAsync(request, ct);
-            return Created(string.Empty, result);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
-    }
+    public IActionResult Register()
+        => StatusCode(StatusCodes.Status403Forbidden, new { message = "Public registration is disabled. Contact your administrator." });
 
     /// <summary>Login with username and password.</summary>
     [HttpPost("login")]
