@@ -24,8 +24,18 @@ public static class DatabaseSeeder
         var lastName = configuration["Seed:LastName"] ?? "Admin";
 
         var username = string.Join(' ', email.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
-        if (await db.Users.IgnoreQueryFilters().AnyAsync(u => u.Email == username, ct))
+        var existing = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == username, ct);
+        if (existing is not null)
+        {
+            // Optional one-shot ops reset for known seed account (default off).
+            if (configuration.GetValue("Seed:ForceResetPassword", false))
+            {
+                existing.PasswordHash = BCrypt.Net.BCrypt.HashPassword(password);
+                existing.IsActive = true;
+                await db.SaveChangesAsync(ct);
+            }
             return;
+        }
 
         var seedTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
