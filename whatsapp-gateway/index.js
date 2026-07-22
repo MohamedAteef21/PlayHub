@@ -166,14 +166,47 @@ class WaSession {
   }
 
   tryRemoveStaleLockfile() {
+    const names = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    for (const name of names) {
+      const p = path.join(this.authPath, name);
+      try {
+        if (fs.existsSync(p)) {
+          fs.unlinkSync(p);
+          console.warn(`[${this.clientId}] Removed stale ${name}`);
+        }
+      } catch (e) {
+        console.warn(`[${this.clientId}] Could not remove ${name}:`, e.message);
+      }
+    }
+  }
+
+  async destroyBrowser({ logout = false } = {}) {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const client = this.client;
+    this.client = null;
+    this.isInitializing = false;
+    this.hasLoggedAuthenticated = false;
+    this.hasHandledReady = false;
+    if (!client) {
+      this.tryRemoveStaleLockfile();
+      return;
+    }
     try {
-      if (fs.existsSync(this.lockfile)) {
-        fs.unlinkSync(this.lockfile);
-        console.warn(`[${this.clientId}] Removed stale Chromium lockfile`);
+      if (logout && typeof client.logout === 'function') {
+        await client.logout();
       }
     } catch (e) {
-      console.warn(`[${this.clientId}] Could not remove lockfile:`, e.message);
+      console.warn(`[${this.clientId}] logout:`, e.message || e);
     }
+    try {
+      await client.destroy();
+    } catch (e) {
+      console.warn(`[${this.clientId}] destroy:`, e.message || e);
+    }
+    this.tryRemoveStaleLockfile();
   }
 
   ensureClient() {
@@ -307,10 +340,19 @@ class WaSession {
 
   scheduleReconnect(reason) {
     if (this.reconnectTimer) return;
+    // LOGOUT / UNPAIRED means local auth is dead — don't thrash reconnect; wait for QR via ensure.
+    const fatal = /LOGOUT|UNPAIRED|auth_failure|TOS_BLOCK|PROXYBLOCK/i.test(String(reason));
+    if (fatal) {
+      console.warn(`[${this.clientId}] Fatal disconnect (${reason}) — destroy browser; next /ensure will show QR`);
+      this.destroyBrowser({ logout: false }).catch(() => {});
+      return;
+    }
     console.log(`[${this.clientId}] Will re-init in 5s (${reason})...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.start(1).catch((e) => console.error(`[${this.clientId}] reconnect failed:`, e.message || e));
+      this.destroyBrowser({ logout: false })
+        .then(() => this.start(1))
+        .catch((e) => console.error(`[${this.clientId}] reconnect failed:`, e.message || e));
     }, 5000);
   }
 
@@ -325,6 +367,12 @@ class WaSession {
     this.hasLoggedAuthenticated = false;
     this.hasHandledReady = false;
 
+    // Always create a fresh Client after failures / reconnects
+    if (this.client && attempt > 1) {
+      await this.destroyBrowser({ logout: false });
+      this.isInitializing = true;
+    }
+
     const client = this.ensureClient();
     try {
       console.log(`[${this.clientId}] initialize (attempt ${attempt}/${maxAttempts})...`);
@@ -332,6 +380,7 @@ class WaSession {
       this.isInitializing = false;
     } catch (err) {
       console.error(`[${this.clientId}] init failed (attempt ${attempt}):`, err.message || err);
+      await this.destroyBrowser({ logout: false });
       if (attempt >= maxAttempts) {
         this.isInitializing = false;
         this.clearConnectionState(`init_failed:${err.message || err}`);
@@ -346,8 +395,8 @@ class WaSession {
 
   async ensureStarted() {
     if (this.isReady || this.isInitializing) return;
-    if (this.client) {
-      // Client exists but not ready — wait for QR / auth
+    if (this.client && !this.isReady) {
+      // Client exists but stuck waiting — leave it (QR flow)
       return;
     }
     await this.start(1);
@@ -463,37 +512,20 @@ class WaSession {
   }
 
   async disconnect({ logout = true } = {}) {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    const client = this.client;
-    this.client = null;
     this.clearConnectionState('user_disconnect');
-    this.hasLoggedAuthenticated = false;
-    this.hasHandledReady = false;
-    this.isInitializing = false;
-
-    if (client) {
-      try {
-        if (logout && typeof client.logout === 'function') {
-          await client.logout();
-        }
-      } catch (e) {
-        console.warn(`[${this.clientId}] logout:`, e.message || e);
-      }
-      try {
-        await client.destroy();
-      } catch (e) {
-        console.warn(`[${this.clientId}] destroy:`, e.message || e);
-      }
-    }
+    await this.destroyBrowser({ logout });
 
     try {
       if (fs.existsSync(this.sessionFile)) fs.unlinkSync(this.sessionFile);
     } catch (_) {
       /* ignore */
+    }
+
+    // Wipe LocalAuth so next scan is clean
+    try {
+      fs.rmSync(this.authPath, { recursive: true, force: true });
+    } catch (e) {
+      console.warn(`[${this.clientId}] auth wipe:`, e.message || e);
     }
 
     return { ok: true, disconnected: true, clientId: this.clientId };
