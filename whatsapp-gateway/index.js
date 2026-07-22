@@ -225,6 +225,9 @@ class WaSession {
       qrMaxRetries: 8,
       restartOnAuthFail: true,
       takeoverOnConflict: true,
+      // Default wwebjs UA is Chrome/101 — WhatsApp often rejects / times out linking
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
       webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html'
