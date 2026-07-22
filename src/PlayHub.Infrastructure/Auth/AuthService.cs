@@ -220,11 +220,22 @@ public class AuthService : IAuthService
             .FirstOrDefaultAsync(u => u.Id == userId, ct)
             ?? throw new UnauthorizedAccessException("User not found.");
 
-        if (!await CanAccessBranchAsync(user, request.BranchId, ct))
+        // Masters may clear the active branch to view all owned branches.
+        if (request.BranchId is null || request.BranchId == Guid.Empty)
+        {
+            if (!user.IsMaster)
+                throw new UnauthorizedAccessException("Staff must select a specific branch.");
+
+            _tenantContext.BranchId = null;
+            return await BuildAuthResponseAsync(user, null, ct);
+        }
+
+        var branchId = request.BranchId.Value;
+        if (!await CanAccessBranchAsync(user, branchId, ct))
             throw new UnauthorizedAccessException("You are not assigned to this branch.");
 
-        _tenantContext.BranchId = request.BranchId;
-        return await BuildAuthResponseAsync(user, request.BranchId, ct);
+        _tenantContext.BranchId = branchId;
+        return await BuildAuthResponseAsync(user, branchId, ct);
     }
 
     private async Task<AuthResponse> BuildAuthResponseAsync(User user, Guid? activeBranchId, CancellationToken ct)

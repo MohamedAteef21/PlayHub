@@ -27,7 +27,8 @@ public record CreateStockVoucherRequest(
     StockVoucherType VoucherType,
     IReadOnlyList<StockVoucherLineInput> Lines,
     string? Notes = null,
-    Guid? RelatedCountVoucherId = null);
+    Guid? RelatedCountVoucherId = null,
+    Guid? BranchId = null);
 
 public record StockVoucherLineDto(
     Guid Id,

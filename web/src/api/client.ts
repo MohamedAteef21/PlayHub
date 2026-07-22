@@ -126,7 +126,7 @@ export const authApi = {
       body: JSON.stringify({ email: username, password }),
     }),
 
-  selectBranch: (branchId: string) =>
+  selectBranch: (branchId: string | null) =>
     apiFetch<AuthResponse>('/auth/select-branch', {
       method: 'POST',
       body: JSON.stringify({ branchId }),
@@ -244,6 +244,7 @@ export const assetsApi = {
     name: string;
     roomNumber?: string;
     maxWatchingCapacity: number;
+    branchId?: string;
     assets?: { venueAssetTypeId: string; quantity: number; workingCount: number; notes?: string }[];
   }) =>
     apiFetch<import('@/types').Room>('/assets/rooms', {
@@ -273,6 +274,7 @@ export const assetsApi = {
     roomId?: string | null;
     name: string;
     identifier?: string;
+    branchId?: string;
     controllers?: { controllerTypeId: string; quantity: number; workingCount: number }[];
     screen?: { count: number; workingCount: number; notes?: string };
   }) =>
@@ -405,6 +407,7 @@ export const cafeteriaApi = {
     largeUnitId?: string;
     unitsPerLarge?: number;
     initialStockUnit?: number;
+    branchId?: string;
     variants?: {
       id?: string;
       name: string;
@@ -455,6 +458,7 @@ export const cafeteriaApi = {
     sellPrice: number;
     warehouseItemId: string;
     deductQuantity: number;
+    branchId?: string;
   }) =>
     apiFetch<import('@/types').CafeteriaAddOn>('/cafeteria/addons', {
       method: 'POST',
@@ -573,6 +577,7 @@ export const inventoryApi = {
     lines: { cafeteriaItemId: string; quantity: number; unit?: number; notes?: string }[];
     notes?: string;
     relatedCountVoucherId?: string;
+    branchId?: string;
   }) =>
     apiFetch<import('@/types').StockVoucher>('/inventory/vouchers', {
       method: 'POST',
@@ -628,7 +633,13 @@ export const accountingApi = {
       `/accounting/expenses?${params}`
     );
   },
-  createExpense: (data: { categoryId: string; amount: number; description: string; expenseDate: string }) =>
+  createExpense: (data: {
+    categoryId: string;
+    amount: number;
+    description: string;
+    expenseDate: string;
+    branchId?: string;
+  }) =>
     apiFetch<import('@/types').Expense>('/accounting/expenses', {
       method: 'POST',
       body: JSON.stringify(data),

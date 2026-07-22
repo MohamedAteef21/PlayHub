@@ -92,17 +92,8 @@ export function AppLayout() {
     if (activeBranchId) return;
     // Master Admin with no venues yet: stay in the app and create a branch from Settings.
     if (user.isMaster && user.branches.length === 0) return;
-    if (user.isMaster && user.branches.length > 0) {
-      void (async () => {
-        try {
-          const res = await authApi.selectBranch(user.branches[0].id);
-          setAuth(res.accessToken, res.refreshToken, res.user, res.activeBranchId, res.accessTokenExpiresAt);
-        } catch {
-          navigate('/select-branch');
-        }
-      })();
-      return;
-    }
+    // Master may clear the active branch to view all branches — do not force-select.
+    if (user.isMaster) return;
     navigate('/select-branch');
   }, [user, activeBranchId, setAuth, navigate]);
 
@@ -112,8 +103,10 @@ export function AppLayout() {
   }
 
   const needsFirstBranch = user.isMaster && user.branches.length === 0 && !activeBranchId;
+  // Staff must have a branch; master may be in "all branches" view (null activeBranchId).
+  const waitingForBranch = !user.isMaster && !activeBranchId && !needsFirstBranch;
 
-  if (!activeBranchId && !needsFirstBranch) {
+  if (waitingForBranch) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-surface text-muted">
         {t('common.loading')}
@@ -123,7 +116,9 @@ export function AppLayout() {
 
   const branchName = activeBranchId
     ? user.branches.find((b) => b.id === activeBranchId)?.name ?? ''
-    : '';
+    : user.isMaster
+      ? t('common.allBranches')
+      : '';
   const displayName = `${user.firstName} ${user.lastName}`.trim() || user.email;
   const roleLabel =
     user.role === 2
@@ -133,7 +128,8 @@ export function AppLayout() {
         : user.isMaster
           ? t('users.superAdmin')
           : t('users.staff');
-  const canSwitchBranch = user.branches.length > 1;
+  // Masters always get the switcher (branch or all). Staff need 2+ branches.
+  const canSwitchBranch = user.isMaster ? user.branches.length > 0 : user.branches.length > 1;
 
   const subscriptionWarning = (() => {
     if (!user.subscriptionExpiresAt) return null;
@@ -155,8 +151,10 @@ export function AppLayout() {
     navigate('/login');
   }
 
-  async function handleSwitchBranch(branchId: string) {
+  async function handleSwitchBranch(branchId: string | null) {
     if (branchId === activeBranchId || switchingBranch) return;
+    // Selecting "all" when already all.
+    if (branchId === null && activeBranchId === null) return;
     setSwitchingBranch(true);
     try {
       const res = await authApi.selectBranch(branchId);
@@ -332,6 +330,23 @@ export function AppLayout() {
                         <p className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
                           {t('branch.switch')}
                         </p>
+                        {user.isMaster && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={switchingBranch}
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover ${
+                              activeBranchId === null ? 'bg-primary/10 text-primary' : ''
+                            }`}
+                            onClick={() => handleSwitchBranch(null)}
+                          >
+                            <Icon name="branch" className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{t('common.allBranches')}</span>
+                            {activeBranchId === null && (
+                              <span className="ms-auto text-[11px]">{t('branch.active')}</span>
+                            )}
+                          </button>
+                        )}
                         {user.branches.map((b) => (
                           <button
                             key={b.id}

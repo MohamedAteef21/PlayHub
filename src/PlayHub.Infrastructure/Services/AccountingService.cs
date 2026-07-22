@@ -119,7 +119,7 @@ public class AccountingService : IAccountingService
 
     public async Task<ExpenseDto> CreateExpenseAsync(CreateExpenseRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.ResolveCreateBranchIdAsync(_db, _tenantContext, request.BranchId, ct);
 
         if (request.Amount <= 0)
             throw new InvalidOperationException("Expense amount must be greater than zero.");

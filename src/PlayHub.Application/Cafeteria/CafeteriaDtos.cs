@@ -59,7 +59,8 @@ public record CreateCafeteriaItemRequest(
     Guid? BaseUnitId = null,
     Guid? LargeUnitId = null,
     int UnitsPerLarge = 1,
-    InventoryUnitKind InitialStockUnit = InventoryUnitKind.Base);
+    InventoryUnitKind InitialStockUnit = InventoryUnitKind.Base,
+    Guid? BranchId = null);
 
 public record UpdateCafeteriaItemRequest(
     string Name,
@@ -89,7 +90,8 @@ public record CreateCafeteriaAddOnRequest(
     string Name,
     decimal SellPrice,
     Guid WarehouseItemId,
-    int DeductQuantity = 1);
+    int DeductQuantity = 1,
+    Guid? BranchId = null);
 
 public record UpdateCafeteriaAddOnRequest(
     string Name,

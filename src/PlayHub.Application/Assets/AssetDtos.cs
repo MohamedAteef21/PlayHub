@@ -29,7 +29,8 @@ public record CreateRoomRequest(
     string Name,
     string? RoomNumber,
     int MaxWatchingCapacity,
-    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null);
+    IReadOnlyList<UpsertRoomAssetRequest>? Assets = null,
+    Guid? BranchId = null);
 
 public record UpdateRoomRequest(
     string Name,
@@ -94,7 +95,8 @@ public record CreateDeviceRequest(
     string Name,
     string? Identifier = null,
     IReadOnlyList<UpsertDeviceControllerRequest>? Controllers = null,
-    UpsertScreenRequest? Screen = null);
+    UpsertScreenRequest? Screen = null,
+    Guid? BranchId = null);
 
 public record UpdateDeviceRequest(
     Guid? RoomId,
@@ -106,6 +108,8 @@ public record UpdateDeviceRequest(
 
 public record AssetDashboardRoomDto(
     Guid Id,
+    Guid BranchId,
+    string BranchName,
     string Name,
     string? RoomNumber,
     int MaxWatchingCapacity,
@@ -114,6 +118,8 @@ public record AssetDashboardRoomDto(
 
 public record AssetDashboardDeviceDto(
     Guid Id,
+    Guid BranchId,
+    string BranchName,
     string Identifier,
     string Name,
     string LiveStatus,
@@ -124,7 +130,7 @@ public record AssetDashboardDeviceDto(
     bool IsActive);
 
 public record AssetDashboardDto(
-    Guid BranchId,
+    Guid? BranchId,
     string BranchName,
     IReadOnlyList<AssetDashboardRoomDto> Rooms,
     IReadOnlyList<AssetDashboardDeviceDto> UnassignedDevices);
