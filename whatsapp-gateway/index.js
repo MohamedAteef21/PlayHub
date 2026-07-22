@@ -145,9 +145,13 @@ class WaSession {
   clearConnectionState(reason) {
     const wasReady = this.isReady;
     this.isReady = false;
-    this.qrDataUrl = null;
-    this.qrGeneratedAt = null;
-    this.lastQrRaw = null;
+    // Keep last QR visible during transient reconnects so the UI does not go blank
+    const keepQr = !wasReady && !/LOGOUT|UNPAIRED|auth_failure|user_disconnect/i.test(String(reason));
+    if (!keepQr) {
+      this.qrDataUrl = null;
+      this.qrGeneratedAt = null;
+      this.lastQrRaw = null;
+    }
     this.currentSessionId = null;
     this.currentWidUser = null;
     this.sessionConnectedAt = null;
@@ -222,7 +226,8 @@ class WaSession {
       }),
       // Give phone time to finish linking after QR scan
       authTimeoutMs: 180000,
-      qrMaxRetries: 8,
+      // 0 = never stop refreshing QR (avoids empty "waiting for QR" gaps)
+      qrMaxRetries: 0,
       restartOnAuthFail: true,
       takeoverOnConflict: true,
       // Default wwebjs UA is Chrome/101 — WhatsApp often rejects / times out linking
@@ -351,20 +356,23 @@ class WaSession {
 
   scheduleReconnect(reason) {
     if (this.reconnectTimer) return;
+    const reasonText = String(reason);
     // LOGOUT / UNPAIRED means local auth is dead — don't thrash reconnect; wait for QR via ensure.
-    const fatal = /LOGOUT|UNPAIRED|auth_failure|TOS_BLOCK|PROXYBLOCK/i.test(String(reason));
+    const fatal = /LOGOUT|UNPAIRED|auth_failure|TOS_BLOCK|PROXYBLOCK/i.test(reasonText);
     if (fatal) {
       console.warn(`[${this.clientId}] Fatal disconnect (${reason}) — destroy browser; next /ensure will show QR`);
       this.destroyBrowser({ logout: false }).catch(() => {});
       return;
     }
-    console.log(`[${this.clientId}] Will re-init in 5s (${reason})...`);
+    // QR retry limit (if enabled) — keep serving last QR until re-init produces a new one
+    const qrExhausted = /qrcode retries|max qr/i.test(reasonText);
+    console.log(`[${this.clientId}] Will re-init in ${qrExhausted ? 2 : 5}s (${reason})...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.destroyBrowser({ logout: false })
         .then(() => this.start(1))
         .catch((e) => console.error(`[${this.clientId}] reconnect failed:`, e.message || e));
-    }, 5000);
+    }, qrExhausted ? 2000 : 5000);
   }
 
   async start(attempt = 1) {
