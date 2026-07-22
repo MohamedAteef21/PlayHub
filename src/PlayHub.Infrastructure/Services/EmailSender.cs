@@ -23,14 +23,10 @@ public class EmailSender : IEmailSender
         if (string.IsNullOrWhiteSpace(toEmail))
             throw new InvalidOperationException("Recipient email is required.");
 
-        var host = string.IsNullOrWhiteSpace(settings.SmtpHost) ? "smtp.gmail.com" : settings.SmtpHost.Trim();
-        var port = settings.SmtpPort > 0 ? settings.SmtpPort : 587;
-
         var message = new MimeMessage();
-        var fromName = string.IsNullOrWhiteSpace(settings.SenderDisplayName)
-            ? "PlayHub"
-            : settings.SenderDisplayName.Trim();
-        message.From.Add(new MailboxAddress(fromName, settings.SmtpUsername.Trim()));
+        message.From.Add(new MailboxAddress(
+            AlertSettingsService.FixedSenderDisplayName,
+            settings.SmtpUsername.Trim()));
         message.To.Add(MailboxAddress.Parse(toEmail.Trim()));
         message.Subject = subject;
 
@@ -46,7 +42,11 @@ public class EmailSender : IEmailSender
         message.Body = builder.ToMessageBody();
 
         using var client = new SmtpClient();
-        await client.ConnectAsync(host, port, SecureSocketOptions.StartTls, ct);
+        await client.ConnectAsync(
+            AlertSettingsService.FixedSmtpHost,
+            AlertSettingsService.FixedSmtpPort,
+            SecureSocketOptions.StartTls,
+            ct);
         await client.AuthenticateAsync(settings.SmtpUsername.Trim(), settings.SmtpPassword, ct);
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);

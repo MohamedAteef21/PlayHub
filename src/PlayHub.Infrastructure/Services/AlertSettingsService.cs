@@ -2,13 +2,16 @@ using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Alerts;
 using PlayHub.Application.Common;
 using PlayHub.Domain.Entities;
-using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
 
 namespace PlayHub.Infrastructure.Services;
 
 public class AlertSettingsService : IAlertSettingsService
 {
+    public const string FixedSmtpHost = "smtp.gmail.com";
+    public const int FixedSmtpPort = 587;
+    public const string FixedSenderDisplayName = "PlayHub System";
+
     private readonly PlayHubDbContext _db;
     private readonly TenantContext _tenantContext;
     private readonly IEmailSender _email;
@@ -31,6 +34,7 @@ public class AlertSettingsService : IAlertSettingsService
         EnsureMaster();
         var user = await LoadUserAsync(ct);
         var settings = await _db.MasterAlertSettings
+            .Include(s => s.Recipients)
             .FirstOrDefaultAsync(s => s.UserId == _tenantContext.UserId, ct);
 
         return Map(user, settings);
@@ -43,6 +47,7 @@ public class AlertSettingsService : IAlertSettingsService
         var user = await LoadUserAsync(ct);
 
         var settings = await _db.MasterAlertSettings
+            .Include(s => s.Recipients)
             .FirstOrDefaultAsync(s => s.UserId == _tenantContext.UserId, ct);
 
         if (settings is null)
@@ -55,42 +60,82 @@ public class AlertSettingsService : IAlertSettingsService
             _db.MasterAlertSettings.Add(settings);
         }
 
-        settings.SmtpHost = string.IsNullOrWhiteSpace(request.SmtpHost) ? "smtp.gmail.com" : request.SmtpHost.Trim();
-        settings.SmtpPort = request.SmtpPort > 0 ? request.SmtpPort : 587;
+        settings.SmtpHost = FixedSmtpHost;
+        settings.SmtpPort = FixedSmtpPort;
+        settings.SenderDisplayName = FixedSenderDisplayName;
         settings.SmtpUsername = request.SmtpUsername?.Trim();
         if (!string.IsNullOrWhiteSpace(request.SmtpPassword))
             settings.SmtpPassword = request.SmtpPassword.Trim();
-        settings.SenderDisplayName = request.SenderDisplayName?.Trim();
-        settings.AlertRecipientEmail = request.AlertRecipientEmail?.Trim();
         settings.OwnerWhatsAppPhone = string.IsNullOrWhiteSpace(request.OwnerWhatsAppPhone)
             ? null
             : PhoneNormalizer.Normalize(request.OwnerWhatsAppPhone);
-        settings.NotifyLowStock = request.NotifyLowStock;
-        settings.NotifySubscription = request.NotifySubscription;
-        settings.NotifyDeviceMaintenance = request.NotifyDeviceMaintenance;
+
+        ReplaceRecipients(settings, request.Recipients);
 
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("AlertSettings.Updated", "MasterAlertSettings", settings.Id, ct: ct);
 
-        return Map(user, settings)!;
+        return Map(user, settings);
     }
 
     public async Task SendTestEmailAsync(CancellationToken ct = default)
     {
         EnsureMaster();
         var settings = await _db.MasterAlertSettings
+            .Include(s => s.Recipients)
             .FirstOrDefaultAsync(s => s.UserId == _tenantContext.UserId, ct)
             ?? throw new InvalidOperationException("Save Gmail settings first.");
 
-        if (string.IsNullOrWhiteSpace(settings.AlertRecipientEmail))
-            throw new InvalidOperationException("Alert recipient email is required.");
+        var emails = settings.Recipients
+            .Select(r => r.Email)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        await _email.SendAsync(
-            settings,
-            settings.AlertRecipientEmail,
-            "PlayHub test email / تجربة إيميل",
-            "لو وصلت الرسالة دي، إعدادات الجيميل شغالة.\n\nIf you received this, Gmail settings work.",
-            ct: ct);
+        if (emails.Count == 0)
+            throw new InvalidOperationException("Add at least one alert recipient email.");
+
+        foreach (var email in emails)
+        {
+            await _email.SendAsync(
+                settings,
+                email,
+                "PlayHub test email / تجربة إيميل",
+                "لو وصلت الرسالة دي، إعدادات الجيميل شغالة.\n\nIf you received this, Gmail settings work.",
+                ct: ct);
+        }
+    }
+
+    private void ReplaceRecipients(
+        MasterAlertSettings settings,
+        IReadOnlyList<UpsertMasterAlertRecipientRequest> recipients)
+    {
+        if (settings.Recipients.Count > 0)
+            _db.MasterAlertRecipients.RemoveRange(settings.Recipients);
+        settings.Recipients.Clear();
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in recipients ?? [])
+        {
+            var email = r.Email?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(email))
+                throw new InvalidOperationException("Recipient email is required.");
+            if (!seen.Add(email))
+                throw new InvalidOperationException($"Duplicate recipient email: {email}");
+
+            if (!r.NotifyLowStock && !r.NotifySubscription && !r.NotifyDeviceMaintenance)
+                throw new InvalidOperationException(
+                    $"Select at least one notification type for {email}.");
+
+            settings.Recipients.Add(new MasterAlertRecipient
+            {
+                Email = email,
+                DisplayName = string.IsNullOrWhiteSpace(r.DisplayName) ? null : r.DisplayName.Trim(),
+                NotifyLowStock = r.NotifyLowStock,
+                NotifySubscription = r.NotifySubscription,
+                NotifyDeviceMaintenance = r.NotifyDeviceMaintenance,
+            });
+        }
     }
 
     private async Task<User> LoadUserAsync(CancellationToken ct) =>
@@ -107,15 +152,19 @@ public class AlertSettingsService : IAlertSettingsService
         new(
             s?.Id ?? Guid.Empty,
             user.Id,
-            s?.SmtpHost,
-            s?.SmtpPort ?? 587,
             s?.SmtpUsername,
             !string.IsNullOrWhiteSpace(s?.SmtpPassword),
-            s?.SenderDisplayName,
-            s?.AlertRecipientEmail,
+            FixedSenderDisplayName,
             s?.OwnerWhatsAppPhone,
-            s?.NotifyLowStock ?? true,
-            s?.NotifySubscription ?? true,
-            s?.NotifyDeviceMaintenance ?? true,
+            (s?.Recipients ?? [])
+                .OrderBy(r => r.Email)
+                .Select(r => new MasterAlertRecipientDto(
+                    r.Id,
+                    r.Email,
+                    r.DisplayName,
+                    r.NotifyLowStock,
+                    r.NotifySubscription,
+                    r.NotifyDeviceMaintenance))
+                .ToList(),
             user.AllowedNotificationChannels);
 }

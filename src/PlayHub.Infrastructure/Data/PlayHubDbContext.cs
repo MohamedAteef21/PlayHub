@@ -53,6 +53,7 @@ public class PlayHubDbContext : DbContext
     public DbSet<VenueAssetType> VenueAssetTypes => Set<VenueAssetType>();
     public DbSet<RoomAsset> RoomAssets => Set<RoomAsset>();
     public DbSet<MasterAlertSettings> MasterAlertSettings => Set<MasterAlertSettings>();
+    public DbSet<MasterAlertRecipient> MasterAlertRecipients => Set<MasterAlertRecipient>();
     public DbSet<DeviceMaintenance> DeviceMaintenances => Set<DeviceMaintenance>();
     public DbSet<DevicePricingPlan> DevicePricingPlans => Set<DevicePricingPlan>();
     public DbSet<PricingPlan> PricingPlans => Set<PricingPlan>();
@@ -210,6 +211,10 @@ public class PlayHubDbContext : DbContext
         modelBuilder.Entity<MasterAlertSettings>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             (_tenantContext.IsSuperAdmin || e.UserId == _tenantContext.UserId));
+
+        modelBuilder.Entity<MasterAlertRecipient>().HasQueryFilter(e =>
+            e.Settings.TenantId == _tenantContext.TenantId &&
+            (_tenantContext.IsSuperAdmin || e.Settings.UserId == _tenantContext.UserId));
 
         modelBuilder.Entity<Customer>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId && !e.IsDeleted);

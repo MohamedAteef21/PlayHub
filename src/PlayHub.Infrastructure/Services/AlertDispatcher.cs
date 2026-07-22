@@ -44,7 +44,7 @@ public class AlertDispatcher : IAlertDispatcher
         {
             var masters = await _db.Users
                 .IgnoreQueryFilters()
-                .Include(u => u.AlertSettings)
+                .Include(u => u.AlertSettings!).ThenInclude(s => s.Recipients)
                 .Where(u =>
                     u.TenantId == tenantId &&
                     u.IsMaster &&
@@ -55,7 +55,15 @@ public class AlertDispatcher : IAlertDispatcher
             foreach (var master in masters)
             {
                 var settings = master.AlertSettings;
-                if (!ShouldNotify(type, settings))
+                var recipients = settings?.Recipients?.ToList() ?? [];
+                var matchingRecipients = recipients.Where(r => RecipientWants(type, r)).ToList();
+
+                // In-app notification for the master when anyone cares, or subscription alerts with no settings yet.
+                var shouldCreateInApp = matchingRecipients.Count > 0
+                    || (settings is null && type is NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon)
+                    || (settings is not null && recipients.Count == 0 && type is NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon);
+
+                if (!shouldCreateInApp)
                     continue;
 
                 var recentExists = relatedEntityId.HasValue && await _db.Notifications.IgnoreQueryFilters().AnyAsync(n =>
@@ -84,22 +92,30 @@ public class AlertDispatcher : IAlertDispatcher
 
                 if (allowed.HasFlag(NotificationChannel.Email) &&
                     settings is not null &&
-                    !string.IsNullOrWhiteSpace(settings.AlertRecipientEmail) &&
                     !string.IsNullOrWhiteSpace(settings.SmtpUsername) &&
                     !string.IsNullOrWhiteSpace(settings.SmtpPassword))
                 {
-                    try
+                    foreach (var recipient in matchingRecipients)
                     {
-                        await _email.SendAsync(settings, settings.AlertRecipientEmail, titleAr, body, ct: ct);
-                    }
-                    catch
-                    {
-                        // ignore email failures
+                        try
+                        {
+                            await _email.SendAsync(settings, recipient.Email, titleAr, body, ct: ct);
+                        }
+                        catch
+                        {
+                            // ignore email failures
+                        }
                     }
                 }
 
+                // WhatsApp: send if the owner phone is set and at least one recipient wants this type
+                // (or subscription alerts when there are no recipients yet).
+                var sendWhatsApp = matchingRecipients.Count > 0
+                    || (recipients.Count == 0 && type is NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon);
+
                 if (allowed.HasFlag(NotificationChannel.WhatsApp) &&
                     settings is not null &&
+                    sendWhatsApp &&
                     !string.IsNullOrWhiteSpace(settings.OwnerWhatsAppPhone))
                 {
                     try
@@ -121,17 +137,12 @@ public class AlertDispatcher : IAlertDispatcher
         }
     }
 
-    private static bool ShouldNotify(NotificationType type, MasterAlertSettings? settings)
-    {
-        if (settings is null)
-            return type is NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon;
-
-        return type switch
+    private static bool RecipientWants(NotificationType type, MasterAlertRecipient recipient) =>
+        type switch
         {
-            NotificationType.LowStock => settings.NotifyLowStock,
-            NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon => settings.NotifySubscription,
-            NotificationType.DeviceMaintenance or NotificationType.DeviceMaintenanceReminder => settings.NotifyDeviceMaintenance,
+            NotificationType.LowStock => recipient.NotifyLowStock,
+            NotificationType.SubscriptionExpired or NotificationType.SubscriptionExpiringSoon => recipient.NotifySubscription,
+            NotificationType.DeviceMaintenance or NotificationType.DeviceMaintenanceReminder => recipient.NotifyDeviceMaintenance,
             _ => true
         };
-    }
 }

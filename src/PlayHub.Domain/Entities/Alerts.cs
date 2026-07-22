@@ -8,26 +8,35 @@ public class MasterAlertSettings : BaseEntity, ITenantEntity
     public Guid TenantId { get; set; }
     public Guid UserId { get; set; }
 
-    /// <summary>SMTP host, e.g. smtp.gmail.com</summary>
+    /// <summary>SMTP host — always smtp.gmail.com (fixed).</summary>
     public string? SmtpHost { get; set; } = "smtp.gmail.com";
     public int SmtpPort { get; set; } = 587;
     /// <summary>Sender Gmail address (SMTP username).</summary>
     public string? SmtpUsername { get; set; }
     /// <summary>Gmail App Password (not the normal password).</summary>
     public string? SmtpPassword { get; set; }
-    public string? SenderDisplayName { get; set; }
+    /// <summary>Always "PlayHub System" when sending.</summary>
+    public string? SenderDisplayName { get; set; } = "PlayHub System";
 
-    /// <summary>Where alert emails are delivered (venue inbox).</summary>
-    public string? AlertRecipientEmail { get; set; }
     /// <summary>Venue owner WhatsApp number for important updates.</summary>
     public string? OwnerWhatsAppPhone { get; set; }
 
+    public Tenant Tenant { get; set; } = null!;
+    public User User { get; set; } = null!;
+    public ICollection<MasterAlertRecipient> Recipients { get; set; } = [];
+}
+
+/// <summary>Email recipient with per-person notification type selection.</summary>
+public class MasterAlertRecipient : BaseEntity
+{
+    public Guid MasterAlertSettingsId { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string? DisplayName { get; set; }
     public bool NotifyLowStock { get; set; } = true;
     public bool NotifySubscription { get; set; } = true;
     public bool NotifyDeviceMaintenance { get; set; } = true;
 
-    public Tenant Tenant { get; set; } = null!;
-    public User User { get; set; } = null!;
+    public MasterAlertSettings Settings { get; set; } = null!;
 }
 
 /// <summary>Device taken out for repair / maintenance with a reason.</summary>

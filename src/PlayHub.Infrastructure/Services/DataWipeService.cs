@@ -78,6 +78,8 @@ public class DataWipeService
             "customers",
             "ExpenseCategories",
             "Notifications",
+            "master_alert_recipients",
+            "master_alert_settings",
             "audit_logs",
             "refresh_tokens",
         ];

@@ -476,11 +476,23 @@ public class MasterAlertSettingsConfiguration : IEntityTypeConfiguration<MasterA
         builder.Property(x => x.SmtpUsername).HasMaxLength(256);
         builder.Property(x => x.SmtpPassword).HasMaxLength(500);
         builder.Property(x => x.SenderDisplayName).HasMaxLength(200);
-        builder.Property(x => x.AlertRecipientEmail).HasMaxLength(256);
         builder.Property(x => x.OwnerWhatsAppPhone).HasMaxLength(30);
         builder.HasIndex(x => x.UserId).IsUnique();
         builder.HasOne(x => x.User).WithOne(x => x.AlertSettings).HasForeignKey<MasterAlertSettings>(x => x.UserId);
         builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+        builder.HasMany(x => x.Recipients).WithOne(x => x.Settings).HasForeignKey(x => x.MasterAlertSettingsId);
+    }
+}
+
+public class MasterAlertRecipientConfiguration : IEntityTypeConfiguration<MasterAlertRecipient>
+{
+    public void Configure(EntityTypeBuilder<MasterAlertRecipient> builder)
+    {
+        builder.ToTable("master_alert_recipients");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Email).HasMaxLength(256).IsRequired();
+        builder.Property(x => x.DisplayName).HasMaxLength(200);
+        builder.HasIndex(x => new { x.MasterAlertSettingsId, x.Email }).IsUnique();
     }
 }
 
