@@ -15,10 +15,13 @@ const { Client, LocalAuth, MessageMedia, WAState } = require('whatsapp-web.js');
  */
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
-const SESSIONS_DIR = path.join(__dirname, 'sessions');
-const AUTH_ROOT = path.join(__dirname, '.wwebjs_auth');
+/** Persistent data root (Render disk mounts at /data). Falls back to app dir locally. */
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+const AUTH_ROOT = path.join(DATA_DIR, '.wwebjs_auth');
 const REQUIRE_SESSION_ID = process.env.REQUIRE_SESSION_ID !== '0' && process.env.REQUIRE_SESSION_ID !== 'false';
 const QUIET_QR_TERMINAL = process.env.QUIET_QR_TERMINAL === '1' || process.env.QUIET_QR_TERMINAL === 'true';
+const PUPPETEER_EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
@@ -188,7 +191,8 @@ class WaSession {
       takeoverOnConflict: true,
       puppeteer: {
         headless: true,
-        args: puppeteerArgs()
+        args: puppeteerArgs(),
+        ...(PUPPETEER_EXECUTABLE_PATH ? { executablePath: PUPPETEER_EXECUTABLE_PATH } : {})
       }
     });
 
@@ -690,6 +694,10 @@ process.on('uncaughtException', (err) => {
 
 app.listen(PORT, HOST, () => {
   console.log(`PlayHub WhatsApp gateway on http://${HOST}:${PORT}`);
+  console.log(`DATA_DIR=${DATA_DIR}`);
+  if (PUPPETEER_EXECUTABLE_PATH) {
+    console.log(`Chromium: ${PUPPETEER_EXECUTABLE_PATH}`);
+  }
   console.log('Multi-tenant: pass X-Client-Id (tenant GUID) on every request.');
   console.log('Sessions start lazily when /status|/qr|/ensure is called.');
 });

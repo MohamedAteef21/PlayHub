@@ -8,7 +8,7 @@ Node service that links each Master/tenant WhatsApp number via QR (whatsapp-web.
 |-------|--------|
 | React frontend | **Vercel** |
 | .NET API | **MonsterASP / IIS** |
-| This gateway | **Same VPS as the API** (Node process on `127.0.0.1:3000`) — **not** Vercel |
+| This gateway | **Render** (Docker + disk) or VPS — **not** Vercel |
 
 The browser never talks to this service directly. PlayHub API proxies status / QR / send / disconnect.
 
@@ -21,6 +21,11 @@ npm start
 ```
 
 Default: `http://127.0.0.1:3000`
+
+## Render
+
+Use repo-root `render.yaml` (Blueprint) or build `whatsapp-gateway/Dockerfile`.
+Sessions persist under `DATA_DIR` (default `/data` on Render).
 
 ## Multi-tenant
 
@@ -46,8 +51,10 @@ Send requires `X-Session-Id` (or body `sessionId`) matching the connected sessio
 
 ## Env
 
-- `PORT` (default 3000)
-- `HOST` (default 127.0.0.1)
+- `PORT` (default 3000; Render sets this)
+- `HOST` (default `127.0.0.1`; use `0.0.0.0` on Render)
+- `DATA_DIR` (session root; `/data` on Render disk)
+- `PUPPETEER_EXECUTABLE_PATH` (system Chromium in Docker)
 - `REQUIRE_SESSION_ID` (default true)
 - `QUIET_QR_TERMINAL=1`
-- `ALLOWED_ORIGINS=https://your-vercel-app.vercel.app` (optional; API proxies so usually unused)
+- `ALLOWED_ORIGINS` (optional; API proxies so usually unused)

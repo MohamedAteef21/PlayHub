@@ -6,7 +6,7 @@
 |---|---|---|
 | Backend (.NET 10 API + SignalR + Hangfire) | **MonsterASP.NET** | يدعم .NET 10 و SignalR و SQL Server |
 | Frontend (React/Vite) | **Vercel** | استضافة static سريعة ومجانية |
-| WhatsApp Gateway (Node.js + Chrome) | **VPS / Railway / جهاز المحل** | محتاج بروسيس شغال 24/7 + متصفح Chromium — مايشتغلش على Vercel ولا MonsterASP shared hosting |
+| WhatsApp Gateway (Node.js + Chrome) | **Render** (موصى به) / VPS / Railway | محتاج بروسيس شغال 24/7 + Chromium + disk — مايشتغلش على Vercel ولا MonsterASP shared |
 
 ---
 
@@ -59,34 +59,46 @@ Compress-Archive -Path publish/api/* -DestinationPath publish/playhub-api.zip -F
 
 ---
 
-## 3) WhatsApp Gateway
+## 3) WhatsApp Gateway على Render
 
-الـ Gateway (مجلد `whatsapp-gateway`) بيشغّل WhatsApp Web عن طريق متصفح Chromium، فمحتاج:
+الـ Gateway (مجلد `whatsapp-gateway`) بيشغّل WhatsApp Web عبر Chromium، فمحتاج:
 - بروسيس Node.js شغال باستمرار (مش serverless)
 - مساحة دائمة لحفظ session الواتساب (عشان ما تعملش مسح QR كل مرة)
 
-**الخيارات بالترتيب:**
+الملفات جاهزة في الريبو:
+- `whatsapp-gateway/Dockerfile` — Node 20 + Chromium
+- `render.yaml` — Blueprint (Web Service + disk على `/data`)
 
-| الخيار | التكلفة | ملاحظات |
-|---|---|---|
-| **VPS صغير** (Hetzner/Contabo/DigitalOcean) | ~4-6$/شهر | الأفضل والأثبت. Node + Chrome + `pm2` |
-| **Railway.app** | ~5$/شهر | سهل، لكن محتاج Dockerfile يتضمن Chromium + Volume للـ session |
-| **جهاز المحل (ويندوز)** | مجاني | الـ Gateway يفضل شغال محليًا، بس لازم رابط عام للـ API يوصله — عن طريق [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) مجانًا |
+> **مهم:** الخطة المجانية على Render بتنام وملهاش disk ثابت — الواتساب هيطلب QR كل مرة. استخدم **Starter** (أو أعلى) زي ما هو مضبوط في `render.yaml`.
 
-**خطوات VPS (المقترح):**
-```bash
-# على السيرفر (Ubuntu)
-sudo apt update && sudo apt install -y nodejs npm chromium-browser
-git clone <repo> && cd PlayHub/whatsapp-gateway
-npm install
-npm install -g pm2
-PORT=3000 pm2 start index.js --name whatsapp-gateway
-pm2 save && pm2 startup
-```
-ثم حط رابط السيرفر (مثلاً `http://<vps-ip>:3000` أو دومين + HTTPS عبر nginx/caddy) في:
-- `WhatsApp:ApiBaseUrl` في `appsettings.Production.json` على MonsterASP
+### أ. رفع الخدمة (Blueprint — مرة واحدة)
 
-بعدها من صفحة الإعدادات في البرنامج هتقدر تعمل مسح للـ QR وتربط رقم الواتساب عادي.
+1. ادفع الريبو على GitHub (الفرع فيه `render.yaml`).
+2. من [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**.
+3. اربط الريبو `PlayHub` واختار الفرع اللي فيه `render.yaml` (أو `main` بعد الدمج).
+4. **Apply** — Render هيبني الـ Docker ويطلع رابط زي:
+   `https://playhub-whatsapp-gateway.onrender.com`
+5. افتح `/health` على الرابط — لازم يرجع `{ "ok": true, ... }`.
+
+### ب. ربط الـ API
+
+حط رابط الـ Gateway (من غير `/` في الآخر) في:
+- `WhatsApp:ApiBaseUrl` في إعدادات الإنتاج على MonsterASP  
+  أو في حقل `WhatsAppApiBaseUrl` للـ tenant من لوحة الماستر
+
+بعدها من الإعدادات في البرنامج اعمل مسح QR وربط الرقم.
+
+### ج. إنشاء الخدمة من الـ API (بديل)
+
+من Account Settings → API Keys انسخ المفتاح، وابعتّه للوكيل عشان ينشئ الخدمة تلقائيًا عبر `https://api.render.com/v1/services`.
+
+### بدائل
+
+| الخيار | ملاحظات |
+|---|---|
+| **VPS** | `pm2` + Chromium — أثبت لو عندك سيرفر |
+| **Railway** | نفس الـ Dockerfile + Volume على `/data` |
+| **جهاز المحل** | Cloudflare Tunnel يوصل الـ API للـ Gateway المحلي |
 
 ---
 
@@ -97,7 +109,7 @@ pm2 save && pm2 startup
    - الـ Connection String بتاع الداتابيز
    - (لو عايزني أرفع بنفسي) بيانات FTP أو ملف WebDeploy `.publishSettings`
 2. **حساب Vercel**: اربط الريبو بنفسك بالخطوات فوق، أو ابعتلي Vercel Token لو عايزني أرفع بالـ CLI.
-3. **قرار استضافة الواتساب**: VPS ولا Railway ولا جهاز المحل + Cloudflare Tunnel؟
+3. **حساب Render** (للواتساب): Blueprint من `render.yaml`، أو ابعت Render API Key لو عايز الوكيل ينشئ الخدمة.
 4. **باسورد الأدمن** اللي هيتحط في `Seed:Password`.
 
 ---
