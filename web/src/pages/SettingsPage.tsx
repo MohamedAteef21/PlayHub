@@ -171,7 +171,7 @@ export function SettingsPage() {
     queryKey: ['whatsapp', 'status'],
     queryFn: whatsappApi.status,
     enabled: canWhatsApp && tab === 'whatsapp',
-    refetchInterval: 5000,
+    refetchInterval: 2000,
     meta: { silent: true },
   });
 
@@ -181,7 +181,7 @@ export function SettingsPage() {
     queryKey: ['whatsapp', 'qr'],
     queryFn: whatsappApi.qr,
     enabled: canWhatsApp && tab === 'whatsapp' && !waReady,
-    refetchInterval: 5000,
+    refetchInterval: 2000,
     meta: { silent: true },
   });
 
@@ -1343,8 +1343,10 @@ export function SettingsPage() {
                 {!waReady && (
                   <div className="space-y-3">
                     <p className="text-sm text-muted">{t('whatsapp.scanQr')}</p>
+                    <p className="text-xs text-warning">{t('whatsapp.qrFreshHint')}</p>
                     {qrImageSrc() ? (
                       <img
+                        key={waQr?.qrBase64 || waQr?.qr || 'qr'}
                         src={qrImageSrc()!}
                         alt="WhatsApp QR"
                         className="mx-auto h-56 w-56 rounded-xl border border-border bg-white p-2"

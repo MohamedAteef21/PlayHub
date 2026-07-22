@@ -103,7 +103,8 @@ function puppeteerArgs() {
     '--disable-extensions',
     '--disable-background-networking',
     '--disable-features=TranslateUI',
-    '--mute-audio'
+    '--mute-audio',
+    '--disable-blink-features=AutomationControlled'
   ];
 }
 
@@ -219,9 +220,15 @@ class WaSession {
         clientId: this.clientId,
         dataPath: AUTH_ROOT
       }),
-      authTimeoutMs: 120000,
+      // Give phone time to finish linking after QR scan
+      authTimeoutMs: 180000,
+      qrMaxRetries: 8,
       restartOnAuthFail: true,
       takeoverOnConflict: true,
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html'
+      },
       puppeteer: {
         headless: true,
         args: puppeteerArgs(),
@@ -238,6 +245,7 @@ class WaSession {
 
       this.lastQrRaw = qr;
       this.qrRotationCount += 1;
+      this.hasLoggedAuthenticated = false;
 
       if (QUIET_QR_TERMINAL) {
         console.log(`[${this.clientId}][QR] refreshed #${this.qrRotationCount}`);
@@ -248,9 +256,9 @@ class WaSession {
 
       try {
         this.qrDataUrl = await QRCode.toDataURL(qr, {
-          width: 512,
-          margin: 4,
-          errorCorrectionLevel: 'H',
+          width: 420,
+          margin: 2,
+          errorCorrectionLevel: 'M',
           color: { dark: '#000000', light: '#ffffff' }
         });
         this.qrGeneratedAt = Date.now();
@@ -267,7 +275,11 @@ class WaSession {
       this.lastQrRaw = null;
       if (this.hasLoggedAuthenticated) return;
       this.hasLoggedAuthenticated = true;
-      console.log(`[${this.clientId}] Authenticated`);
+      console.log(`[${this.clientId}] Authenticated — waiting for ready…`);
+    });
+
+    client.on('loading_screen', (percent, message) => {
+      console.log(`[${this.clientId}] loading ${percent}% — ${message}`);
     });
 
     client.on('ready', async () => {
@@ -313,10 +325,6 @@ class WaSession {
       this.clearConnectionState(String(reason));
       console.warn(`[${this.clientId}] Disconnected:`, reason);
       this.scheduleReconnect(String(reason));
-    });
-
-    client.on('loading_screen', (percent, message) => {
-      console.log(`[${this.clientId}] loading ${percent}% — ${message}`);
     });
 
     client.on('change_state', (state) => {
@@ -403,19 +411,23 @@ class WaSession {
   }
 
   statusPayload() {
-    const status = this.isReady ? 'AUTHENTICATED' : 'WAITING_QR';
+    const linking = !this.isReady && this.hasLoggedAuthenticated;
+    const status = this.isReady ? 'AUTHENTICATED' : linking ? 'LINKING' : 'WAITING_QR';
+    const qrAgeMs = this.qrGeneratedAt ? Date.now() - this.qrGeneratedAt : null;
     return {
       ok: true,
       clientId: this.clientId,
       ready: this.isReady,
+      linking,
       status,
       hasQr: Boolean(this.qrDataUrl),
       qrGeneratedAt: this.qrGeneratedAt,
+      qrAgeMs,
       hasSession: Boolean(this.currentSessionId),
       sessionId: this.currentSessionId,
       phone: phoneDigitsFromWid(this.currentWidUser),
       phoneNumber: phoneDigitsFromWid(this.currentWidUser),
-      qr: this.isReady ? null : this.qrDataUrl,
+      qr: this.isReady || linking ? null : this.qrDataUrl,
       initializing: this.isInitializing
     };
   }
@@ -447,12 +459,15 @@ class WaSession {
   }
 
   qrPayload() {
+    const linking = !this.isReady && this.hasLoggedAuthenticated;
     return {
       ready: this.isReady,
+      linking,
       clientId: this.clientId,
-      qr: this.qrDataUrl,
-      qrBase64: this.qrDataUrl,
+      qr: linking || this.isReady ? null : this.qrDataUrl,
+      qrBase64: linking || this.isReady ? null : this.qrDataUrl,
       generatedAt: this.qrGeneratedAt,
+      qrAgeMs: this.qrGeneratedAt ? Date.now() - this.qrGeneratedAt : null,
       rotation: this.qrRotationCount,
       sessionId: this.currentSessionId,
       widUser: this.currentWidUser,
