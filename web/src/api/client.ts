@@ -107,8 +107,21 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: res.statusText }));
-    const message = body.message ?? 'Request failed';
+    const body = await res.json().catch(() => ({ message: res.statusText })) as {
+      message?: string;
+      detail?: string;
+      title?: string;
+      code?: string;
+      errors?: Record<string, string[] | string>;
+    };
+    let message = body.message || body.detail || body.title || 'Request failed';
+    if (body.errors && typeof body.errors === 'object') {
+      const parts = Object.entries(body.errors).flatMap(([key, val]) => {
+        const texts = Array.isArray(val) ? val : [String(val)];
+        return texts.map((t) => (key ? `${key}: ${t}` : t));
+      });
+      if (parts.length) message = parts.join(' · ');
+    }
     if (isSubscriptionExpiredPayload(body)) {
       useAuthStore.getState().logout();
     }
@@ -805,7 +818,7 @@ export const reservationsApi = {
     deviceId: string;
     startsAt: string;
     endsAt?: string | null;
-    customerId?: string | null;
+    customerId: string;
     guestName?: string | null;
     notes?: string | null;
   }) =>

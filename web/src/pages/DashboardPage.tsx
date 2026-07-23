@@ -404,7 +404,9 @@ export function DashboardPage() {
   const [openModal, setOpenModal] = useState<AssetDashboardDevice | null>(null);
   const [reserveModal, setReserveModal] = useState<AssetDashboardDevice | null>(null);
   const [reserveStartsAt, setReserveStartsAt] = useState(toEgyptDateTimeLocalInput());
-  const [reserveGuestName, setReserveGuestName] = useState('');
+  const [reserveCustomerSearch, setReserveCustomerSearch] = useState('');
+  const [reserveSelectedCustomer, setReserveSelectedCustomer] = useState<Customer | null>(null);
+  const [debouncedReserveCustomerQ, setDebouncedReserveCustomerQ] = useState('');
   const [reserveNotes, setReserveNotes] = useState('');
   const [reserveError, setReserveError] = useState('');
   const [reserveLoading, setReserveLoading] = useState(false);
@@ -472,6 +474,11 @@ export function DashboardPage() {
     const id = window.setTimeout(() => setDebouncedCustomerQ(customerSearch.trim()), 300);
     return () => window.clearTimeout(id);
   }, [customerSearch]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedReserveCustomerQ(reserveCustomerSearch.trim()), 300);
+    return () => window.clearTimeout(id);
+  }, [reserveCustomerSearch]);
 
   const { data: dashboard, isLoading } = useQuery({
     queryKey: ['dashboard', user?.id, activeBranchId],
@@ -547,6 +554,12 @@ export function DashboardPage() {
     queryKey: ['customers', 'open-session', debouncedCustomerQ],
     queryFn: () => customersApi.getAll(debouncedCustomerQ || undefined, 1, 10),
     enabled: !!openModal && guestType === 'registered',
+  });
+
+  const { data: reserveCustomerResults } = useQuery({
+    queryKey: ['customers', 'reserve', debouncedReserveCustomerQ],
+    queryFn: () => customersApi.getAll(debouncedReserveCustomerQ || undefined, 1, 10),
+    enabled: !!reserveModal,
   });
 
   const { data: cafItems = [] } = useQuery({
@@ -735,7 +748,9 @@ export function DashboardPage() {
   function openReserveForDevice(device: AssetDashboardDevice) {
     setReserveModal(device);
     setReserveStartsAt(toEgyptDateTimeLocalInput());
-    setReserveGuestName('');
+    setReserveCustomerSearch('');
+    setReserveSelectedCustomer(null);
+    setDebouncedReserveCustomerQ('');
     setReserveNotes('');
     setReserveError('');
   }
@@ -784,9 +799,8 @@ export function DashboardPage() {
 
   async function handleReserveSubmit() {
     if (!reserveModal) return;
-    const guestName = reserveGuestName.trim();
-    if (!guestName) {
-      setReserveError(t('dashboard.reserveGuestName'));
+    if (!reserveSelectedCustomer) {
+      setReserveError(t('dashboard.reserveCustomerRequired'));
       return;
     }
     setReserveLoading(true);
@@ -796,12 +810,13 @@ export function DashboardPage() {
       await reservationsApi.create({
         deviceId: reserveModal.id,
         startsAt,
-        guestName,
+        customerId: reserveSelectedCustomer.id,
         notes: reserveNotes.trim() || undefined,
       });
       setReserveModal(null);
       setReserveStartsAt(toEgyptDateTimeLocalInput());
-      setReserveGuestName('');
+      setReserveCustomerSearch('');
+      setReserveSelectedCustomer(null);
       setReserveNotes('');
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
     } catch (e) {
@@ -812,15 +827,27 @@ export function DashboardPage() {
   }
 
   async function handleOpen() {
-    if (!openModal || !planId) return;
+    if (!openModal) return;
+    if (!planId) {
+      setOpenError(t('session.planRequired'));
+      return;
+    }
+    if (guestType === 'registered' && !selectedCustomer) {
+      setOpenError(t('session.noCustomersFound'));
+      return;
+    }
     setLoading(true);
     setOpenError('');
     try {
       const plan = plans?.find((p) => p.id === planId);
+      if (!plan) {
+        setOpenError(t('session.planRequired'));
+        return;
+      }
       const useFixed =
         bookingMode === 'fixed' &&
-        plan?.timeUnit !== TimeUnit.PerGame &&
-        !(plan?.sessionMode === SessionMode.Watching && plan.watchingBilling === WatchingBilling.PerPerson);
+        plan.timeUnit !== TimeUnit.PerGame &&
+        !(plan.sessionMode === SessionMode.Watching && plan.watchingBilling === WatchingBilling.PerPerson);
       if (!openingReservationId) {
         const conflict = await reservationsApi.checkConflict(openModal.id);
         if (conflict.hasConflict) {
@@ -828,20 +855,33 @@ export function DashboardPage() {
           if (!window.confirm(message || t('dashboard.reservationConflictWarn'))) return;
         }
       }
-      await sessionsApi.open({
+
+      const payload: Parameters<typeof sessionsApi.open>[0] = {
         deviceId: openModal.id,
         pricingPlanId: planId,
         sessionMode: mode,
-        controllerCount: mode === SessionMode.Gaming ? controllerCount : undefined,
-        watcherCount: mode === SessionMode.Watching ? watcherCount : undefined,
-        plannedDurationMinutes:
-          useFixed ? Math.round(durationHours * 60) : undefined,
-        customerId: guestType === 'registered' ? selectedCustomer?.id : undefined,
         isQuickGuest: guestType === 'quick',
-        quickGuestName:
-          guestType === 'quick' ? quickGuestName.trim() || undefined : undefined,
-        reservationId: openingReservationId ?? undefined,
-      });
+      };
+      if (mode === SessionMode.Gaming) {
+        payload.controllerCount = controllerCount;
+      } else {
+        payload.watcherCount = watcherCount;
+      }
+      if (useFixed) {
+        payload.plannedDurationMinutes = Math.round(durationHours * 60);
+      }
+      if (guestType === 'registered' && selectedCustomer) {
+        payload.customerId = selectedCustomer.id;
+      }
+      if (guestType === 'quick') {
+        const name = quickGuestName.trim();
+        if (name) payload.quickGuestName = name;
+      }
+      if (openingReservationId) {
+        payload.reservationId = openingReservationId;
+      }
+
+      await sessionsApi.open(payload);
       setOpenModal(null);
       setOpeningReservationId(null);
       setBookingMode('open');
@@ -850,6 +890,7 @@ export function DashboardPage() {
       setCustomerSearch('');
       setSelectedCustomer(null);
       setQuickGuestName('');
+      setPlanId('');
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
@@ -1949,6 +1990,8 @@ export function DashboardPage() {
               variant="secondary"
               onClick={() => {
                 setReserveModal(null);
+                setReserveSelectedCustomer(null);
+                setReserveCustomerSearch('');
                 setReserveError('');
               }}
             >
@@ -1956,7 +1999,7 @@ export function DashboardPage() {
             </Button>
             <Button
               loading={reserveLoading}
-              disabled={!reserveGuestName.trim()}
+              disabled={!reserveSelectedCustomer}
               onClick={handleReserveSubmit}
             >
               {t('dashboard.reserveSave')}
@@ -1971,12 +2014,61 @@ export function DashboardPage() {
             value={reserveStartsAt}
             onChange={(e) => setReserveStartsAt(e.target.value)}
           />
-          <Input
-            label={t('dashboard.reserveGuestName')}
-            value={reserveGuestName}
-            onChange={(e) => setReserveGuestName(e.target.value)}
-            required
-          />
+          <div className="space-y-2">
+            <Input
+              label={t('dashboard.reserveCustomer')}
+              value={reserveCustomerSearch}
+              onChange={(e) => {
+                setReserveCustomerSearch(e.target.value);
+                setReserveSelectedCustomer(null);
+              }}
+              placeholder={t('dashboard.reserveSearchCustomer')}
+              required
+            />
+            {reserveSelectedCustomer ? (
+              <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm">
+                <span className="font-medium">{reserveSelectedCustomer.name}</span>
+                <span className="ms-2 text-muted" dir="ltr">
+                  {reserveSelectedCustomer.phone}
+                </span>
+                <span className="ms-2 font-mono text-xs text-muted">{reserveSelectedCustomer.code}</span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ms-2"
+                  onClick={() => {
+                    setReserveSelectedCustomer(null);
+                    setReserveCustomerSearch('');
+                  }}
+                >
+                  {t('session.cancel')}
+                </Button>
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                {(reserveCustomerResults?.items ?? []).length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-muted">{t('session.noCustomersFound')}</p>
+                ) : (
+                  (reserveCustomerResults?.items ?? []).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-start text-sm last:border-0 hover:bg-surface-hover"
+                      onClick={() => {
+                        setReserveSelectedCustomer(c);
+                        setReserveCustomerSearch(c.name);
+                      }}
+                    >
+                      <span className="font-medium">{c.name}</span>
+                      <span className="text-muted" dir="ltr">
+                        {c.phone}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <Input
             label={t('dashboard.reserveNotes')}
             value={reserveNotes}
@@ -2018,7 +2110,7 @@ export function DashboardPage() {
             <Button
               loading={loading}
               onClick={handleOpen}
-              disabled={guestType === 'registered' && !selectedCustomer}
+              disabled={!planId || (guestType === 'registered' && !selectedCustomer)}
             >
               {t('session.confirm')}
             </Button>

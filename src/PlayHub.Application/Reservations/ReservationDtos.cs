@@ -23,8 +23,8 @@ public record DeviceReservationDto(
 public record CreateDeviceReservationRequest(
     Guid DeviceId,
     DateTime StartsAt,
+    Guid CustomerId,
     DateTime? EndsAt = null,
-    Guid? CustomerId = null,
     string? GuestName = null,
     string? Notes = null);
 

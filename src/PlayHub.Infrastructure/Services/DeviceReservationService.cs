@@ -43,33 +43,25 @@ public class DeviceReservationService : IDeviceReservationService
     public async Task<DeviceReservationDto> CreateAsync(CreateDeviceReservationRequest request, CancellationToken ct = default)
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
-        if (request.StartsAt <= DateTime.UtcNow.AddMinutes(-5))
-            throw new InvalidOperationException("Reservation start time must be in the future.");
-
         var device = await _db.Devices
             .Include(d => d.Room)
             .FirstOrDefaultAsync(d => d.Id == request.DeviceId && d.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Device not found.");
 
-        if (!device.IsActive)
-            throw new InvalidOperationException("This device is inactive and cannot be reserved.");
-
         var startsAt = EnsureUtc(request.StartsAt);
+        if (startsAt <= DateTime.UtcNow.AddMinutes(-5))
+            throw new InvalidOperationException("Reservation start time must be in the future.");
+
         var endsAt = request.EndsAt.HasValue ? EnsureUtc(request.EndsAt.Value) : (DateTime?)null;
         if (endsAt.HasValue && endsAt.Value <= startsAt)
             throw new InvalidOperationException("Reservation end time must be after the start time.");
 
-        Customer? customer = null;
-        if (request.CustomerId.HasValue)
-        {
-            customer = await _db.Customers.FirstOrDefaultAsync(
-                c => c.Id == request.CustomerId.Value && c.IsActive, ct)
-                ?? throw new KeyNotFoundException("Customer not found.");
-        }
+        if (request.CustomerId == Guid.Empty)
+            throw new InvalidOperationException("A registered customer is required for the reservation.");
 
-        var guestName = string.IsNullOrWhiteSpace(request.GuestName) ? null : request.GuestName.Trim();
-        if (customer is null && guestName is null)
-            throw new InvalidOperationException("Provide a customer or a guest name for the reservation.");
+        var customer = await _db.Customers.FirstOrDefaultAsync(
+            c => c.Id == request.CustomerId && c.IsActive, ct)
+            ?? throw new KeyNotFoundException("Customer not found.");
 
         // Soft overlap check: another pending reservation on same device within ±30 min window of start.
         var overlap = await _db.DeviceReservations.AnyAsync(r =>
@@ -87,8 +79,8 @@ public class DeviceReservationService : IDeviceReservationService
             DeviceId = device.Id,
             StartsAt = startsAt,
             EndsAt = endsAt,
-            CustomerId = customer?.Id,
-            GuestName = guestName,
+            CustomerId = customer.Id,
+            GuestName = null,
             Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim(),
             Status = ReservationStatus.Pending,
             CreatedByUserId = _tenantContext.UserId

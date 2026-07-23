@@ -99,7 +99,8 @@ export function toEgyptDateTimeLocalInput(ms: number = Date.now()): string {
  * Interpret a datetime-local string as Africa/Cairo wall time and return UTC ISO.
  */
 export function egyptLocalInputToUtcIso(localValue: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(localValue.trim());
+  // Some browsers append seconds (YYYY-MM-DDTHH:mm:ss) on datetime-local.
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(localValue.trim());
   if (!m) throw new Error('Invalid datetime');
   const year = Number(m[1]);
   const month = Number(m[2]);

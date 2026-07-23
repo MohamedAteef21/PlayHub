@@ -513,7 +513,9 @@ export function CafeteriaPage() {
         <Card className="h-fit">
           <p className="mb-3 font-medium">{t('cafeteria.cart')}</p>
           {cart.length === 0 ? (
-            <p className="text-sm text-muted">{t('cafeteria.emptyCart')}</p>
+            <p className="text-sm text-muted">
+              {saleMode === 'waiting' ? t('cafeteria.waitingEmptyCart') : t('cafeteria.emptyCart')}
+            </p>
           ) : (
             <div className="space-y-3">
               {cart.map((l) => (
