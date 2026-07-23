@@ -657,9 +657,6 @@ export function SettingsPage() {
     ...((canManageSettings || isMaster)
       ? [{ id: 'payments' as const, label: t('settings.payments'), icon: 'accounting' as const }]
       : []),
-    ...(canWhatsApp
-      ? [{ id: 'whatsapp' as const, label: t('settings.whatsapp'), icon: 'user' as const }]
-      : []),
   ];
 
   return (

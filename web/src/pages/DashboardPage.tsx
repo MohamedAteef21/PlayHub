@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi, whatsappApi } from '@/api/client';
+import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi } from '@/api/client';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -319,11 +319,8 @@ export function DashboardPage() {
   const [debouncedCustomerQ, setDebouncedCustomerQ] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [quickGuestName, setQuickGuestName] = useState('');
-  const [waInvoiceMsg, setWaInvoiceMsg] = useState('');
-  const [waInvoiceError, setWaInvoiceError] = useState('');
-  const [waInvoiceLoading, setWaInvoiceLoading] = useState(false);
+  const [invoiceActionError, setInvoiceActionError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
-  const canSendWhatsApp = hasPermission(user, Permissions.CustomersManage);
 
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedCustomerQ(customerSearch.trim()), 300);
@@ -589,8 +586,7 @@ export function DashboardPage() {
       setPaymentMethod(PaymentMethod.Cash);
       setWalletPayAmount('');
       setProofFile(null);
-      setWaInvoiceMsg('');
-      setWaInvoiceError('');
+      setInvoiceActionError('');
       setInvoiceResult(detail);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -645,29 +641,10 @@ export function DashboardPage() {
     );
   }
 
-  async function handleSendInvoiceWhatsApp() {
-    if (!invoiceResult) return;
-    setWaInvoiceLoading(true);
-    setWaInvoiceMsg('');
-    setWaInvoiceError('');
-    try {
-      const res = await whatsappApi.sendInvoice(invoiceResult.id);
-      if (res.success) {
-        setWaInvoiceMsg(t('whatsapp.invoiceSent'));
-      } else {
-        setWaInvoiceError(res.error || t('common.error'));
-      }
-    } catch (e) {
-      setWaInvoiceError(e instanceof Error ? e.message : t('common.error'));
-    } finally {
-      setWaInvoiceLoading(false);
-    }
-  }
-
   async function handleDownloadInvoicePdf() {
     if (!invoiceResult) return;
     setPdfLoading(true);
-    setWaInvoiceError('');
+    setInvoiceActionError('');
     try {
       const blob = await alertsApi.downloadInvoicePdf(invoiceResult.id);
       const url = URL.createObjectURL(blob);
@@ -677,7 +654,7 @@ export function DashboardPage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setWaInvoiceError(e instanceof Error ? e.message : t('common.error'));
+      setInvoiceActionError(e instanceof Error ? e.message : t('common.error'));
     } finally {
       setPdfLoading(false);
     }
@@ -1048,8 +1025,7 @@ export function DashboardPage() {
         open={!!invoiceResult}
         onClose={() => {
           setInvoiceResult(null);
-          setWaInvoiceMsg('');
-          setWaInvoiceError('');
+          setInvoiceActionError('');
         }}
         title={t('session.closedSuccess')}
         footer={
@@ -1058,23 +1034,11 @@ export function DashboardPage() {
               variant="secondary"
               onClick={() => {
                 setInvoiceResult(null);
-                setWaInvoiceMsg('');
-                setWaInvoiceError('');
+                setInvoiceActionError('');
               }}
             >
               {t('session.done')}
             </Button>
-            {canSendWhatsApp &&
-              invoiceResult?.customerId &&
-              invoiceResult.customerPhone && (
-                <Button
-                  variant="secondary"
-                  loading={waInvoiceLoading}
-                  onClick={handleSendInvoiceWhatsApp}
-                >
-                  {t('whatsapp.sendInvoice')}
-                </Button>
-              )}
             <Button variant="secondary" loading={pdfLoading} onClick={handleDownloadInvoicePdf}>
               <Icon name="download" className="h-4 w-4" />
               {t('session.downloadPdf')}
@@ -1160,8 +1124,7 @@ export function DashboardPage() {
                 <span>{formatCurrency(invoiceResult.totalCost)}</span>
               </div>
             </div>
-            {waInvoiceMsg && <p className="text-sm text-success">{waInvoiceMsg}</p>}
-            {waInvoiceError && <p className="text-sm text-danger">{waInvoiceError}</p>}
+            {invoiceActionError && <p className="text-sm text-danger">{invoiceActionError}</p>}
           </div>
         )}
       </Modal>
