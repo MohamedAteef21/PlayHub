@@ -386,13 +386,13 @@ export function DashboardPage() {
   );
   const convertSelectedPlan = convertPlans.find((p) => p.id === convertPlanId);
   const convertDevice = useMemo(() => {
-    if (!convertModal || !dashboard?.rooms) return null;
-    for (const room of dashboard.rooms) {
+    if (!convertModal || !dashboard) return null;
+    for (const room of dashboard.rooms ?? []) {
       const d = room.devices.find((x) => x.id === convertModal.deviceId);
       if (d) return d;
     }
-    return null;
-  }, [convertModal, dashboard?.rooms]);
+    return (dashboard.unassignedDevices ?? []).find((x) => x.id === convertModal.deviceId) ?? null;
+  }, [convertModal, dashboard]);
 
   const { data: customerSearchResults } = useQuery({
     queryKey: ['customers', 'open-session', debouncedCustomerQ],
