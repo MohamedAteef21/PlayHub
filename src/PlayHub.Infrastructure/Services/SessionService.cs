@@ -508,7 +508,8 @@ public class SessionService : ISessionService
         var finalSegment = SessionBillingSegments.Build(
             _costCalculator, session, closedAt, billingRoundUp,
             isPerGame ? request.MatchCount : null,
-            out var segmentCost);
+            out var segmentCost,
+            chargeFullPlannedBooking: true);
         SessionBillingSegments.Append(session, finalSegment);
 
         var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, closedAt);

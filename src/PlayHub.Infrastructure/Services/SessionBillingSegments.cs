@@ -47,7 +47,8 @@ internal static class SessionBillingSegments
         DateTime endedAt,
         bool billingRoundUp,
         int? matchCount,
-        out decimal amount)
+        out decimal amount,
+        bool chargeFullPlannedBooking = false)
     {
         var timeUnit = calc.GetTimeUnit(session.RateSnapshot) ?? TimeUnit.PerHour;
         var isMatch = session.SessionMode == SessionMode.Gaming && timeUnit == TimeUnit.PerGame;
@@ -79,9 +80,20 @@ internal static class SessionBillingSegments
         }
 
         var elapsed = calc.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, endedAt);
-        var billableSeconds = session.PlannedDurationMinutes is > 0
-            ? Math.Min(elapsed, session.PlannedDurationMinutes.Value * 60)
-            : elapsed;
+        // Booked sessions: closing early still bills the reserved time (Max). Mid-session
+        // splits (convert) only bill elapsed so far (Min) so the next segment can continue.
+        int billableSeconds;
+        if (session.PlannedDurationMinutes is > 0)
+        {
+            var plannedSeconds = session.PlannedDurationMinutes.Value * 60;
+            billableSeconds = chargeFullPlannedBooking
+                ? Math.Max(elapsed, plannedSeconds)
+                : Math.Min(elapsed, plannedSeconds);
+        }
+        else
+        {
+            billableSeconds = elapsed;
+        }
 
         amount = decimal.Round(
             calc.CalculateTimeCost(

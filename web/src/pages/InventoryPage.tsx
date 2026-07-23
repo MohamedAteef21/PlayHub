@@ -338,19 +338,25 @@ export function InventoryPage() {
 
   const saveUnitMutation = useMutation({
     mutationFn: () => {
+      const english = unitName.trim();
+      const arabic = unitNameAr.trim();
+      const name = english || arabic;
+      if (!name) throw new Error(t('inventory.unitNameRequired'));
+
       if (editingUnit) {
         return inventoryApi.updateUnit(editingUnit.id, {
-          name: unitName.trim(),
-          nameAr: unitNameAr.trim() || null,
+          name,
+          nameAr: arabic || null,
           isActive: unitIsActive,
         });
       }
       return inventoryApi.createUnit({
-        name: unitName.trim(),
-        nameAr: unitNameAr.trim() || undefined,
+        name,
+        nameAr: arabic || undefined,
       });
     },
     onSuccess: () => {
+      setError('');
       resetUnitForm();
       queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
     },
@@ -962,16 +968,16 @@ export function InventoryPage() {
         ) : (
           <DataTable
             headers={[
-              t('inventory.unitName'),
               t('inventory.unitNameAr'),
+              t('inventory.unitName'),
               t('common.status'),
               '',
             ]}
           >
             {allUnits.map((unit) => (
               <tr key={unit.id} className="hover:bg-surface-hover">
-                <td className="px-4 py-3 font-medium">{unit.name}</td>
-                <td className="px-4 py-3 text-muted">{unit.nameAr || '—'}</td>
+                <td className="px-4 py-3 font-medium">{unit.nameAr || '—'}</td>
+                <td className="px-4 py-3 text-muted">{unit.name}</td>
                 <td className="px-4 py-3">
                   <Badge status={unit.isActive ? 'gaming' : 'idle'}>
                     {unit.isActive ? t('common.active') : t('common.inactive')}
@@ -1495,14 +1501,14 @@ export function InventoryPage() {
       >
         <div className="space-y-3">
           <Input
-            label={t('inventory.unitName')}
-            value={unitName}
-            onChange={(e) => setUnitName(e.target.value)}
-          />
-          <Input
             label={t('inventory.unitNameAr')}
             value={unitNameAr}
             onChange={(e) => setUnitNameAr(e.target.value)}
+          />
+          <Input
+            label={t('inventory.unitName')}
+            value={unitName}
+            onChange={(e) => setUnitName(e.target.value)}
           />
           {editingUnit && (
             <label className="flex items-center gap-2 text-sm">
@@ -1517,9 +1523,13 @@ export function InventoryPage() {
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button
             className="w-full"
+            type="button"
             loading={saveUnitMutation.isPending}
-            disabled={!unitName.trim()}
-            onClick={() => saveUnitMutation.mutate()}
+            disabled={!unitName.trim() && !unitNameAr.trim()}
+            onClick={() => {
+              setError('');
+              saveUnitMutation.mutate();
+            }}
           >
             {t('common.save')}
           </Button>
