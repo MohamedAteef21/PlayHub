@@ -229,7 +229,8 @@ export const sessionsApi = {
     stockDeductQuantity: number,
     customerName?: string,
     addOns?: { addOnId: string; quantity: number }[],
-    allowSkipMissingIngredients?: boolean
+    allowSkipMissingIngredients?: boolean,
+    unit?: number
   ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${sessionId}/cafeteria`, {
       method: 'POST',
@@ -241,6 +242,7 @@ export const sessionsApi = {
         customerName: customerName || undefined,
         addOns: addOns?.length ? addOns : undefined,
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
+        unit: unit ?? undefined,
       }),
     }),
   returnCafeteria: (sessionId: string, sessionCafeteriaLineId: string, quantity: number, reason: string) =>
@@ -502,6 +504,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     payment: import('@/types').PaymentRequest,
@@ -524,6 +527,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }

@@ -25,7 +25,15 @@ import type {
   SessionDetail,
   SessionLive,
 } from '@/types';
-import { CafeteriaItemKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import { CafeteriaItemKind, InventoryUnitKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import {
+  formatStockDisplay,
+  hasLargeUnit,
+  maxSellQuantity,
+  toBaseQuantity,
+  unitLabel,
+  variantUnitPrice,
+} from '@/lib/itemUnits';
 
 type CafCartAddOn = { addOnId: string; name: string; price: number; quantity: number };
 
@@ -33,12 +41,14 @@ type CafCartLine = {
   itemId: string;
   itemName: string;
   itemKind: number;
+  item: CafeteriaItem;
   variantId: string;
   variantName: string;
   variant: CafeteriaItemVariant;
   price: number;
   quantity: number;
   stockDeduct: number;
+  unit: number;
   stockAvailable: number;
   addOns: CafCartAddOn[];
 };
@@ -262,6 +272,7 @@ export function DashboardPage() {
   const [cafPickVariantId, setCafPickVariantId] = useState('');
   const [cafPickQty, setCafPickQty] = useState('1');
   const [cafPickStock, setCafPickStock] = useState('1');
+  const [cafPickUnit, setCafPickUnit] = useState<number>(InventoryUnitKind.Base);
   const [cafPickAddOns, setCafPickAddOns] = useState<Record<string, number>>({});
   const [cafMissingDialog, setCafMissingDialog] = useState<{
     missing: MissingIngredient[];
@@ -668,7 +679,8 @@ export function DashboardPage() {
         line.stockDeduct,
         sessionCustomerName || cafCustomerName.trim() || undefined,
         line.addOns.map((a) => ({ addOnId: a.addOnId, quantity: a.quantity })),
-        allowSkip
+        allowSkip,
+        line.unit
       );
     }
     if (last) onUpdate(last);
@@ -716,8 +728,14 @@ export function DashboardPage() {
     if (!variant) return;
     const quantity = Math.max(1, Number(cafPickQty) || 1);
     const manual = needsManualStockDeduct(cafPickItem, variant);
+    const unit =
+      manual && hasLargeUnit(cafPickItem) ? cafPickUnit : InventoryUnitKind.Base;
     const stockDeduct = manual ? Math.max(1, Number(cafPickStock) || quantity) : quantity;
-    if (manual && stockDeduct > cafPickItem.currentQuantity) {
+    const maxAvail = manual ? maxSellQuantity(cafPickItem, unit as InventoryUnitKind) : Infinity;
+    const baseNeeded = manual
+      ? toBaseQuantity(cafPickItem, stockDeduct, unit as InventoryUnitKind)
+      : 0;
+    if (manual && (stockDeduct > maxAvail || baseNeeded > cafPickItem.currentQuantity)) {
       setCafError(t('inventory.insufficientStock'));
       return;
     }
@@ -727,16 +745,18 @@ export function DashboardPage() {
         const addon = cafAddOns.find((a: CafeteriaAddOn) => a.id === addOnId)!;
         return { addOnId, name: addon.name, price: addon.sellPrice, quantity: qty };
       });
+    const unitPrice = variantUnitPrice(variant.sellPrice, cafPickItem, unit as InventoryUnitKind);
     setCafCart((prev) => {
-      const existing = prev.find((l) => l.variantId === variant.id);
+      const existing = prev.find((l) => l.variantId === variant.id && l.unit === unit);
       if (existing) {
         return prev.map((l) =>
-          l.variantId === variant.id
+          l.variantId === variant.id && l.unit === unit
             ? {
                 ...l,
                 quantity: l.quantity + quantity,
                 stockDeduct: l.stockDeduct + stockDeduct,
                 stockAvailable: cafPickItem.currentQuantity,
+                item: cafPickItem,
                 addOns: mergeCafAddOns(l.addOns, selectedAddOns),
               }
             : l
@@ -748,12 +768,14 @@ export function DashboardPage() {
           itemId: cafPickItem.id,
           itemName: cafPickItem.name,
           itemKind: cafPickItem.kind,
+          item: cafPickItem,
           variantId: variant.id,
           variantName: variant.name,
           variant,
-          price: variant.sellPrice,
+          price: unitPrice,
           quantity,
           stockDeduct,
+          unit,
           stockAvailable: cafPickItem.currentQuantity,
           addOns: selectedAddOns,
         },
@@ -761,6 +783,7 @@ export function DashboardPage() {
     });
     setCafPickItem(null);
     setCafPickAddOns({});
+    setCafPickUnit(InventoryUnitKind.Base);
     setCafSearch('');
     setCafError('');
   }
@@ -1714,6 +1737,7 @@ export function DashboardPage() {
                           setCafPickVariantId(variants[0].id);
                           setCafPickQty('1');
                           setCafPickStock('1');
+                          setCafPickUnit(0);
                           setCafPickAddOns({});
                           setCafError('');
                         }}
@@ -1723,7 +1747,7 @@ export function DashboardPage() {
                           <span className="block text-xs text-muted">
                             {variantCount} {t('inventory.variants', { defaultValue: 'variants' })}
                             {' · '}
-                            {t('cafeteria.stock')}: {item.currentQuantity}
+                            {t('cafeteria.stock')}: {formatStockDisplay(item)}
                           </span>
                         </span>
                         <span className="text-xs font-medium text-primary">+ {t('cafeteria.addToCart')}</span>
@@ -1741,7 +1765,10 @@ export function DashboardPage() {
                   <div className="space-y-2">
                     <p className="text-sm font-medium">{t('cafeteria.cart')}</p>
                     {cafCart.map((line) => (
-                      <div key={line.variantId} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
+                      <div
+                        key={`${line.variantId}:${line.unit}`}
+                        className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2"
+                      >
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
                             {line.itemName} — {line.variantName}
@@ -1751,7 +1778,8 @@ export function DashboardPage() {
                             {needsManualStockDeduct({ kind: line.itemKind }, line.variant) && (
                               <>
                                 {' · '}
-                                {t('inventory.stockDeduct')} {line.stockDeduct}
+                                {t('inventory.stockDeduct')} {line.stockDeduct}{' '}
+                                {unitLabel(line.item, line.unit as InventoryUnitKind)}
                               </>
                             )}
                           </p>
@@ -1769,7 +1797,7 @@ export function DashboardPage() {
                               setCafCart((prev) =>
                                 prev
                                   .map((l) => {
-                                    if (l.variantId !== line.variantId) return l;
+                                    if (l.variantId !== line.variantId || l.unit !== line.unit) return l;
                                     const nextQty = Math.max(0, l.quantity - 1);
                                     const manual = needsManualStockDeduct({ kind: l.itemKind }, l.variant);
                                     const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
@@ -1794,7 +1822,7 @@ export function DashboardPage() {
                             onClick={() =>
                               setCafCart((prev) =>
                                 prev.map((l) => {
-                                  if (l.variantId !== line.variantId) return l;
+                                  if (l.variantId !== line.variantId || l.unit !== line.unit) return l;
                                   const nextQty = l.quantity + 1;
                                   const manual = needsManualStockDeduct({ kind: l.itemKind }, l.variant);
                                   const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
@@ -1815,7 +1843,11 @@ export function DashboardPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setCafCart((prev) => prev.filter((l) => l.variantId !== line.variantId))}
+                          onClick={() =>
+                            setCafCart((prev) =>
+                              prev.filter((l) => !(l.variantId === line.variantId && l.unit === line.unit))
+                            )
+                          }
                         >
                           ✕
                         </Button>
@@ -1827,6 +1859,7 @@ export function DashboardPage() {
                     </div>
                   </div>
                 )}
+
               </>
             );
           })()}
@@ -1931,16 +1964,53 @@ export function DashboardPage() {
             />
             {showStock && (
               <>
-                <Input
-                  label={t('inventory.stockDeduct')}
-                  type="number"
-                  min={1}
-                  value={cafPickStock}
-                  onChange={(e) => setCafPickStock(e.target.value)}
-                />
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[8rem] flex-1">
+                    <Input
+                      label={t('inventory.stockDeduct')}
+                      type="number"
+                      min={1}
+                      value={cafPickStock}
+                      onChange={(e) => setCafPickStock(e.target.value)}
+                    />
+                  </div>
+                  {hasLargeUnit(cafPickItem) ? (
+                    <div className="w-32">
+                      <label className="mb-1 block text-xs text-muted">{t('inventory.deductUnit')}</label>
+                      <select
+                        className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                        value={cafPickUnit}
+                        onChange={(e) => setCafPickUnit(Number(e.target.value))}
+                      >
+                        <option value={InventoryUnitKind.Base}>
+                          {cafPickItem.baseUnitName || t('inventory.baseUnit')}
+                        </option>
+                        <option value={InventoryUnitKind.Large}>
+                          {cafPickItem.largeUnitName || t('inventory.largeUnit')}
+                        </option>
+                      </select>
+                    </div>
+                  ) : (
+                    <span className="mb-2 text-xs text-muted">
+                      {cafPickItem.baseUnitName || t('inventory.baseUnit')}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-muted">
-                  {t('inventory.stockAvailable')}: {cafPickItem.currentQuantity}
+                  {t('inventory.stockAvailable')}: {formatStockDisplay(cafPickItem)}
                 </p>
+                {hasLargeUnit(cafPickItem) && cafPickUnit === InventoryUnitKind.Large && (
+                  <p className="text-xs text-muted">
+                    {t('inventory.storesAsBase', {
+                      qty: toBaseQuantity(
+                        cafPickItem,
+                        Number(cafPickStock) || 0,
+                        InventoryUnitKind.Large
+                      ),
+                      unit: cafPickItem.baseUnitName || t('inventory.baseUnit'),
+                    })}
+                  </p>
+                )}
               </>
             )}
             {cafAddOns.length > 0 && (

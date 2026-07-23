@@ -1,19 +1,180 @@
 import type { CafeteriaItem } from '@/types';
 import { InventoryUnitKind } from '@/types';
 
-export function hasLargeUnit(item: CafeteriaItem): boolean {
+/** How a recipe/add-on quantity is entered in the UI (converted to warehouse base units on save). */
+export type RecipeDeductUnit = 'base' | 'gram' | 'kilogram' | 'milliliter' | 'liter';
+
+const GRAMS_PER_KG = 1000;
+const ML_PER_L = 1000;
+
+export function hasLargeUnit(item: Pick<CafeteriaItem, 'largeUnitName' | 'unitsPerLarge'>): boolean {
   return !!item.largeUnitName && item.unitsPerLarge > 1;
 }
 
+function normalizeUnitName(name: string | null | undefined): string {
+  return (name ?? '').trim().toLowerCase();
+}
+
+export function isGramUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return n === 'جرام' || n === 'جم' || n === 'g' || n === 'gram' || n === 'grams';
+}
+
+export function isKilogramUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return (
+    n === 'كجم' ||
+    n === 'كيلو' ||
+    n === 'كيلوجرام' ||
+    n === 'كيلو جرام' ||
+    n === 'kg' ||
+    n === 'kilo' ||
+    n === 'kilogram' ||
+    n === 'kilograms'
+  );
+}
+
+export function isMilliliterUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return (
+    n === 'مل' ||
+    n === 'مللي' ||
+    n === 'ملليلتر' ||
+    n === 'مليلتر' ||
+    n === 'ml' ||
+    n === 'milliliter' ||
+    n === 'millilitre' ||
+    n === 'milliliters' ||
+    n === 'millilitres'
+  );
+}
+
+export function isLiterUnitName(name: string | null | undefined): boolean {
+  const n = normalizeUnitName(name);
+  return (
+    n === 'لتر' ||
+    n === 'ل' ||
+    n === 'ltr' ||
+    n === 'l' ||
+    n === 'liter' ||
+    n === 'litre' ||
+    n === 'liters' ||
+    n === 'litres'
+  );
+}
+
+export function isWeightItem(item: Pick<CafeteriaItem, 'baseUnitName' | 'largeUnitName'>): boolean {
+  return (
+    isGramUnitName(item.baseUnitName) ||
+    isKilogramUnitName(item.baseUnitName) ||
+    isGramUnitName(item.largeUnitName) ||
+    isKilogramUnitName(item.largeUnitName)
+  );
+}
+
+export function isVolumeItem(item: Pick<CafeteriaItem, 'baseUnitName' | 'largeUnitName'>): boolean {
+  return (
+    isMilliliterUnitName(item.baseUnitName) ||
+    isLiterUnitName(item.baseUnitName) ||
+    isMilliliterUnitName(item.largeUnitName) ||
+    isLiterUnitName(item.largeUnitName)
+  );
+}
+
+/** Weight or volume items that support small/large measure pickers (g/kg or ml/L). */
+export function isMeasurableItem(item: Pick<CafeteriaItem, 'baseUnitName' | 'largeUnitName'>): boolean {
+  return isWeightItem(item) || isVolumeItem(item);
+}
+
+export function defaultDeductUnit(
+  item: Pick<CafeteriaItem, 'baseUnitName' | 'largeUnitName'>
+): RecipeDeductUnit {
+  if (isGramUnitName(item.baseUnitName) || isWeightItem(item)) return 'gram';
+  if (isMilliliterUnitName(item.baseUnitName) || isVolumeItem(item)) return 'milliliter';
+  return 'base';
+}
+
+/** Convert a recipe/add-on UI quantity into integer warehouse base units. */
+export function recipeQtyToBase(
+  item: Pick<CafeteriaItem, 'baseUnitName'>,
+  quantity: number,
+  deductUnit: RecipeDeductUnit
+): number {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+
+  if (deductUnit === 'base') return Math.round(qty);
+
+  if (deductUnit === 'gram' || deductUnit === 'kilogram') {
+    const asGrams = deductUnit === 'kilogram' ? qty * GRAMS_PER_KG : qty;
+    if (isGramUnitName(item.baseUnitName)) return Math.round(asGrams);
+    if (isKilogramUnitName(item.baseUnitName)) {
+      return Math.max(0, Math.round(asGrams / GRAMS_PER_KG));
+    }
+    return Math.round(qty);
+  }
+
+  if (deductUnit === 'milliliter' || deductUnit === 'liter') {
+    const asMl = deductUnit === 'liter' ? qty * ML_PER_L : qty;
+    if (isMilliliterUnitName(item.baseUnitName)) return Math.round(asMl);
+    if (isLiterUnitName(item.baseUnitName)) {
+      return Math.max(0, Math.round(asMl / ML_PER_L));
+    }
+    return Math.round(qty);
+  }
+
+  return Math.round(qty);
+}
+
+/** Prefer showing measurable recipe/add-on lines in the small measure unit. */
+export function recipeQtyFromBase(
+  item: Pick<CafeteriaItem, 'baseUnitName'>,
+  baseQuantity: number
+): { quantity: string; deductUnit: RecipeDeductUnit } {
+  if (isGramUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'gram' };
+  }
+  if (isKilogramUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'kilogram' };
+  }
+  if (isMilliliterUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'milliliter' };
+  }
+  if (isLiterUnitName(item.baseUnitName)) {
+    return { quantity: String(baseQuantity), deductUnit: 'liter' };
+  }
+  return { quantity: String(baseQuantity), deductUnit: 'base' };
+}
+
 export function toBaseQuantity(
-  item: CafeteriaItem,
+  item: Pick<CafeteriaItem, 'largeUnitName' | 'unitsPerLarge'> | CafeteriaItem,
   quantity: number,
   unit: InventoryUnitKind
 ): number {
-  if (unit === InventoryUnitKind.Large && hasLargeUnit(item)) {
-    return quantity * item.unitsPerLarge;
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty)) return 0;
+  const factor = item.unitsPerLarge > 1 ? item.unitsPerLarge : 1;
+  const canLarge = !!item.largeUnitName && factor > 1;
+  if (unit === InventoryUnitKind.Large && canLarge) {
+    return Math.round(qty * factor);
   }
-  return quantity;
+  return Math.round(qty);
+}
+
+/** Convert an entered qty to warehouse base using form unit ids (before item exists). */
+export function enteredQtyToBase(
+  quantity: number,
+  unit: InventoryUnitKind,
+  unitsPerLarge: number,
+  hasLarge: boolean
+): number {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty)) return 0;
+  const factor = unitsPerLarge > 1 ? unitsPerLarge : 1;
+  if (unit === InventoryUnitKind.Large && hasLarge && factor > 1) {
+    return Math.round(qty * factor);
+  }
+  return Math.round(qty);
 }
 
 export function maxSellQuantity(item: CafeteriaItem, unit: InventoryUnitKind): number {
@@ -28,6 +189,18 @@ export function lineUnitPrice(item: CafeteriaItem, unit: InventoryUnitKind): num
     return item.sellPrice * item.unitsPerLarge;
   }
   return item.sellPrice;
+}
+
+/** Variant sell price is per small unit; scale when selling by large unit. */
+export function variantUnitPrice(
+  variantSellPrice: number,
+  item: Pick<CafeteriaItem, 'largeUnitName' | 'unitsPerLarge'>,
+  unit: InventoryUnitKind
+): number {
+  if (unit === InventoryUnitKind.Large && hasLargeUnit(item)) {
+    return variantSellPrice * item.unitsPerLarge;
+  }
+  return variantSellPrice;
 }
 
 export function formatStockDisplay(item: CafeteriaItem): string {

@@ -13,6 +13,22 @@ import {
   StockVoucherStatus,
   StockVoucherType,
 } from '@/types';
+import {
+  defaultDeductUnit,
+  enteredQtyToBase,
+  formatStockDisplay,
+  hasLargeUnit,
+  isGramUnitName,
+  isKilogramUnitName,
+  isLiterUnitName,
+  isMilliliterUnitName,
+  isVolumeItem,
+  isWeightItem,
+  recipeQtyFromBase,
+  recipeQtyToBase,
+  toBaseQuantity,
+  type RecipeDeductUnit,
+} from '@/lib/itemUnits';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -22,7 +38,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'warehouse' | 'menu' | 'addons' | 'vouchers' | 'movements';
+type Tab = 'warehouse' | 'menu' | 'units' | 'addons' | 'vouchers' | 'movements';
 
 type VariantFormRow = {
   key: string;
@@ -38,6 +54,7 @@ type RecipeLineFormRow = {
   id?: string;
   warehouseItemId: string;
   quantity: string;
+  deductUnit: RecipeDeductUnit;
 };
 
 const movementLabels: Record<number, string> = {
@@ -52,7 +69,13 @@ const movementLabels: Record<number, string> = {
 };
 
 function newRecipeLineRow(partial?: Partial<RecipeLineFormRow>): RecipeLineFormRow {
-  return { key: crypto.randomUUID(), warehouseItemId: '', quantity: '1', ...partial };
+  return {
+    key: crypto.randomUUID(),
+    warehouseItemId: '',
+    quantity: '1',
+    deductUnit: 'base',
+    ...partial,
+  };
 }
 
 function newVariantRow(partial?: Partial<VariantFormRow>): VariantFormRow {
@@ -103,6 +126,7 @@ export function InventoryPage() {
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [voucherNotes, setVoucherNotes] = useState('');
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
+  const [voucherLineUnits, setVoucherLineUnits] = useState<Record<string, number>>({});
   const [itemFormOpen, setItemFormOpen] = useState(false);
   const [formContext, setFormContext] = useState<'warehouse' | 'menu'>('warehouse');
   const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
@@ -110,7 +134,9 @@ export function InventoryPage() {
   const [itemName, setItemName] = useState('');
   const [itemNameAr, setItemNameAr] = useState('');
   const [itemQty, setItemQty] = useState('0');
-  const [itemThreshold, setItemThreshold] = useState('5');
+  const [itemQtyUnit, setItemQtyUnit] = useState<number>(InventoryUnitKind.Base);
+  const [itemThreshold, setItemThreshold] = useState('0');
+  const [itemThresholdUnit, setItemThresholdUnit] = useState<number>(InventoryUnitKind.Base);
   const [itemIsActive, setItemIsActive] = useState(true);
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
@@ -122,7 +148,14 @@ export function InventoryPage() {
   const [addonPrice, setAddonPrice] = useState('');
   const [addonWarehouseId, setAddonWarehouseId] = useState('');
   const [addonDeductQty, setAddonDeductQty] = useState('1');
+  const [addonDeductUnit, setAddonDeductUnit] = useState<RecipeDeductUnit>('base');
   const [addonIsActive, setAddonIsActive] = useState(true);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [newUnitNameAr, setNewUnitNameAr] = useState('');
+  const [editingUnit, setEditingUnit] = useState<InventoryUnit | null>(null);
+  const [editUnitName, setEditUnitName] = useState('');
+  const [editUnitNameAr, setEditUnitNameAr] = useState('');
+  const [editUnitActive, setEditUnitActive] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -134,9 +167,15 @@ export function InventoryPage() {
     queryFn: () => cafeteriaApi.getItems(),
   });
 
-  const { data: units = [] } = useQuery({
-    queryKey: ['inventory-units', user?.id, activeBranchId],
-    queryFn: () => inventoryApi.getUnits(),
+  const { data: units = [], isLoading: unitsLoading } = useQuery({
+    queryKey: ['inventory-units', user?.id, activeBranchId, tab === 'units'],
+    queryFn: () => inventoryApi.getUnits(tab !== 'units'),
+  });
+
+  const { data: conversionLogs = [], isLoading: logsLoading } = useQuery({
+    queryKey: ['inventory-conversion-logs', user?.id, activeBranchId],
+    queryFn: () => inventoryApi.getConversionLogs(),
+    enabled: tab === 'units' && canManageItems,
   });
 
   const warehouseItems = useMemo(
@@ -204,11 +243,18 @@ export function InventoryPage() {
           ? {
               recipeLines: row.recipeLines
                 .filter((rl) => rl.warehouseItemId && rl.quantity !== '')
-                .map((rl) => ({
-                  ...(rl.id ? { id: rl.id } : {}),
-                  warehouseItemId: rl.warehouseItemId,
-                  quantity: Number(rl.quantity),
-                })),
+                .map((rl) => {
+                  const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                  const baseQty = warehouse
+                    ? recipeQtyToBase(warehouse, Number(rl.quantity), rl.deductUnit)
+                    : Math.round(Number(rl.quantity) || 0);
+                  return {
+                    ...(rl.id ? { id: rl.id } : {}),
+                    warehouseItemId: rl.warehouseItemId,
+                    quantity: baseQty,
+                  };
+                })
+                .filter((rl) => rl.quantity > 0),
             }
           : {}),
       }));
@@ -222,7 +268,7 @@ export function InventoryPage() {
         itemKind === CafeteriaItemKind.Menu;
       const variants = needsVariants ? buildVariantsPayload(includeRecipes) : [];
 
-      const unitPayload = formContext === 'warehouse' && isStockKind(itemKind)
+      const unitPayload = isStockKind(itemKind)
         ? {
             baseUnitId: baseUnitId || undefined,
             largeUnitId: largeUnitId || undefined,
@@ -230,12 +276,24 @@ export function InventoryPage() {
           }
         : {};
 
+      const hasLarge = !!largeUnitId && Number(unitsPerLarge) > 1;
+      const thresholdBase =
+        formContext === 'menu'
+          ? 0
+          : enteredQtyToBase(
+              Number(itemThreshold) || 0,
+              itemThresholdUnit as InventoryUnitKind,
+              Number(unitsPerLarge) || 1,
+              hasLarge
+            );
+
       if (editingItem) {
         return cafeteriaApi.updateItem(editingItem.id, {
           name: itemName.trim(),
           kind: itemKind,
           nameAr: itemNameAr.trim() || undefined,
-          minThreshold: Number(itemThreshold) || 0,
+          // Menu/sell products have no stock of their own — never require a min threshold.
+          minThreshold: thresholdBase,
           isActive: itemIsActive,
           variants,
           ...unitPayload,
@@ -247,7 +305,9 @@ export function InventoryPage() {
         kind: itemKind,
         nameAr: itemNameAr.trim() || undefined,
         currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
-        minThreshold: Number(itemThreshold) || 0,
+        initialStockUnit:
+          formContext === 'warehouse' && hasLarge ? itemQtyUnit : InventoryUnitKind.Base,
+        minThreshold: thresholdBase,
         variants: variants.map(({ name, sellPrice, recipeLines }) => ({
           name,
           sellPrice,
@@ -299,13 +359,80 @@ export function InventoryPage() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const createUnitMutation = useMutation({
+    mutationFn: () =>
+      inventoryApi.createUnit({
+        name: newUnitName.trim(),
+        nameAr: newUnitNameAr.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setNewUnitName('');
+      setNewUnitNameAr('');
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const updateUnitMutation = useMutation({
+    mutationFn: () =>
+      inventoryApi.updateUnit(editingUnit!.id, {
+        name: editUnitName.trim(),
+        nameAr: editUnitNameAr.trim() || null,
+        isActive: editUnitActive,
+      }),
+    onSuccess: () => {
+      setEditingUnit(null);
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const toggleUnitMutation = useMutation({
+    mutationFn: (unit: InventoryUnit) =>
+      inventoryApi.updateUnit(unit.id, {
+        name: unit.name,
+        nameAr: unit.nameAr,
+        isActive: !unit.isActive,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['inventory-units'] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const deleteUnitMutation = useMutation({
+    mutationFn: (id: string) => inventoryApi.deleteUnit(id),
+    onSuccess: (_data, id) => {
+      setError('');
+      queryClient.setQueriesData<InventoryUnit[]>({ queryKey: ['inventory-units'] }, (old) =>
+        old?.filter((u) => u.id !== id)
+      );
+      queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function openEditUnit(unit: InventoryUnit) {
+    setEditingUnit(unit);
+    setEditUnitName(unit.name);
+    setEditUnitNameAr(unit.nameAr ?? '');
+    setEditUnitActive(unit.isActive);
+    setError('');
+  }
+
   const saveAddonMutation = useMutation({
     mutationFn: () => {
+      const warehouse = warehouseItems.find((w) => w.id === addonWarehouseId);
+      const deductQuantity = warehouse
+        ? recipeQtyToBase(warehouse, Number(addonDeductQty) || 0, addonDeductUnit)
+        : Math.round(Number(addonDeductQty) || 1);
+      if (deductQuantity <= 0) throw new Error(t('inventory.deductQty'));
       const payload = {
         name: addonName.trim(),
         sellPrice: Number(addonPrice),
         warehouseItemId: addonWarehouseId,
-        deductQuantity: Number(addonDeductQty) || 1,
+        deductQuantity,
       };
       if (editingAddon) {
         return cafeteriaApi.updateAddOn(editingAddon.id, { ...payload, isActive: addonIsActive });
@@ -336,13 +463,18 @@ export function InventoryPage() {
           if (voucherType === StockVoucherType.StockIn && qty <= 0) return null;
           if (voucherType === StockVoucherType.StockCount && qty < 0) return null;
           if (voucherType === StockVoucherType.Settlement) {
+            // Absolute on-hand always entered in small (base) unit.
             const delta = qty - item.currentQuantity;
             if (delta === 0) return null;
             return { cafeteriaItemId: item.id, quantity: delta };
           }
           if (voucherType === StockVoucherType.StockIn) {
-            return { cafeteriaItemId: item.id, quantity: qty, unit: InventoryUnitKind.Base };
+            const unit = hasLargeUnit(item)
+              ? (voucherLineUnits[item.id] ?? InventoryUnitKind.Base)
+              : InventoryUnitKind.Base;
+            return { cafeteriaItemId: item.id, quantity: qty, unit };
           }
+          // Stock count: absolute qty in small unit.
           return { cafeteriaItemId: item.id, quantity: qty };
         })
         .filter(Boolean) as { cafeteriaItemId: string; quantity: number; unit?: number }[];
@@ -359,6 +491,7 @@ export function InventoryPage() {
     onSuccess: () => {
       setVoucherOpen(false);
       setVoucherLines({});
+      setVoucherLineUnits({});
       setVoucherNotes('');
       setError('');
       queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
@@ -414,7 +547,9 @@ export function InventoryPage() {
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
-    setItemThreshold('5');
+    setItemQtyUnit(InventoryUnitKind.Base);
+    setItemThreshold('0');
+    setItemThresholdUnit(InventoryUnitKind.Base);
     setItemIsActive(true);
     setBaseUnitId('');
     setLargeUnitId('');
@@ -430,14 +565,44 @@ export function InventoryPage() {
     setItemName('');
     setItemNameAr('');
     setItemQty('0');
-    setItemThreshold('5');
+    setItemQtyUnit(InventoryUnitKind.Base);
+    setItemThreshold('0');
+    setItemThresholdUnit(InventoryUnitKind.Base);
     setItemIsActive(true);
-    setBaseUnitId(units[0]?.id ?? '');
+    setBaseUnitId(units.find((u) => u.isActive)?.id ?? units[0]?.id ?? '');
     setLargeUnitId('');
     setUnitsPerLarge('1');
     setVariantRows([newVariantRow()]);
     setError('');
     setItemFormOpen(true);
+  }
+
+  function applyWeightPreset() {
+    const gram =
+      units.find((u) => u.isActive && (isGramUnitName(u.name) || isGramUnitName(u.nameAr))) ??
+      units.find((u) => isGramUnitName(u.name) || isGramUnitName(u.nameAr));
+    const kg =
+      units.find((u) => u.isActive && (isKilogramUnitName(u.name) || isKilogramUnitName(u.nameAr))) ??
+      units.find((u) => isKilogramUnitName(u.name) || isKilogramUnitName(u.nameAr));
+    if (gram) setBaseUnitId(gram.id);
+    if (kg) setLargeUnitId(kg.id);
+    setUnitsPerLarge('1000');
+    setItemQtyUnit(InventoryUnitKind.Large);
+    setItemThresholdUnit(InventoryUnitKind.Base);
+  }
+
+  function applyVolumePreset() {
+    const ml =
+      units.find((u) => u.isActive && (isMilliliterUnitName(u.name) || isMilliliterUnitName(u.nameAr))) ??
+      units.find((u) => isMilliliterUnitName(u.name) || isMilliliterUnitName(u.nameAr));
+    const liter =
+      units.find((u) => u.isActive && (isLiterUnitName(u.name) || isLiterUnitName(u.nameAr))) ??
+      units.find((u) => isLiterUnitName(u.name) || isLiterUnitName(u.nameAr));
+    if (ml) setBaseUnitId(ml.id);
+    if (liter) setLargeUnitId(liter.id);
+    setUnitsPerLarge('1000');
+    setItemQtyUnit(InventoryUnitKind.Large);
+    setItemThresholdUnit(InventoryUnitKind.Base);
   }
 
   function openEditItem(item: CafeteriaItem, ctx: 'warehouse' | 'menu') {
@@ -447,6 +612,8 @@ export function InventoryPage() {
     setItemName(item.name);
     setItemNameAr(item.nameAr ?? '');
     setItemThreshold(String(item.minThreshold));
+    setItemThresholdUnit(InventoryUnitKind.Base);
+    setItemQtyUnit(InventoryUnitKind.Base);
     setItemIsActive(item.isActive);
     setBaseUnitId(resolveUnitId(units, item.baseUnitName));
     setLargeUnitId(resolveUnitId(units, item.largeUnitName));
@@ -459,13 +626,18 @@ export function InventoryPage() {
               name: v.name,
               sellPrice: String(v.sellPrice),
               isActive: v.isActive,
-              recipeLines: (v.recipeLines ?? []).map((rl) =>
-                newRecipeLineRow({
+              recipeLines: (v.recipeLines ?? []).map((rl) => {
+                const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                const mapped = warehouse
+                  ? recipeQtyFromBase(warehouse, rl.quantity)
+                  : { quantity: String(rl.quantity), deductUnit: 'base' as RecipeDeductUnit };
+                return newRecipeLineRow({
                   id: rl.id,
                   warehouseItemId: rl.warehouseItemId,
-                  quantity: String(rl.quantity),
-                })
-              ),
+                  quantity: mapped.quantity,
+                  deductUnit: mapped.deductUnit,
+                });
+              }),
             })
           )
         : [newVariantRow()]
@@ -481,6 +653,7 @@ export function InventoryPage() {
     setAddonPrice('');
     setAddonWarehouseId('');
     setAddonDeductQty('1');
+    setAddonDeductUnit('base');
     setAddonIsActive(true);
     setError('');
   }
@@ -489,8 +662,10 @@ export function InventoryPage() {
     setEditingAddon(null);
     setAddonName('');
     setAddonPrice('');
-    setAddonWarehouseId(warehouseItems[0]?.id ?? '');
+    const first = warehouseItems.find((w) => w.isActive) ?? warehouseItems[0];
+    setAddonWarehouseId(first?.id ?? '');
     setAddonDeductQty('1');
+    setAddonDeductUnit(first ? defaultDeductUnit(first) : 'base');
     setAddonIsActive(true);
     setError('');
     setAddonFormOpen(true);
@@ -501,7 +676,12 @@ export function InventoryPage() {
     setAddonName(addon.name);
     setAddonPrice(String(addon.sellPrice));
     setAddonWarehouseId(addon.warehouseItemId);
-    setAddonDeductQty(String(addon.deductQuantity));
+    const warehouse = warehouseItems.find((w) => w.id === addon.warehouseItemId);
+    const mapped = warehouse
+      ? recipeQtyFromBase(warehouse, addon.deductQuantity)
+      : { quantity: String(addon.deductQuantity), deductUnit: 'base' as RecipeDeductUnit };
+    setAddonDeductQty(mapped.quantity);
+    setAddonDeductUnit(mapped.deductUnit);
     setAddonIsActive(addon.isActive);
     setError('');
     setAddonFormOpen(true);
@@ -576,6 +756,7 @@ export function InventoryPage() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'warehouse', label: t('inventory.warehouse') },
     { id: 'menu', label: t('inventory.menuProducts') },
+    { id: 'units', label: t('inventory.units') },
     { id: 'addons', label: t('inventory.addons') },
     { id: 'vouchers', label: t('inventory.vouchers') },
     { id: 'movements', label: t('inventory.movements') },
@@ -595,6 +776,9 @@ export function InventoryPage() {
             <Icon name="plus" className="h-4 w-4" />
             {t('inventory.addMenuProduct')}
           </Button>
+        )}
+        {tab === 'units' && canManageItems && (
+          <span className="text-sm text-muted">{t('inventory.unitsHint')}</span>
         )}
         {tab === 'addons' && canManageItems && (
           <Button onClick={openCreateAddon}>
@@ -643,6 +827,7 @@ export function InventoryPage() {
       <div className="mb-4 text-sm text-muted">
         {tab === 'warehouse' && t('inventory.warehouseHint')}
         {tab === 'menu' && t('inventory.menuHint')}
+        {tab === 'units' && t('inventory.unitsHint')}
         {tab === 'addons' && t('inventory.addonsHint')}
       </div>
 
@@ -708,8 +893,13 @@ export function InventoryPage() {
                     {item.isActive ? t('common.active') : t('common.inactive')}
                   </Badge>
                 </td>
-                <td className="px-4 py-3">{item.currentQuantity}</td>
-                <td className="px-4 py-3">{item.minThreshold}</td>
+                <td className="px-4 py-3">
+                  <span className="text-sm">{formatStockDisplay(item)}</span>
+                </td>
+                <td className="px-4 py-3">
+                  {item.minThreshold}
+                  {item.baseUnitName ? ` ${item.baseUnitName}` : ''}
+                </td>
                 <td className="px-4 py-3">{formatCurrency(itemStockValue(item))}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
@@ -822,6 +1012,116 @@ export function InventoryPage() {
               </tr>
             ))}
           </DataTable>
+        ))}
+
+      {tab === 'units' &&
+        (canManageItems ? (
+          unitsLoading ? (
+            <PageLoader />
+          ) : (
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[10rem] flex-1">
+                  <Input
+                    label={t('inventory.unitName')}
+                    value={newUnitName}
+                    onChange={(e) => setNewUnitName(e.target.value)}
+                    placeholder={t('inventory.unitNamePlaceholder')}
+                  />
+                </div>
+                <div className="min-w-[10rem] flex-1">
+                  <Input
+                    label={t('inventory.unitNameAr')}
+                    value={newUnitNameAr}
+                    onChange={(e) => setNewUnitNameAr(e.target.value)}
+                  />
+                </div>
+                <Button
+                  loading={createUnitMutation.isPending}
+                  disabled={!newUnitName.trim()}
+                  onClick={() => createUnitMutation.mutate()}
+                >
+                  <Icon name="plus" className="h-4 w-4" />
+                  {t('inventory.addUnit')}
+                </Button>
+              </div>
+
+              {units.length === 0 ? (
+                <p className="text-muted">{t('inventory.noUnits')}</p>
+              ) : (
+                <DataTable headers={[t('inventory.unitName'), t('common.status'), '']}>
+                  {units.map((unit) => (
+                    <tr key={unit.id} className="hover:bg-surface-hover">
+                      <td className="px-4 py-3">{unitName(unit, i18n.language)}</td>
+                      <td className="px-4 py-3">
+                        <Badge status={unit.isActive ? 'gaming' : 'idle'}>
+                          {unit.isActive ? t('common.active') : t('common.inactive')}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEditUnit(unit)}>
+                            {t('users.edit')}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={toggleUnitMutation.isPending}
+                            onClick={() => toggleUnitMutation.mutate(unit)}
+                          >
+                            {unit.isActive ? t('inventory.deactivate') : t('inventory.activate')}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={deleteUnitMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(t('inventory.confirmDeleteUnit'))) {
+                                deleteUnitMutation.mutate(unit.id);
+                              }
+                            }}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </DataTable>
+              )}
+
+              <div>
+                <h3 className="mb-3 text-sm font-medium">{t('inventory.conversionLogs')}</h3>
+                {logsLoading ? (
+                  <PageLoader />
+                ) : conversionLogs.length === 0 ? (
+                  <p className="text-sm text-muted">—</p>
+                ) : (
+                  <ul className="space-y-2 text-sm text-muted">
+                    {conversionLogs.map((log) => (
+                      <li key={log.id} className="rounded-lg border border-border px-3 py-2">
+                        <p className="font-medium text-text">{log.itemName}</p>
+                        <p>
+                          {log.oldUnitsPerLarge} → {log.newUnitsPerLarge}
+                          {' · '}
+                          {log.oldBaseUnitName}
+                          {log.oldLargeUnitName ? ` / ${log.oldLargeUnitName}` : ''}
+                          {' → '}
+                          {log.newBaseUnitName}
+                          {log.newLargeUnitName ? ` / ${log.newLargeUnitName}` : ''}
+                        </p>
+                        <p className="text-xs">
+                          {log.changedByName} · {new Date(log.createdAt).toLocaleString()}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )
+        ) : (
+          <p className="text-muted">{t('inventory.units')}</p>
         ))}
 
       {tab === 'addons' &&
@@ -960,8 +1260,12 @@ export function InventoryPage() {
         {adjustItem && (
           <div className="space-y-4">
             <p className="font-medium">{itemLabel(adjustItem)}</p>
+            <p className="text-sm text-muted">
+              {t('inventory.stockAvailable')}: {formatStockDisplay(adjustItem)}
+            </p>
+            <p className="text-xs text-muted">{t('inventory.absoluteBaseHint')}</p>
             <Input
-              label={t('inventory.newQty')}
+              label={`${t('inventory.newQty')} (${adjustItem.baseUnitName || t('inventory.baseUnit')})`}
               type="number"
               value={newQty}
               onChange={(e) => setNewQty(e.target.value)}
@@ -982,11 +1286,22 @@ export function InventoryPage() {
 
       <Modal
         open={voucherOpen}
-        onClose={() => setVoucherOpen(false)}
+        onClose={() => {
+          setVoucherOpen(false);
+          setVoucherLines({});
+          setVoucherLineUnits({});
+        }}
         title={voucherTypeLabel(voucherType)}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setVoucherOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setVoucherOpen(false);
+                setVoucherLines({});
+                setVoucherLineUnits({});
+              }}
+            >
               {t('session.cancel')}
             </Button>
             <Button loading={createVoucherMutation.isPending} onClick={() => createVoucherMutation.mutate()}>
@@ -1005,28 +1320,77 @@ export function InventoryPage() {
           <div className="max-h-72 space-y-2 overflow-y-auto">
             {stockItems
               .filter((i) => i.isActive)
-              .map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{itemLabel(item)}</p>
-                    <p className="text-xs text-muted">
-                      {t('inventory.systemQty')}: {item.currentQuantity}
-                    </p>
+              .map((item) => {
+                const allowLarge =
+                  voucherType === StockVoucherType.StockIn && hasLargeUnit(item);
+                const lineUnit = allowLarge
+                  ? (voucherLineUnits[item.id] ?? InventoryUnitKind.Base)
+                  : InventoryUnitKind.Base;
+                const entered = voucherLines[item.id];
+                const basePreview =
+                  entered !== undefined && entered !== '' && !Number.isNaN(Number(entered))
+                    ? toBaseQuantity(item, Number(entered), lineUnit as InventoryUnitKind)
+                    : null;
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-wrap items-end justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{itemLabel(item)}</p>
+                      <p className="text-xs text-muted">
+                        {t('inventory.systemQty')}: {formatStockDisplay(item)}
+                      </p>
+                      {basePreview != null && allowLarge && lineUnit === InventoryUnitKind.Large && (
+                        <p className="text-xs text-muted">
+                          {t('inventory.storesAsBase', {
+                            qty: basePreview,
+                            unit: item.baseUnitName || t('inventory.baseUnit'),
+                          })}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-end gap-2">
+                      <Input
+                        type="number"
+                        className="w-24"
+                        placeholder={
+                          voucherType === StockVoucherType.Settlement
+                            ? String(item.currentQuantity)
+                            : '0'
+                        }
+                        value={voucherLines[item.id] ?? ''}
+                        onChange={(e) =>
+                          setVoucherLines((prev) => ({ ...prev, [item.id]: e.target.value }))
+                        }
+                      />
+                      {allowLarge ? (
+                        <select
+                          className="w-28 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                          value={lineUnit}
+                          onChange={(e) =>
+                            setVoucherLineUnits((prev) => ({
+                              ...prev,
+                              [item.id]: Number(e.target.value),
+                            }))
+                          }
+                        >
+                          <option value={InventoryUnitKind.Base}>
+                            {item.baseUnitName || t('inventory.baseUnit')}
+                          </option>
+                          <option value={InventoryUnitKind.Large}>
+                            {item.largeUnitName || t('inventory.largeUnit')}
+                          </option>
+                        </select>
+                      ) : (
+                        <span className="mb-2 w-20 text-xs text-muted">
+                          {item.baseUnitName || t('inventory.baseUnit')}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <Input
-                    type="number"
-                    className="w-24 shrink-0"
-                    placeholder={
-                      voucherType === StockVoucherType.Settlement ? String(item.currentQuantity) : '0'
-                    }
-                    value={voucherLines[item.id] ?? ''}
-                    onChange={(e) => setVoucherLines((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                  />
-                </div>
-              ))}
+                );
+              })}
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
         </div>
@@ -1083,6 +1447,17 @@ export function InventoryPage() {
 
           {formContext === 'warehouse' && isStockKind(itemKind) && (
             <>
+              <p className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">
+                {t('inventory.qtyRule')}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={applyWeightPreset}>
+                  {t('inventory.weightPreset')}
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={applyVolumePreset}>
+                  {t('inventory.volumePreset')}
+                </Button>
+              </div>
               <div>
                 <label className="mb-1 block text-sm text-muted">{t('inventory.baseUnit')}</label>
                 <select
@@ -1103,7 +1478,14 @@ export function InventoryPage() {
                 <select
                   className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                   value={largeUnitId}
-                  onChange={(e) => setLargeUnitId(e.target.value)}
+                  onChange={(e) => {
+                    setLargeUnitId(e.target.value);
+                    if (!e.target.value) {
+                      setItemQtyUnit(InventoryUnitKind.Base);
+                      setItemThresholdUnit(InventoryUnitKind.Base);
+                      setUnitsPerLarge('1');
+                    }
+                  }}
                 >
                   <option value="">{t('inventory.none')}</option>
                   {units
@@ -1116,48 +1498,120 @@ export function InventoryPage() {
                 </select>
               </div>
               {largeUnitId && (
-                <Input
-                  label={t('inventory.unitsPerLarge')}
-                  type="number"
-                  min={2}
-                  value={unitsPerLarge}
-                  onChange={(e) => setUnitsPerLarge(e.target.value)}
-                />
-              )}
-              <Input
-                label={t('inventory.threshold')}
-                type="number"
-                value={itemThreshold}
-                onChange={(e) => setItemThreshold(e.target.value)}
-              />
-              {editingItem ? (
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={itemIsActive}
-                    onChange={(e) => setItemIsActive(e.target.checked)}
+                <>
+                  <Input
+                    label={t('inventory.unitsPerLarge')}
+                    type="number"
+                    min={2}
+                    value={unitsPerLarge}
+                    onChange={(e) => setUnitsPerLarge(e.target.value)}
                   />
-                  {t('common.active')}
-                </label>
-              ) : (
-                <Input
-                  label={t('inventory.initialStock')}
-                  type="number"
-                  value={itemQty}
-                  onChange={(e) => setItemQty(e.target.value)}
-                />
+                  {editingItem &&
+                    Number(unitsPerLarge) !== (editingItem.unitsPerLarge || 1) && (
+                      <p className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                        {t('inventory.conversionChangeWarn')}
+                      </p>
+                    )}
+                </>
               )}
+              <p className="text-xs text-muted">{t('inventory.weightStockHint')}</p>
+              {(() => {
+                const baseU = units.find((u) => u.id === baseUnitId);
+                const largeU = units.find((u) => u.id === largeUnitId);
+                const baseLabel = baseU ? unitName(baseU, i18n.language) : t('inventory.baseUnit');
+                const largeLabel = largeU ? unitName(largeU, i18n.language) : t('inventory.largeUnit');
+                const hasLarge = !!largeUnitId && Number(unitsPerLarge) > 1;
+                const factor = Number(unitsPerLarge) || 1;
+                const thresholdBase = enteredQtyToBase(
+                  Number(itemThreshold) || 0,
+                  itemThresholdUnit as InventoryUnitKind,
+                  factor,
+                  hasLarge
+                );
+                const stockBase = enteredQtyToBase(
+                  Number(itemQty) || 0,
+                  itemQtyUnit as InventoryUnitKind,
+                  factor,
+                  hasLarge
+                );
+                return (
+                  <>
+                    <div className="space-y-1">
+                      <label className="block text-sm text-muted">{t('inventory.thresholdOptional')}</label>
+                      <div className="flex flex-wrap gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          className="min-w-[8rem] flex-1"
+                          value={itemThreshold}
+                          onChange={(e) => setItemThreshold(e.target.value)}
+                        />
+                        {hasLarge ? (
+                          <select
+                            className="w-32 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                            value={itemThresholdUnit}
+                            onChange={(e) => setItemThresholdUnit(Number(e.target.value))}
+                          >
+                            <option value={InventoryUnitKind.Base}>{baseLabel}</option>
+                            <option value={InventoryUnitKind.Large}>{largeLabel}</option>
+                          </select>
+                        ) : (
+                          <span className="self-center text-xs text-muted">{baseLabel}</span>
+                        )}
+                      </div>
+                      {hasLarge && itemThresholdUnit === InventoryUnitKind.Large && (
+                        <p className="text-xs text-muted">
+                          {t('inventory.storesAsBase', { qty: thresholdBase, unit: baseLabel })}
+                        </p>
+                      )}
+                    </div>
+                    {editingItem ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={itemIsActive}
+                          onChange={(e) => setItemIsActive(e.target.checked)}
+                        />
+                        {t('common.active')}
+                      </label>
+                    ) : (
+                      <div className="space-y-1">
+                        <label className="block text-sm text-muted">{t('inventory.initialStock')}</label>
+                        <div className="flex flex-wrap gap-2">
+                          <Input
+                            type="number"
+                            className="min-w-[8rem] flex-1"
+                            value={itemQty}
+                            onChange={(e) => setItemQty(e.target.value)}
+                          />
+                          {hasLarge ? (
+                            <select
+                              className="w-32 rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                              value={itemQtyUnit}
+                              onChange={(e) => setItemQtyUnit(Number(e.target.value))}
+                            >
+                              <option value={InventoryUnitKind.Base}>{baseLabel}</option>
+                              <option value={InventoryUnitKind.Large}>{largeLabel}</option>
+                            </select>
+                          ) : (
+                            <span className="self-center text-xs text-muted">{baseLabel}</span>
+                          )}
+                        </div>
+                        {hasLarge && (
+                          <p className="text-xs text-muted">
+                            {t('inventory.storesAsBase', { qty: stockBase, unit: baseLabel })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </>
           )}
 
           {formContext === 'menu' && (
             <>
-              <Input
-                label={t('inventory.threshold')}
-                type="number"
-                value={itemThreshold}
-                onChange={(e) => setItemThreshold(e.target.value)}
-              />
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -1168,6 +1622,9 @@ export function InventoryPage() {
               </label>
               {itemKind === CafeteriaItemKind.SellAsIs && (
                 <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+              )}
+              {itemKind === CafeteriaItemKind.Menu && (
+                <p className="text-xs text-muted">{t('inventory.recipeWeightHint')}</p>
               )}
             </>
           )}
@@ -1240,51 +1697,105 @@ export function InventoryPage() {
                           {t('inventory.addRecipeLine')}
                         </Button>
                       </div>
-                      {row.recipeLines.map((rl) => (
-                        <div key={rl.key} className="flex flex-wrap items-end gap-2">
-                          <div className="min-w-[10rem] flex-1">
-                            <label className="mb-1 block text-xs text-muted">
-                              {t('inventory.warehouseItem')}
-                            </label>
-                            <select
-                              className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
-                              value={rl.warehouseItemId}
-                              onChange={(e) =>
-                                updateRecipeLine(row.key, rl.key, { warehouseItemId: e.target.value })
-                              }
-                            >
-                              <option value="">{t('inventory.selectWarehouseItem')}</option>
-                              {warehouseItems
-                                .filter((w) => w.isActive)
-                                .map((w) => (
-                                  <option key={w.id} value={w.id}>
-                                    {itemLabel(w)} ({w.currentQuantity})
+                      {row.recipeLines.map((rl) => {
+                        const warehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                        const weight = warehouse ? isWeightItem(warehouse) : false;
+                        const volume = warehouse ? isVolumeItem(warehouse) : false;
+                        const basePreview =
+                          warehouse && rl.quantity !== ''
+                            ? recipeQtyToBase(warehouse, Number(rl.quantity), rl.deductUnit)
+                            : 0;
+                        return (
+                          <div key={rl.key} className="space-y-1">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <div className="min-w-[10rem] flex-1">
+                                <label className="mb-1 block text-xs text-muted">
+                                  {t('inventory.warehouseItem')}
+                                </label>
+                                <select
+                                  className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                                  value={rl.warehouseItemId}
+                                  onChange={(e) => {
+                                    const id = e.target.value;
+                                    const wh = warehouseItems.find((w) => w.id === id);
+                                    updateRecipeLine(row.key, rl.key, {
+                                      warehouseItemId: id,
+                                      deductUnit: wh ? defaultDeductUnit(wh) : 'base',
+                                    });
+                                  }}
+                                >
+                                  <option value="">{t('inventory.selectWarehouseItem')}</option>
+                                  {warehouseItems
+                                    .filter((w) => w.isActive)
+                                    .map((w) => (
+                                      <option key={w.id} value={w.id}>
+                                        {itemLabel(w)} ({w.currentQuantity} {w.baseUnitName})
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                              <div className="w-24">
+                                <Input
+                                  label={t('inventory.deductQty')}
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={rl.quantity}
+                                  onChange={(e) =>
+                                    updateRecipeLine(row.key, rl.key, { quantity: e.target.value })
+                                  }
+                                />
+                              </div>
+                              <div className="w-28">
+                                <label className="mb-1 block text-xs text-muted">
+                                  {t('inventory.deductUnit')}
+                                </label>
+                                <select
+                                  className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                                  value={rl.deductUnit}
+                                  onChange={(e) =>
+                                    updateRecipeLine(row.key, rl.key, {
+                                      deductUnit: e.target.value as RecipeDeductUnit,
+                                    })
+                                  }
+                                >
+                                  {weight && (
+                                    <>
+                                      <option value="gram">{t('inventory.unitGram')}</option>
+                                      <option value="kilogram">{t('inventory.unitKilogram')}</option>
+                                    </>
+                                  )}
+                                  {volume && (
+                                    <>
+                                      <option value="milliliter">{t('inventory.unitMilliliter')}</option>
+                                      <option value="liter">{t('inventory.unitLiter')}</option>
+                                    </>
+                                  )}
+                                  <option value="base">
+                                    {warehouse?.baseUnitName || t('inventory.baseUnit')}
                                   </option>
-                                ))}
-                            </select>
+                                </select>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeRecipeLine(row.key, rl.key)}
+                              >
+                                {t('common.delete')}
+                              </Button>
+                            </div>
+                            {warehouse && basePreview > 0 && (
+                              <p className="text-xs text-muted">
+                                {t('inventory.deductPreview', {
+                                  qty: basePreview,
+                                  unit: warehouse.baseUnitName,
+                                })}
+                              </p>
+                            )}
                           </div>
-                          <div className="w-24">
-                            <Input
-                              label={t('inventory.qty')}
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={rl.quantity}
-                              onChange={(e) =>
-                                updateRecipeLine(row.key, rl.key, { quantity: e.target.value })
-                              }
-                            />
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeRecipeLine(row.key, rl.key)}
-                          >
-                            {t('common.delete')}
-                          </Button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1322,26 +1833,79 @@ export function InventoryPage() {
             <select
               className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
               value={addonWarehouseId}
-              onChange={(e) => setAddonWarehouseId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                setAddonWarehouseId(id);
+                const wh = warehouseItems.find((w) => w.id === id);
+                if (wh) setAddonDeductUnit(defaultDeductUnit(wh));
+              }}
             >
               <option value="">{t('inventory.selectWarehouseItem')}</option>
               {warehouseItems
                 .filter((w) => w.isActive)
                 .map((w) => (
                   <option key={w.id} value={w.id}>
-                    {itemLabel(w)} ({w.currentQuantity})
+                    {itemLabel(w)} ({w.currentQuantity} {w.baseUnitName})
                   </option>
                 ))}
             </select>
           </div>
-          <Input
-            label={t('inventory.deductQty')}
-            type="number"
-            min={0}
-            step="0.01"
-            value={addonDeductQty}
-            onChange={(e) => setAddonDeductQty(e.target.value)}
-          />
+          {(() => {
+            const warehouse = warehouseItems.find((w) => w.id === addonWarehouseId);
+            const weight = warehouse ? isWeightItem(warehouse) : false;
+            const volume = warehouse ? isVolumeItem(warehouse) : false;
+            const basePreview = warehouse
+              ? recipeQtyToBase(warehouse, Number(addonDeductQty) || 0, addonDeductUnit)
+              : 0;
+            return (
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[8rem] flex-1">
+                    <Input
+                      label={t('inventory.deductQty')}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={addonDeductQty}
+                      onChange={(e) => setAddonDeductQty(e.target.value)}
+                    />
+                  </div>
+                  <div className="w-28">
+                    <label className="mb-1 block text-xs text-muted">{t('inventory.deductUnit')}</label>
+                    <select
+                      className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                      value={addonDeductUnit}
+                      onChange={(e) => setAddonDeductUnit(e.target.value as RecipeDeductUnit)}
+                    >
+                      {weight && (
+                        <>
+                          <option value="gram">{t('inventory.unitGram')}</option>
+                          <option value="kilogram">{t('inventory.unitKilogram')}</option>
+                        </>
+                      )}
+                      {volume && (
+                        <>
+                          <option value="milliliter">{t('inventory.unitMilliliter')}</option>
+                          <option value="liter">{t('inventory.unitLiter')}</option>
+                        </>
+                      )}
+                      <option value="base">
+                        {warehouse?.baseUnitName || t('inventory.baseUnit')}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+                {warehouse && basePreview > 0 && (
+                  <p className="text-xs text-muted">
+                    {t('inventory.deductPreview', {
+                      qty: basePreview,
+                      unit: warehouse.baseUnitName,
+                    })}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           {editingAddon && (
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -1358,6 +1922,42 @@ export function InventoryPage() {
             loading={saveAddonMutation.isPending}
             disabled={!addonName.trim() || !addonWarehouseId || addonPrice === ''}
             onClick={() => saveAddonMutation.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editingUnit}
+        onClose={() => setEditingUnit(null)}
+        title={t('inventory.editUnit')}
+      >
+        <div className="space-y-3">
+          <Input
+            label={t('inventory.unitName')}
+            value={editUnitName}
+            onChange={(e) => setEditUnitName(e.target.value)}
+          />
+          <Input
+            label={t('inventory.unitNameAr')}
+            value={editUnitNameAr}
+            onChange={(e) => setEditUnitNameAr(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={editUnitActive}
+              onChange={(e) => setEditUnitActive(e.target.checked)}
+            />
+            {t('common.active')}
+          </label>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            loading={updateUnitMutation.isPending}
+            disabled={!editUnitName.trim()}
+            onClick={() => updateUnitMutation.mutate()}
           >
             {t('common.save')}
           </Button>
@@ -1411,7 +2011,10 @@ function VoucherCard({
       <ul className="mb-3 space-y-1 text-sm text-muted">
         {voucher.lines.map((l) => (
           <li key={l.id}>
-            {l.itemName}: {l.quantity}
+            {l.itemName}:{' '}
+            {l.enteredQuantity != null && l.enteredUnit === InventoryUnitKind.Large
+              ? `${l.enteredQuantity} → ${l.quantity}`
+              : l.quantity}
             {l.systemQuantity != null && ` · ${t('inventory.systemQty')} ${l.systemQuantity}`}
             {l.variance != null &&
               l.variance !== 0 &&

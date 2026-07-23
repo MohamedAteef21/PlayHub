@@ -167,15 +167,18 @@ public static class CafeteriaStockPlanner
             }
         }
 
-        var productTotal = variant.SellPrice * quantity;
-        // Recompute add-ons total excluding skipped (still charge for skipped add-ons? User said skip deduct only)
-        // Keep charging — only stock deduct is skipped.
+        var unitPrice = unit == InventoryUnitKind.Large && ItemUnitHelper.HasLargeUnit(item)
+            ? variant.SellPrice * item.UnitsPerLarge
+            : variant.SellPrice;
+
+        var productTotal = unitPrice * quantity;
+        // Keep charging add-ons even when stock deduct is skipped.
         return new SaleLinePlan(
             item,
             variant,
             quantity,
             parentStockDeduct,
-            variant.SellPrice,
+            unitPrice,
             productTotal,
             addOnsTotal,
             productTotal + addOnsTotal,

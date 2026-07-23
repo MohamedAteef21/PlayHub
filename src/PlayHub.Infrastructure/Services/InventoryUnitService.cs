@@ -218,8 +218,18 @@ public class InventoryUnitService : IInventoryUnitService
         var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
         var added = false;
 
-        var defaults = new[] { "قطعة", "علبة", "كرتونة" };
-        foreach (var name in defaults)
+        // Include weight units so recipes can deduct in grams/kg (e.g. sugar bag → tea cup).
+        var defaults = new (string Name, string NameAr)[]
+        {
+            ("قطعة", "قطعة"),
+            ("علبة", "علبة"),
+            ("كرتونة", "كرتونة"),
+            ("جرام", "جرام"),
+            ("كجم", "كجم"),
+            ("مل", "مل"),
+            ("لتر", "لتر"),
+        };
+        foreach (var (name, nameAr) in defaults)
         {
             if (existingSet.Contains(name))
                 continue;
@@ -228,7 +238,7 @@ public class InventoryUnitService : IInventoryUnitService
                 TenantId = _tenantContext.TenantId,
                 OwnerUserId = ownerId,
                 Name = name,
-                NameAr = name,
+                NameAr = nameAr,
                 IsActive = true
             });
             existingSet.Add(name);
