@@ -132,11 +132,24 @@ export const authApi = {
       body: JSON.stringify({ branchId }),
     }),
 
-  logout: (refreshToken: string) =>
-    apiFetch<void>('/auth/logout', {
-      method: 'POST',
-      body: JSON.stringify({ refreshToken }),
-    }),
+  logout: async (refreshToken: string) => {
+    // Best-effort revoke: no refresh-retry, short timeout — UI must not wait on this.
+    const { accessToken } = useAuthStore.getState();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 2500);
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ refreshToken }),
+        signal: ctrl.signal,
+      });
+    } finally {
+      window.clearTimeout(timer);
+    }
+  },
 
   updatePreferences: (data: { preferredLanguage?: string; preferredTheme?: string }) =>
     apiFetch<import('@/types').AuthUser>('/auth/preferences', {

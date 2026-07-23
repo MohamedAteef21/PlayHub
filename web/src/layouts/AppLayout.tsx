@@ -150,12 +150,16 @@ export function AppLayout() {
     return { daysLeft, date: expiry.toLocaleDateString() };
   })();
 
-  async function handleLogout() {
+  function handleLogout() {
+    const token = refreshToken;
     setUserMenuOpen(false);
-    if (refreshToken) await authApi.logout(refreshToken).catch(() => {});
+    // Clear local session immediately — don't wait on the server revoke.
     logout();
     queryClient.clear();
-    navigate('/login');
+    navigate('/login', { replace: true });
+    if (token) {
+      void authApi.logout(token).catch(() => {});
+    }
   }
 
   async function handleSwitchBranch(branchId: string) {
