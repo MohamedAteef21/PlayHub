@@ -66,6 +66,7 @@ public class DataWipeService
             "Screens",
             "device_pricing_plans",
             "device_maintenances",
+            "device_reservations",
             "Devices",
             "Rooms",
             "venue_asset_types",

@@ -63,9 +63,9 @@ internal static class SessionBillingSegments
 
             var matchRate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
             amount = decimal.Round(matchRate * matchCount.Value, 2);
-            var matchLabel = tier == 2
-                ? $"Couple · {matchRate:0.##}/match × {matchCount}"
-                : $"Individual · {matchRate:0.##}/match × {matchCount}";
+            var tierAr = tier == 2 ? "زوجي" : "فردي";
+            var matchLabel =
+                $"ماتش ({tierAr}) · تمن المباراة {matchRate:0.##} × {matchCount} مباريات = {amount:0.##}";
 
             return new BillingSegmentDto(
                 "Match",
@@ -113,31 +113,59 @@ internal static class SessionBillingSegments
         decimal rate;
         decimal qty;
         string qtyUnit;
-        var tierName = tier == 2 ? "Couple" : "Individual";
+        int? peopleCount = null;
+        var tierName = tier == 2 ? "زوجي" : "فردي";
+        var minutes = decimal.Round(billableSeconds / 60m, 2);
 
         if (session.SessionMode == SessionMode.Watching)
         {
-            rate = amount;
-            qty = 1;
-            qtyUnit = "segment";
-            label = $"Watching · {session.WatcherCount ?? 0} guest(s) · {amount:0.##}";
+            var watchers = session.WatcherCount ?? 0;
+            peopleCount = watchers;
+            var perPerson = calc.GetWatchingRatePerPerson(session.RateSnapshot);
+            var watchingBilling = calc.GetWatchingBilling(session.RateSnapshot) ?? WatchingBilling.PerPerson;
+
+            if (watchingBilling == WatchingBilling.PerPerson)
+            {
+                // Flat: تمن الفرد × عدد الأفراد
+                rate = perPerson;
+                qty = watchers;
+                qtyUnit = "guest";
+                label = $"مشاهدة · تمن الفرد {perPerson:0.##} × {watchers} أفراد = {amount:0.##}";
+            }
+            else if (timeUnit == TimeUnit.PerHour)
+            {
+                rate = perPerson;
+                qty = !billingRoundUp
+                    ? decimal.Round(billableSeconds / 3600m, 4)
+                    : (hours > 0 ? (decimal)hours : 0);
+                qtyUnit = "hour";
+                label =
+                    $"مشاهدة · تمن الفرد {perPerson:0.##} × {watchers} أفراد × {qty:0.####} ساعة = {amount:0.##}";
+            }
+            else
+            {
+                rate = perPerson;
+                qty = minutes;
+                qtyUnit = "min";
+                label =
+                    $"مشاهدة · تمن الفرد {perPerson:0.##} × {watchers} أفراد × {qty:0.##} دقيقة = {amount:0.##}";
+            }
         }
         else if (timeUnit == TimeUnit.PerHour)
         {
             rate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
             qty = hours > 0 ? (decimal)hours : 0;
-            // Prefer exact hours from billable seconds when not rounding up, so label matches amount.
             if (!billingRoundUp)
                 qty = decimal.Round(billableSeconds / 3600m, 4);
             qtyUnit = "hour";
-            label = $"{tierName} · {rate:0.##}/h × {qty:0.####}h";
+            label = $"لعب ({tierName}) · سعر الساعة {rate:0.##} × {qty:0.####} ساعة = {amount:0.##}";
         }
         else
         {
             rate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
-            qty = decimal.Round(billableSeconds / 60m, 2);
+            qty = minutes;
             qtyUnit = "min";
-            label = $"{tierName} · {rate:0.##}/unit × {qty:0.##}{qtyUnit}";
+            label = $"لعب ({tierName}) · السعر {rate:0.##} × {qty:0.##} دقيقة = {amount:0.##}";
         }
 
         return new BillingSegmentDto(
@@ -149,6 +177,7 @@ internal static class SessionBillingSegments
             amount,
             session.StartedAt,
             endedAt,
-            tier);
+            tier,
+            peopleCount);
     }
 }
