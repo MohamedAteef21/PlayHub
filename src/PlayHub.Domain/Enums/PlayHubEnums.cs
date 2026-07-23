@@ -160,6 +160,13 @@ public enum ExpenseCategoryKind : short
     Revenue = 1
 }
 
+public enum ReservationStatus : short
+{
+    Pending = 1,
+    Started = 2,
+    Cancelled = 3
+}
+
 public enum NotificationType : short
 {
     LowStock = 1,
