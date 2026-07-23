@@ -38,39 +38,85 @@ public class InventoryUnitService : IInventoryUnitService
 
     public async Task<InventoryUnitDto> CreateAsync(CreateInventoryUnitRequest request, CancellationToken ct = default)
     {
-        var name = request.Name.Trim();
+        if (request is null)
+            throw new InvalidOperationException("Unit payload is required.");
+
+        var name = (request.Name ?? string.Empty).Trim();
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            name = nameAr ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
+        if (name.Length > 100)
+            throw new InvalidOperationException("Unit name is too long (max 100).");
+        if (nameAr is { Length: > 100 })
+            throw new InvalidOperationException("Arabic unit name is too long (max 100).");
 
         var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
-        var exists = await _db.InventoryUnits.AnyAsync(
-            u => u.TenantId == _tenantContext.TenantId
-                 && u.OwnerUserId == ownerId
-                 && u.Name == name, ct);
-        if (exists)
-            throw new InvalidOperationException("This unit name already exists.");
+
+        // Revive soft-deleted unit with the same name for this owner instead of hitting the unique index.
+        var existing = await _db.InventoryUnits
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u =>
+                u.TenantId == _tenantContext.TenantId
+                && u.OwnerUserId == ownerId
+                && u.Name == name, ct);
+
+        if (existing is not null)
+        {
+            if (!existing.IsDeleted && existing.IsActive)
+                throw new InvalidOperationException("This unit name already exists.");
+
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.DeletedByUserId = null;
+            existing.IsActive = true;
+            existing.NameAr = nameAr ?? existing.NameAr;
+            await _db.SaveChangesAsync(ct);
+            await _audit.LogAsync("InventoryUnit.Restored", "InventoryUnit", existing.Id, new { existing.Name }, ct: ct);
+            return new InventoryUnitDto(existing.Id, existing.Name, existing.NameAr, existing.IsActive, existing.CreatedAt);
+        }
 
         var unit = new InventoryUnit
         {
             TenantId = _tenantContext.TenantId,
             OwnerUserId = ownerId,
             Name = name,
-            NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
+            NameAr = nameAr,
             IsActive = true
         };
         _db.InventoryUnits.Add(unit);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            throw new InvalidOperationException("This unit name already exists.");
+        }
+
         await _audit.LogAsync("InventoryUnit.Created", "InventoryUnit", unit.Id, new { unit.Name }, ct: ct);
         return new InventoryUnitDto(unit.Id, unit.Name, unit.NameAr, unit.IsActive, unit.CreatedAt);
     }
 
     public async Task<InventoryUnitDto> UpdateAsync(Guid id, UpdateInventoryUnitRequest request, CancellationToken ct = default)
     {
+        if (request is null)
+            throw new InvalidOperationException("Unit payload is required.");
+
         var unit = await RequireOwnedUnitAsync(id, ct);
 
-        var name = request.Name.Trim();
+        var name = (request.Name ?? string.Empty).Trim();
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            name = nameAr ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name))
             throw new InvalidOperationException("Unit name is required.");
+        if (name.Length > 100)
+            throw new InvalidOperationException("Unit name is too long (max 100).");
+        if (nameAr is { Length: > 100 })
+            throw new InvalidOperationException("Arabic unit name is too long (max 100).");
 
         var ownerId = unit.OwnerUserId ?? await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
         var duplicate = await _db.InventoryUnits.AnyAsync(
@@ -83,11 +129,10 @@ public class InventoryUnitService : IInventoryUnitService
 
         var oldName = unit.Name;
         unit.Name = name;
-        unit.NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+        unit.NameAr = nameAr;
         unit.IsActive = request.IsActive;
         unit.OwnerUserId ??= ownerId;
 
-        // Keep cafeteria item labels in sync — only on this owner's branches.
         if (!string.Equals(oldName, name, StringComparison.Ordinal))
         {
             var ownerBranchIds = await _db.Branches
@@ -112,7 +157,15 @@ public class InventoryUnitService : IInventoryUnitService
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            throw new InvalidOperationException("This unit name already exists.");
+        }
+
         await _audit.LogAsync("InventoryUnit.Updated", "InventoryUnit", unit.Id, new { oldName, unit.Name, unit.IsActive }, ct: ct);
         return new InventoryUnitDto(unit.Id, unit.Name, unit.NameAr, unit.IsActive, unit.CreatedAt);
     }
@@ -235,7 +288,6 @@ public class InventoryUnitService : IInventoryUnitService
             added = true;
         }
 
-        // Pull unit names used on this owner's branches into their private catalog.
         var ownerBranchIds = await _db.Branches
             .Where(b => b.OwnerUserId == ownerId)
             .Select(b => b.Id)
@@ -274,7 +326,17 @@ public class InventoryUnitService : IInventoryUnitService
             }
         }
 
-        if (added)
+        if (!added)
+            return;
+
+        try
+        {
             await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            foreach (var entry in _db.ChangeTracker.Entries<InventoryUnit>().Where(e => e.State == EntityState.Added).ToList())
+                entry.State = EntityState.Detached;
+        }
     }
 }

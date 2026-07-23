@@ -400,7 +400,10 @@ public class InventoryUnitConfiguration : IEntityTypeConfiguration<InventoryUnit
         builder.ToTable("inventory_units");
         builder.Property(x => x.Name).HasMaxLength(100).IsRequired();
         builder.Property(x => x.NameAr).HasMaxLength(100);
-        builder.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+        // Per-owner catalog: same name may exist for different masters in one tenant.
+        builder.HasIndex(x => new { x.TenantId, x.OwnerUserId, x.Name })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0");
         builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
     }
 }

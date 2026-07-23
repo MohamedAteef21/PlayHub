@@ -68,6 +68,15 @@ export function AccountingPage() {
     [categories, entryKind, categoryId]
   );
 
+  const expenseEntries = useMemo(
+    () => expenses.filter((e) => e.categoryKind !== CategoryKind.Revenue),
+    [expenses]
+  );
+  const revenueEntries = useMemo(
+    () => expenses.filter((e) => e.categoryKind === CategoryKind.Revenue),
+    [expenses]
+  );
+
   const addMutation = useMutation({
     mutationFn: () => {
       const data = {
@@ -233,47 +242,61 @@ export function AccountingPage() {
         {categories.length === 0 ? (
           <p className="text-sm text-muted">{t('accounting.noCategories')}</p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          <DataTable
+            headers={[
+              t('accounting.categoryKind'),
+              t('accounting.categoryNameAr'),
+              t('accounting.categoryName'),
+              t('common.status'),
+              ...(canManageCategories ? [t('common.actions')] : []),
+            ]}
+          >
             {categories.map((c) => (
-              <span
-                key={c.id}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5 text-sm"
-              >
-                <span
-                  className={`rounded px-1.5 py-0.5 text-xs ${
-                    c.kind === CategoryKind.Revenue
-                      ? 'bg-success/15 text-success'
-                      : 'bg-danger/15 text-danger'
-                  }`}
-                >
-                  {kindLabel(c.kind)}
-                </span>
-                <span className={!c.isActive ? 'text-muted line-through' : undefined}>
+              <tr key={c.id} className="hover:bg-surface-hover transition-colors">
+                <td className="px-4 py-3">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      c.kind === CategoryKind.Revenue
+                        ? 'bg-success/15 text-success'
+                        : 'bg-danger/15 text-danger'
+                    }`}
+                  >
+                    {kindLabel(c.kind)}
+                  </span>
+                </td>
+                <td className={`px-4 py-3 ${!c.isActive ? 'text-muted line-through' : ''}`}>
+                  {c.nameAr || '—'}
+                </td>
+                <td className={`px-4 py-3 ${!c.isActive ? 'text-muted line-through' : ''}`}>
                   {c.name}
-                  {c.nameAr ? <span className="ms-2 text-muted">· {c.nameAr}</span> : null}
-                </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-muted">
+                  {c.isActive ? t('common.active') : t('common.inactive')}
+                </td>
                 {canManageCategories && (
-                  <>
-                    <Button variant="ghost" size="sm" onClick={() => openEditCategory(c)}>
-                      {t('users.edit')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      loading={deleteCategoryMutation.isPending}
-                      onClick={() => {
-                        if (window.confirm(t('common.confirmDelete'))) {
-                          deleteCategoryMutation.mutate(c.id);
-                        }
-                      }}
-                    >
-                      {t('common.delete')}
-                    </Button>
-                  </>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => openEditCategory(c)}>
+                        {t('users.edit')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        loading={deleteCategoryMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(t('common.confirmDelete'))) {
+                            deleteCategoryMutation.mutate(c.id);
+                          }
+                        }}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </td>
                 )}
-              </span>
+              </tr>
             ))}
-          </div>
+          </DataTable>
         )}
       </div>
 
@@ -291,77 +314,115 @@ export function AccountingPage() {
         </div>
       )}
 
-      <h2 className="mb-3 text-lg font-semibold">{t('accounting.expenseList')}</h2>
       {error && !addOpen && !categoryOpen && <p className="mb-3 text-sm text-danger">{error}</p>}
       {expLoading ? (
         <PageLoader />
-      ) : expenses.length === 0 ? (
-        <p className="text-muted">{t('accounting.noExpenses')}</p>
       ) : (
         <>
-          <DataTable
-            headers={[
-              t('accounting.date'),
-              t('accounting.entryType'),
-              t('accounting.category'),
-              t('accounting.description'),
-              t('accounting.amount'),
-              t('accounting.recordedBy'),
-              ...(canAddExpense ? [t('common.actions')] : []),
-            ]}
-          >
-            {expenses.map((e) => {
-              const isRevenue = e.categoryKind === CategoryKind.Revenue;
-              return (
-                <tr key={e.id} className="hover:bg-surface-hover transition-colors">
-                  <td className="px-4 py-3">{e.expenseDate}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-xs ${
-                        isRevenue ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
-                      }`}
-                    >
-                      {kindLabel(e.categoryKind)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{e.categoryName}</td>
-                  <td className="px-4 py-3">{e.description}</td>
-                  <td className={`px-4 py-3 font-medium ${isRevenue ? 'text-success' : 'text-danger'}`}>
-                    {formatCurrency(e.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
-                  {canAddExpense && (
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)}>
-                          {t('users.edit')}
-                        </Button>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          loading={deleteExpenseMutation.isPending}
-                          onClick={() => {
-                            if (window.confirm(t('common.confirmDelete'))) {
-                              deleteExpenseMutation.mutate(e.id);
-                            }
-                          }}
-                        >
-                          {t('common.delete')}
-                        </Button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </DataTable>
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            totalCount={expensesPage?.totalCount ?? 0}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
-          />
+          <h2 className="mb-3 text-lg font-semibold">{t('accounting.revenueList')}</h2>
+          {revenueEntries.length === 0 ? (
+            <p className="mb-8 text-muted">{t('accounting.noRevenueEntries')}</p>
+          ) : (
+            <div className="mb-8">
+              <DataTable
+                headers={[
+                  t('accounting.date'),
+                  t('accounting.category'),
+                  t('accounting.description'),
+                  t('accounting.amount'),
+                  t('accounting.recordedBy'),
+                  ...(canAddExpense ? [t('common.actions')] : []),
+                ]}
+              >
+                {revenueEntries.map((e) => (
+                  <tr key={e.id} className="hover:bg-surface-hover transition-colors">
+                    <td className="px-4 py-3">{e.expenseDate}</td>
+                    <td className="px-4 py-3">{e.categoryName}</td>
+                    <td className="px-4 py-3">{e.description}</td>
+                    <td className="px-4 py-3 font-medium text-success">{formatCurrency(e.amount)}</td>
+                    <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
+                    {canAddExpense && (
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)}>
+                            {t('users.edit')}
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            loading={deleteExpenseMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(t('common.confirmDelete'))) {
+                                deleteExpenseMutation.mutate(e.id);
+                              }
+                            }}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </DataTable>
+            </div>
+          )}
+
+          <h2 className="mb-3 text-lg font-semibold">{t('accounting.expenseList')}</h2>
+          {expenseEntries.length === 0 ? (
+            <p className="text-muted">{t('accounting.noExpenses')}</p>
+          ) : (
+            <>
+              <DataTable
+                headers={[
+                  t('accounting.date'),
+                  t('accounting.category'),
+                  t('accounting.description'),
+                  t('accounting.amount'),
+                  t('accounting.recordedBy'),
+                  ...(canAddExpense ? [t('common.actions')] : []),
+                ]}
+              >
+                {expenseEntries.map((e) => (
+                  <tr key={e.id} className="hover:bg-surface-hover transition-colors">
+                    <td className="px-4 py-3">{e.expenseDate}</td>
+                    <td className="px-4 py-3">{e.categoryName}</td>
+                    <td className="px-4 py-3">{e.description}</td>
+                    <td className="px-4 py-3 font-medium text-danger">{formatCurrency(e.amount)}</td>
+                    <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
+                    {canAddExpense && (
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)}>
+                            {t('users.edit')}
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            loading={deleteExpenseMutation.isPending}
+                            onClick={() => {
+                              if (window.confirm(t('common.confirmDelete'))) {
+                                deleteExpenseMutation.mutate(e.id);
+                              }
+                            }}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </DataTable>
+              <Pagination
+                page={page}
+                pageSize={pageSize}
+                totalCount={expensesPage?.totalCount ?? 0}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+              />
+            </>
+          )}
         </>
       )}
 

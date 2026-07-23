@@ -599,6 +599,28 @@ export const inventoryApi = {
       method: 'POST',
       body: JSON.stringify({ notes }),
     }),
+  transfer: (data: {
+    fromBranchId: string;
+    toBranchId: string;
+    cafeteriaItemId: string;
+    quantity: number;
+    notes?: string;
+  }) =>
+    apiFetch<{
+      fromBranchId: string;
+      fromBranchName: string;
+      toBranchId: string;
+      toBranchName: string;
+      sourceItemId: string;
+      destinationItemId: string;
+      itemName: string;
+      quantity: number;
+      sourceQuantityAfter: number;
+      destinationQuantityAfter: number;
+    }>('/inventory/transfer', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getUnits: (activeOnly = true) =>
     apiFetch<import('@/types').InventoryUnit[]>(`/inventory/units?activeOnly=${activeOnly}`),
   createUnit: (data: { name: string; nameAr?: string }) =>

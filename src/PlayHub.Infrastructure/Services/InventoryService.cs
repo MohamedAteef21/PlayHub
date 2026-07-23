@@ -89,6 +89,127 @@ public class InventoryService : IInventoryService
         return MapItem(item);
     }
 
+    public async Task<TransferStockResult> TransferStockAsync(TransferStockRequest request, CancellationToken ct = default)
+    {
+        if (!_tenantContext.IsMaster)
+            throw new UnauthorizedAccessException("Only the master can transfer stock between branches.");
+
+        if (request.Quantity <= 0)
+            throw new InvalidOperationException("Transfer quantity must be greater than zero.");
+
+        if (request.FromBranchId == request.ToBranchId)
+            throw new InvalidOperationException("Source and destination branches must be different.");
+
+        var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        var branches = await _db.Branches
+            .Where(b => b.OwnerUserId == ownerId
+                        && (b.Id == request.FromBranchId || b.Id == request.ToBranchId))
+            .ToListAsync(ct);
+
+        var fromBranch = branches.FirstOrDefault(b => b.Id == request.FromBranchId)
+            ?? throw new KeyNotFoundException("Source branch not found.");
+        var toBranch = branches.FirstOrDefault(b => b.Id == request.ToBranchId)
+            ?? throw new KeyNotFoundException("Destination branch not found.");
+
+        var source = await _db.CafeteriaItems
+            .Include(i => i.Variants).ThenInclude(v => v.RecipeLines)
+            .FirstOrDefaultAsync(i => i.Id == request.CafeteriaItemId && i.BranchId == fromBranch.Id, ct)
+            ?? throw new KeyNotFoundException("Source item not found on the source branch.");
+
+        if (source.Kind == CafeteriaItemKind.Menu)
+            throw new InvalidOperationException("Menu recipe items have no stock to transfer — transfer warehouse ingredients instead.");
+
+        if (source.CurrentQuantity < request.Quantity)
+            throw new InvalidOperationException(
+                $"Not enough stock on {fromBranch.Name} (available: {source.CurrentQuantity}).");
+
+        // Match destination catalog row by kind + English name (branch catalogs are independent).
+        var dest = await _db.CafeteriaItems
+            .FirstOrDefaultAsync(i =>
+                i.BranchId == toBranch.Id
+                && i.Kind == source.Kind
+                && i.Name == source.Name, ct);
+
+        if (dest is null)
+        {
+            dest = new CafeteriaItem
+            {
+                TenantId = _tenantContext.TenantId,
+                BranchId = toBranch.Id,
+                Name = source.Name,
+                NameAr = source.NameAr,
+                SellPrice = source.SellPrice,
+                CurrentQuantity = 0,
+                MinThreshold = source.MinThreshold,
+                IsActive = source.IsActive,
+                Kind = source.Kind,
+                BaseUnitName = source.BaseUnitName,
+                LargeUnitName = source.LargeUnitName,
+                UnitsPerLarge = source.UnitsPerLarge
+            };
+            _db.CafeteriaItems.Add(dest);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var transferId = Guid.NewGuid();
+        var note = string.IsNullOrWhiteSpace(request.Notes)
+            ? $"Transfer {request.Quantity} · {fromBranch.Name} → {toBranch.Name}"
+            : request.Notes.Trim();
+
+        source.CurrentQuantity -= request.Quantity;
+        dest.CurrentQuantity += request.Quantity;
+
+        _db.InventoryMovements.Add(new InventoryMovement
+        {
+            TenantId = _tenantContext.TenantId,
+            BranchId = fromBranch.Id,
+            CafeteriaItemId = source.Id,
+            MovementType = InventoryMovementType.TransferOut,
+            QuantityChange = -request.Quantity,
+            ReferenceType = "StockTransfer",
+            ReferenceId = transferId,
+            Notes = note,
+            PerformedByUserId = _tenantContext.UserId
+        });
+
+        _db.InventoryMovements.Add(new InventoryMovement
+        {
+            TenantId = _tenantContext.TenantId,
+            BranchId = toBranch.Id,
+            CafeteriaItemId = dest.Id,
+            MovementType = InventoryMovementType.TransferIn,
+            QuantityChange = request.Quantity,
+            ReferenceType = "StockTransfer",
+            ReferenceId = transferId,
+            Notes = note,
+            PerformedByUserId = _tenantContext.UserId
+        });
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Inventory.Transferred", "CafeteriaItem", source.Id, new
+        {
+            request.FromBranchId,
+            request.ToBranchId,
+            SourceItemId = source.Id,
+            DestItemId = dest.Id,
+            request.Quantity
+        }, ct: ct);
+
+        await _lowStock.CheckAndNotifyAsync(source, ct);
+
+        return new TransferStockResult(
+            fromBranch.Id,
+            fromBranch.Name,
+            toBranch.Id,
+            toBranch.Name,
+            source.Id,
+            dest.Id,
+            source.Name,
+            request.Quantity,
+            source.CurrentQuantity,
+            dest.CurrentQuantity);
+    }
+
     public async Task<PagedResult<StockVoucherDto>> GetVouchersAsync(
         StockVoucherType? type = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
     {

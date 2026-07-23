@@ -29,6 +29,11 @@ public class InventoryController : ControllerBase
     public async Task<IActionResult> Adjust(Guid id, [FromBody] AdjustInventoryRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _inventoryService.AdjustQuantityAsync(id, request, ct));
 
+    [HttpPost("transfer")]
+    [Authorize(Policy = PermissionPolicies.InventoryAdjust)]
+    public async Task<IActionResult> Transfer([FromBody] TransferStockRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _inventoryService.TransferStockAsync(request, ct), StatusCodes.Status201Created);
+
     [HttpGet("vouchers")]
     [Authorize(Policy = PermissionPolicies.InventoryView)]
     public async Task<IActionResult> GetVouchers(
@@ -75,6 +80,10 @@ public class InventoryController : ControllerBase
         catch (KeyNotFoundException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
         }
     }
 }
