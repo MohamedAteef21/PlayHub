@@ -85,6 +85,8 @@ public class ExpenseCategory : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? NameAr { get; set; }
+    /// <summary>Expense (cash out) or Revenue (cash in). Existing rows default to Expense.</summary>
+    public ExpenseCategoryKind Kind { get; set; } = ExpenseCategoryKind.Expense;
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

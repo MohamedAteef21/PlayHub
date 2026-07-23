@@ -619,12 +619,12 @@ export const inventoryApi = {
 
 export const accountingApi = {
   getCategories: () => apiFetch<import('@/types').ExpenseCategory[]>('/accounting/categories'),
-  createCategory: (data: { name: string; nameAr?: string }) =>
+  createCategory: (data: { name: string; nameAr?: string; kind: number }) =>
     apiFetch<import('@/types').ExpenseCategory>('/accounting/categories', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateCategory: (id: string, data: { name: string; nameAr?: string; isActive: boolean }) =>
+  updateCategory: (id: string, data: { name: string; nameAr?: string; kind: number; isActive: boolean }) =>
     apiFetch<import('@/types').ExpenseCategory>(`/accounting/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

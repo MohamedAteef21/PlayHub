@@ -1,10 +1,24 @@
+using PlayHub.Domain.Enums;
+
 namespace PlayHub.Application.Accounting;
 
-public record ExpenseCategoryDto(Guid Id, string Name, string? NameAr, bool IsActive);
+public record ExpenseCategoryDto(
+    Guid Id,
+    string Name,
+    string? NameAr,
+    ExpenseCategoryKind Kind,
+    bool IsActive);
 
-public record CreateExpenseCategoryRequest(string Name, string? NameAr);
+public record CreateExpenseCategoryRequest(
+    string Name,
+    string? NameAr,
+    ExpenseCategoryKind Kind = ExpenseCategoryKind.Expense);
 
-public record UpdateExpenseCategoryRequest(string Name, string? NameAr, bool IsActive);
+public record UpdateExpenseCategoryRequest(
+    string Name,
+    string? NameAr,
+    ExpenseCategoryKind Kind,
+    bool IsActive);
 
 public record ExpenseDto(
     Guid Id,
@@ -12,6 +26,7 @@ public record ExpenseDto(
     string BranchName,
     Guid CategoryId,
     string CategoryName,
+    ExpenseCategoryKind CategoryKind,
     decimal Amount,
     string Description,
     DateOnly ExpenseDate,

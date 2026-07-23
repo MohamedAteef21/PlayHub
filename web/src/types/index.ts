@@ -510,6 +510,8 @@ export interface ExpenseCategory {
   id: string;
   name: string;
   nameAr: string | null;
+  /** 0 = Expense (cash out), 1 = Revenue (cash in) */
+  kind: number;
   isActive: boolean;
 }
 
@@ -519,6 +521,7 @@ export interface Expense {
   branchName: string;
   categoryId: string;
   categoryName: string;
+  categoryKind: number;
   amount: number;
   description: string;
   expenseDate: string;
@@ -563,6 +566,7 @@ export interface CashDrawer {
   cashCafeteria: number;
   cashWalletTopUps: number;
   cashCollectedDebts: number;
+  cashManualIn: number;
   totalCashIn: number;
   cashExpenses: number;
   netCash: number;

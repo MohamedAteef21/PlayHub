@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { accountingApi } from '@/api/client';
@@ -14,6 +14,9 @@ import { Modal } from '@/components/ui/Modal';
 import { DataTable, DateRangeBar, PageHeader, StatCard } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
+
+/** Matches backend ExpenseCategoryKind */
+const CategoryKind = { Expense: 0, Revenue: 1 } as const;
 
 export function AccountingPage() {
   const { t } = useTranslation();
@@ -32,12 +35,14 @@ export function AccountingPage() {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
+  const [entryKind, setEntryKind] = useState<number>(CategoryKind.Expense);
   const [categoryId, setCategoryId] = useState('');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [expenseDate, setExpenseDate] = useState(today());
   const [catName, setCatName] = useState('');
   const [catNameAr, setCatNameAr] = useState('');
+  const [catKind, setCatKind] = useState<number>(CategoryKind.Expense);
   const [catIsActive, setCatIsActive] = useState(true);
   const [error, setError] = useState('');
 
@@ -58,6 +63,11 @@ export function AccountingPage() {
     queryFn: accountingApi.getCategories,
   });
 
+  const filteredCategories = useMemo(
+    () => categories.filter((c) => c.kind === entryKind && (c.isActive || c.id === categoryId)),
+    [categories, entryKind, categoryId]
+  );
+
   const addMutation = useMutation({
     mutationFn: () => {
       const data = {
@@ -77,8 +87,10 @@ export function AccountingPage() {
       setDescription('');
       setCategoryId('');
       setExpenseDate(today());
+      setEntryKind(CategoryKind.Expense);
       queryClient.invalidateQueries({ queryKey: ['accounting-expenses'] });
       queryClient.invalidateQueries({ queryKey: ['accounting-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-cash-drawer'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -88,6 +100,7 @@ export function AccountingPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounting-expenses'] });
       queryClient.invalidateQueries({ queryKey: ['accounting-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports-cash-drawer'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -98,19 +111,25 @@ export function AccountingPage() {
         ? accountingApi.updateCategory(editingCategory.id, {
             name: catName.trim(),
             nameAr: catNameAr.trim() || undefined,
+            kind: catKind,
             isActive: catIsActive,
           })
         : accountingApi.createCategory({
             name: catName.trim(),
             nameAr: catNameAr.trim() || undefined,
+            kind: catKind,
           }),
     onSuccess: (created) => {
       setCategoryOpen(false);
       setEditingCategory(null);
       setCatName('');
       setCatNameAr('');
+      setCatKind(CategoryKind.Expense);
       setCatIsActive(true);
-      if (!editingCategory) setCategoryId(created.id);
+      if (!editingCategory) {
+        setEntryKind(created.kind);
+        setCategoryId(created.id);
+      }
       queryClient.invalidateQueries({ queryKey: ['expense-categories'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -124,6 +143,7 @@ export function AccountingPage() {
 
   function openCreateExpense() {
     setEditingExpense(null);
+    setEntryKind(CategoryKind.Expense);
     setCategoryId('');
     setAmount('');
     setDescription('');
@@ -134,6 +154,7 @@ export function AccountingPage() {
 
   function openEditExpense(e: Expense) {
     setEditingExpense(e);
+    setEntryKind(e.categoryKind ?? CategoryKind.Expense);
     setCategoryId(e.categoryId);
     setAmount(String(e.amount));
     setDescription(e.description);
@@ -146,6 +167,7 @@ export function AccountingPage() {
     setEditingCategory(null);
     setCatName('');
     setCatNameAr('');
+    setCatKind(CategoryKind.Expense);
     setCatIsActive(true);
     setError('');
     setCategoryOpen(true);
@@ -155,9 +177,14 @@ export function AccountingPage() {
     setEditingCategory(c);
     setCatName(c.name);
     setCatNameAr(c.nameAr ?? '');
+    setCatKind(c.kind ?? CategoryKind.Expense);
     setCatIsActive(c.isActive);
     setError('');
     setCategoryOpen(true);
+  }
+
+  function kindLabel(kind: number) {
+    return kind === CategoryKind.Revenue ? t('accounting.kindRevenue') : t('accounting.kindExpense');
   }
 
   return (
@@ -179,7 +206,7 @@ export function AccountingPage() {
           {canAddExpense && (
             <Button onClick={openCreateExpense}>
               <Icon name="plus" className="h-4 w-4" />
-              {t('accounting.addExpense')}
+              {t('accounting.addCashboxEntry')}
             </Button>
           )}
         </div>
@@ -212,6 +239,15 @@ export function AccountingPage() {
                 key={c.id}
                 className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5 text-sm"
               >
+                <span
+                  className={`rounded px-1.5 py-0.5 text-xs ${
+                    c.kind === CategoryKind.Revenue
+                      ? 'bg-success/15 text-success'
+                      : 'bg-danger/15 text-danger'
+                  }`}
+                >
+                  {kindLabel(c.kind)}
+                </span>
                 <span className={!c.isActive ? 'text-muted line-through' : undefined}>
                   {c.name}
                   {c.nameAr ? <span className="ms-2 text-muted">· {c.nameAr}</span> : null}
@@ -266,6 +302,7 @@ export function AccountingPage() {
           <DataTable
             headers={[
               t('accounting.date'),
+              t('accounting.entryType'),
               t('accounting.category'),
               t('accounting.description'),
               t('accounting.amount'),
@@ -273,36 +310,50 @@ export function AccountingPage() {
               ...(canAddExpense ? [t('common.actions')] : []),
             ]}
           >
-            {expenses.map((e) => (
-              <tr key={e.id} className="hover:bg-surface-hover transition-colors">
-                <td className="px-4 py-3">{e.expenseDate}</td>
-                <td className="px-4 py-3">{e.categoryName}</td>
-                <td className="px-4 py-3">{e.description}</td>
-                <td className="px-4 py-3 font-medium text-danger">{formatCurrency(e.amount)}</td>
-                <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
-                {canAddExpense && (
+            {expenses.map((e) => {
+              const isRevenue = e.categoryKind === CategoryKind.Revenue;
+              return (
+                <tr key={e.id} className="hover:bg-surface-hover transition-colors">
+                  <td className="px-4 py-3">{e.expenseDate}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)}>
-                        {t('users.edit')}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        loading={deleteExpenseMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(t('common.confirmDelete'))) {
-                            deleteExpenseMutation.mutate(e.id);
-                          }
-                        }}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </div>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-xs ${
+                        isRevenue ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'
+                      }`}
+                    >
+                      {kindLabel(e.categoryKind)}
+                    </span>
                   </td>
-                )}
-              </tr>
-            ))}
+                  <td className="px-4 py-3">{e.categoryName}</td>
+                  <td className="px-4 py-3">{e.description}</td>
+                  <td className={`px-4 py-3 font-medium ${isRevenue ? 'text-success' : 'text-danger'}`}>
+                    {formatCurrency(e.amount)}
+                  </td>
+                  <td className="px-4 py-3 text-muted">{e.recordedByName}</td>
+                  {canAddExpense && (
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openEditExpense(e)}>
+                          {t('users.edit')}
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          loading={deleteExpenseMutation.isPending}
+                          onClick={() => {
+                            if (window.confirm(t('common.confirmDelete'))) {
+                              deleteExpenseMutation.mutate(e.id);
+                            }
+                          }}
+                        >
+                          {t('common.delete')}
+                        </Button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </DataTable>
           <Pagination
             page={page}
@@ -320,9 +371,23 @@ export function AccountingPage() {
           setAddOpen(false);
           setEditingExpense(null);
         }}
-        title={editingExpense ? t('users.edit') : t('accounting.addExpense')}
+        title={editingExpense ? t('users.edit') : t('accounting.addCashboxEntry')}
       >
         <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('accounting.entryType')}</label>
+            <select
+              value={entryKind}
+              onChange={(e) => {
+                setEntryKind(Number(e.target.value));
+                setCategoryId('');
+              }}
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            >
+              <option value={CategoryKind.Expense}>{t('accounting.kindExpense')}</option>
+              <option value={CategoryKind.Revenue}>{t('accounting.kindRevenue')}</option>
+            </select>
+          </div>
           <div>
             <label className="mb-1 block text-sm text-muted">{t('accounting.category')}</label>
             <select
@@ -331,11 +396,11 @@ export function AccountingPage() {
               className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
             >
               <option value="">{t('accounting.selectCategory')}</option>
-              {categories.filter((c) => c.isActive || c.id === categoryId).map((c) => (
+              {filteredCategories.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            {categories.length === 0 && (
+            {filteredCategories.length === 0 && (
               <p className="mt-2 text-xs text-warning">{t('accounting.createCategoryFirst')}</p>
             )}
           </div>
@@ -365,6 +430,17 @@ export function AccountingPage() {
         <div className="space-y-3">
           <Input label={t('accounting.categoryNameAr')} value={catNameAr} onChange={(e) => setCatNameAr(e.target.value)} />
           <Input label={t('accounting.categoryName')} value={catName} onChange={(e) => setCatName(e.target.value)} />
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('accounting.categoryKind')}</label>
+            <select
+              value={catKind}
+              onChange={(e) => setCatKind(Number(e.target.value))}
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            >
+              <option value={CategoryKind.Expense}>{t('accounting.kindExpense')}</option>
+              <option value={CategoryKind.Revenue}>{t('accounting.kindRevenue')}</option>
+            </select>
+          </div>
           {editingCategory && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={catIsActive} onChange={(e) => setCatIsActive(e.target.checked)} />

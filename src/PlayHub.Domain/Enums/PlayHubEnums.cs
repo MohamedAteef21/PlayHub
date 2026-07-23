@@ -153,6 +153,13 @@ public enum RevenueType : short
     Cafeteria = 2
 }
 
+/// <summary>Whether a cashbox category records money in (revenue) or out (expense).</summary>
+public enum ExpenseCategoryKind : short
+{
+    Expense = 0,
+    Revenue = 1
+}
+
 public enum NotificationType : short
 {
     LowStock = 1,

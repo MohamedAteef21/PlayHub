@@ -29,6 +29,7 @@ public record CashDrawerDto(
     decimal CashCafeteria,
     decimal CashWalletTopUps,
     decimal CashCollectedDebts,
+    decimal CashManualIn,
     decimal TotalCashIn,
     decimal CashExpenses,
     decimal NetCash,

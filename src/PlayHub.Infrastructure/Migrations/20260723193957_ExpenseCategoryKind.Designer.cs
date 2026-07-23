@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PlayHub.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using PlayHub.Infrastructure.Data;
 namespace PlayHub.Infrastructure.Migrations
 {
     [DbContext(typeof(PlayHubDbContext))]
-    partial class PlayHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723193957_ExpenseCategoryKind")]
+    partial class ExpenseCategoryKind
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

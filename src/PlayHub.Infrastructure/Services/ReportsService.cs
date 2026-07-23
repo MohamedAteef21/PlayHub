@@ -179,9 +179,12 @@ public class ReportsService : IReportsService
                 && (w.BranchId == effectiveBranchId || w.BranchId == null))
             .SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
 
-        var cashExpenses = await _db.Expenses
+        var dayCashbox = await _db.Expenses
             .Where(e => e.ExpenseDate == date && e.BranchId == effectiveBranchId)
-            .SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
+            .Select(e => new { e.Amount, e.Category.Kind })
+            .ToListAsync(ct);
+        var cashExpenses = dayCashbox.Where(e => e.Kind == ExpenseCategoryKind.Expense).Sum(e => e.Amount);
+        var cashManualIn = dayCashbox.Where(e => e.Kind == ExpenseCategoryKind.Revenue).Sum(e => e.Amount);
 
         var dayCollections = await _db.CashCollections
             .Where(c => c.BranchId == effectiveBranchId
@@ -194,7 +197,7 @@ public class ReportsService : IReportsService
             .ToListAsync(ct);
 
         var collectedOnDay = dayCollections.Sum(c => c.Amount);
-        var totalCashIn = cashSessions + cashCafeteria + cashWalletTopUps + cashCollectedDebts;
+        var totalCashIn = cashSessions + cashCafeteria + cashWalletTopUps + cashCollectedDebts + cashManualIn;
         var drawerBalance = await ComputeDrawerBalanceAsync(effectiveBranchId, ct);
 
         return new CashDrawerDto(
@@ -204,6 +207,7 @@ public class ReportsService : IReportsService
             cashCafeteria,
             cashWalletTopUps,
             cashCollectedDebts,
+            cashManualIn,
             totalCashIn,
             cashExpenses,
             totalCashIn - cashExpenses,
@@ -263,15 +267,18 @@ public class ReportsService : IReportsService
                 && (w.BranchId == branchId || w.BranchId == null))
             .SumAsync(w => (decimal?)w.Amount, ct) ?? 0m;
 
-        var expenses = await _db.Expenses
+        var cashbox = await _db.Expenses
             .Where(e => e.BranchId == branchId)
-            .SumAsync(e => (decimal?)e.Amount, ct) ?? 0m;
+            .Select(e => new { e.Amount, e.Category.Kind })
+            .ToListAsync(ct);
+        var expenses = cashbox.Where(e => e.Kind == ExpenseCategoryKind.Expense).Sum(e => e.Amount);
+        var manualIn = cashbox.Where(e => e.Kind == ExpenseCategoryKind.Revenue).Sum(e => e.Amount);
 
         var collected = await _db.CashCollections
             .Where(c => c.BranchId == branchId)
             .SumAsync(c => (decimal?)c.Amount, ct) ?? 0m;
 
-        return decimal.Round(cashIn + topUps - expenses - collected, 2);
+        return decimal.Round(cashIn + topUps + manualIn - expenses - collected, 2);
     }
 
     /// <summary>

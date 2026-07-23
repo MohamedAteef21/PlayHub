@@ -153,6 +153,7 @@ export function ReportsPage() {
                 <StatCard label={t('reports.cashCafeteria')} value={formatCurrency(drawer.cashCafeteria)} />
                 <StatCard label={t('reports.cashWalletTopUps')} value={formatCurrency(drawer.cashWalletTopUps)} />
                 <StatCard label={t('reports.cashCollectedDebts')} value={formatCurrency(drawer.cashCollectedDebts)} />
+                <StatCard label={t('reports.cashManualIn')} value={formatCurrency(drawer.cashManualIn)} accent="success" />
               </div>
             </div>
 
