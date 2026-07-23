@@ -93,7 +93,9 @@ public record BillingSegmentDto(
     decimal Amount,
     DateTime StartedAt,
     DateTime EndedAt,
-    int? ControllerTier);
+    int? ControllerTier,
+    /// <summary>Watcher/guest headcount when this segment is watching (for invoice formulas).</summary>
+    int? PeopleCount = null);
 
 public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,

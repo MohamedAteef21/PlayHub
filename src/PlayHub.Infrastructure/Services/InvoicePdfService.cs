@@ -88,21 +88,22 @@ public class InvoicePdfService : IInvoicePdfService
                         col.Item().PaddingTop(6).Text("Billing detail / تفصيل الحساب").Bold();
                         foreach (var seg in segments)
                         {
-                            var detail = seg.QuantityUnit switch
+                            var people = seg.PeopleCount ?? 0;
+                            var formula = seg.QuantityUnit switch
                             {
-                                "match" => $"{seg.Rate:0.##}/match × {seg.Quantity}",
-                                "hour" => $"{seg.Rate:0.##}/h × {seg.Quantity}h",
-                                "min" => $"{seg.Rate:0.##}/min × {seg.Quantity} min",
-                                "guest" => $"{seg.Rate:0.##} × {seg.Quantity} guests",
-                                _ => $"{seg.Rate:0.##} × {seg.Quantity}"
+                                "match" => $"تمن المباراة {seg.Rate:0.##} × {seg.Quantity} مباريات = {seg.Amount:0.##}",
+                                "guest" => $"تمن الفرد {seg.Rate:0.##} × {seg.Quantity} أفراد = {seg.Amount:0.##}",
+                                "hour" when people > 0 =>
+                                    $"تمن الفرد {seg.Rate:0.##} × {people} أفراد × {seg.Quantity:0.####} ساعة = {seg.Amount:0.##}",
+                                "min" when people > 0 =>
+                                    $"تمن الفرد {seg.Rate:0.##} × {people} أفراد × {seg.Quantity:0.##} دقيقة = {seg.Amount:0.##}",
+                                "hour" => $"سعر الساعة {seg.Rate:0.##} × {seg.Quantity:0.####} ساعة = {seg.Amount:0.##}",
+                                "min" => $"السعر {seg.Rate:0.##} × {seg.Quantity:0.##} دقيقة = {seg.Amount:0.##}",
+                                _ => $"{seg.Rate:0.##} × {seg.Quantity} = {seg.Amount:0.##}"
                             };
                             col.Item().Row(r =>
                             {
-                                r.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text(seg.Label);
-                                    c.Item().Text(detail).FontSize(8).FontColor(Colors.Grey.Darken1);
-                                });
+                                r.RelativeItem().Text(formula);
                                 r.ConstantItem(80).AlignRight().Text($"{seg.Amount:0.00}");
                             });
                         }

@@ -1107,25 +1107,79 @@ export function DashboardPage() {
               {(invoiceResult.billingSegments?.length ?? 0) > 0 && (
                 <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
                   <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
-                  {invoiceResult.billingSegments.map((seg, idx) => (
-                    <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
-                      <div className="flex justify-between gap-2 text-xs">
-                        <span className="min-w-0 truncate font-medium">{seg.label}</span>
-                        <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
+                  {invoiceResult.billingSegments.map((seg, idx) => {
+                    const money = (n: number) => formatCurrency(n);
+                    let formula: string;
+                    if (seg.quantityUnit === 'match') {
+                      formula = t('session.formulaMatch', {
+                        rate: money(seg.rate),
+                        count: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'guest') {
+                      formula = t('session.formulaWatching', {
+                        rate: money(seg.rate),
+                        count: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0) {
+                      formula = t('session.formulaWatchingTime', {
+                        rate: money(seg.rate),
+                        people: seg.peopleCount,
+                        hours: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'min' && (seg.peopleCount ?? 0) > 0) {
+                      formula = t('session.formulaWatchingMin', {
+                        rate: money(seg.rate),
+                        people: seg.peopleCount,
+                        mins: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'hour') {
+                      formula = t('session.formulaHourly', {
+                        rate: money(seg.rate),
+                        hours: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'min') {
+                      formula = t('session.formulaMinute', {
+                        rate: money(seg.rate),
+                        mins: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else {
+                      formula = `${money(seg.rate)} × ${seg.quantity} = ${money(seg.amount)}`;
+                    }
+                    return (
+                      <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
+                        <div className="flex justify-between gap-2 text-xs">
+                          <span className="min-w-0 font-medium leading-snug">{formula}</span>
+                          <span className="shrink-0 font-semibold">{money(seg.amount)}</span>
+                        </div>
+                        {seg.quantityUnit === 'match' && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerMatch')}: {money(seg.rate)} · {t('session.matchesCount')}: {seg.quantity}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'guest' && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerPerson')}: {money(seg.rate)} · {t('session.peopleCount')}: {seg.quantity}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0 && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerPerson')}: {money(seg.rate)} · {t('session.peopleCount')}: {seg.peopleCount} · {t('dashboard.consumedTime')}: {seg.quantity} {t('session.hoursShort')}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'hour' && !(seg.peopleCount ?? 0) && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.hourlyRate')}: {money(seg.rate)} · {t('dashboard.consumedTime')}: {seg.quantity} {t('session.hoursShort')}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-[11px] text-muted">
-                        {seg.quantityUnit === 'match'
-                          ? `${formatCurrency(seg.rate)}/${t('dashboard.match')} · ${seg.quantity} ${t('dashboard.match')}`
-                          : seg.quantityUnit === 'hour'
-                            ? `${t('session.hourlyRate')}: ${formatCurrency(seg.rate)} · ${t('dashboard.consumedTime')}: ${seg.quantity} ${t('session.hoursShort')}`
-                            : seg.quantityUnit === 'guest'
-                              ? `${formatCurrency(seg.rate)} · ${seg.quantity} ${t('dashboard.guestsShort')}`
-                              : seg.quantityUnit === 'min'
-                                ? `${formatCurrency(seg.rate)}/${t('dashboard.minutesShort')} · ${t('dashboard.consumedTime')}: ${seg.quantity} ${t('dashboard.minutesShort')}`
-                                : `${t('session.hourlyRate')}: ${formatCurrency(seg.rate)} · ${seg.quantity} ${seg.quantityUnit}`}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               {invoiceResult.roomSurchargeCost > 0 && (

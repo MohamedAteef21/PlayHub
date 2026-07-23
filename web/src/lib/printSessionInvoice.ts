@@ -88,22 +88,29 @@ export function printSessionInvoice(
 
   const segmentsHtml = (detail.billingSegments ?? [])
     .map((s) => {
-      const detailLine =
-        s.quantityUnit === 'match'
-          ? `${money(s.rate)}/match × ${s.quantity}`
-          : s.quantityUnit === 'hour'
-            ? `${money(s.rate)}/h × ${s.quantity}h`
-            : s.quantityUnit === 'guest'
-              ? `${money(s.rate)} × ${s.quantity} guests`
-              : s.quantityUnit === 'min'
-                ? `${money(s.rate)}/min × ${s.quantity} min`
-                : `${money(s.rate)} × ${s.quantity}`;
+      const people = s.peopleCount ?? 0;
+      let detailLine: string;
+      if (s.quantityUnit === 'match') {
+        detailLine = `تمن المباراة ${money(s.rate)} × ${s.quantity} مباريات = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'guest') {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${s.quantity} أفراد = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'hour' && people > 0) {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${people} أفراد × ${s.quantity} ساعة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'min' && people > 0) {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${people} أفراد × ${s.quantity} دقيقة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'hour') {
+        detailLine = `سعر الساعة ${money(s.rate)} × ${s.quantity} ساعة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'min') {
+        detailLine = `السعر ${money(s.rate)} × ${s.quantity} دقيقة = ${money(s.amount)}`;
+      } else {
+        detailLine = `${money(s.rate)} × ${s.quantity} = ${money(s.amount)}`;
+      }
       return `<tr>
         <td>
-          <div>${escapeHtml(s.label)}</div>
-          <div style="color:#666;font-size:11px">${escapeHtml(detailLine)}</div>
+          <div style="font-weight:600">${escapeHtml(detailLine)}</div>
+          <div style="color:#666;font-size:11px">${escapeHtml(s.label)}</div>
         </td>
-        <td style="text-align:end">${money(s.amount)}</td>
+        <td style="text-align:end;font-weight:600">${money(s.amount)}</td>
       </tr>`;
     })
     .join('');

@@ -122,6 +122,7 @@ export interface BillingSegment {
   startedAt: string;
   endedAt: string;
   controllerTier: number | null;
+  peopleCount?: number | null;
 }
 
 export interface SessionDetail {
