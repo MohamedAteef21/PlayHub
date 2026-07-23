@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { formatCurrency, formatDuration, parseServerUtc, useLiveTimer, useSessionHub } from '@/hooks/useSessions';
 import { formatDateTimeEgypt, toEgyptDateTimeLocalInput, egyptLocalInputToUtcIso } from '@/lib/dates';
-import { playTimeUpSound } from '@/lib/timeUpSound';
+import { playEndingSoonSound, playTimeUpSound } from '@/lib/timeUpSound';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
@@ -135,6 +135,7 @@ function DeviceCard({
   onWatchersChange,
   onAddCafeteria,
   onPreviewBill,
+  onTransfer,
   canAddCafeteria,
   dateLocale,
 }: {
@@ -154,6 +155,7 @@ function DeviceCard({
   onWatchersChange: (watcherCount: number) => void;
   onAddCafeteria: () => void;
   onPreviewBill: () => void;
+  onTransfer: () => void;
   canAddCafeteria: boolean;
   dateLocale: string;
 }) {
@@ -210,17 +212,34 @@ function DeviceCard({
               {formatCurrency(session.totalCost)}
             </span>
           </div>
-          {session.plannedDurationMinutes != null && (
-            <div className={`rounded-lg px-2 py-1.5 text-xs ${session.timeExpired || (session.plannedDurationMinutes * 60 - elapsed) <= 0 ? 'animate-pulse bg-danger/15 font-semibold text-danger' : 'bg-primary/10 text-primary'}`}>
-              {session.timeExpired || elapsed >= session.plannedDurationMinutes * 60
-                ? t('dashboard.timeUp')
-                : t('dashboard.remaining', {
-                    time: formatDuration(Math.max(0, session.plannedDurationMinutes * 60 - elapsed)),
-                  })}
-              {' · '}
-              {t('dashboard.bookedFor', { hours: (session.plannedDurationMinutes / 60).toFixed(session.plannedDurationMinutes % 60 === 0 ? 0 : 1) })}
-            </div>
-          )}
+          {session.plannedDurationMinutes != null && (() => {
+            const remainingSec = Math.max(0, session.plannedDurationMinutes * 60 - elapsed);
+            const expired = session.timeExpired || remainingSec <= 0;
+            const endingSoon = !expired && remainingSec > 0 && remainingSec <= 300;
+            return (
+              <div
+                className={`rounded-lg px-2 py-1.5 text-xs ${
+                  expired
+                    ? 'animate-pulse bg-danger/15 font-semibold text-danger'
+                    : endingSoon
+                      ? 'animate-pulse bg-warning/15 font-semibold text-warning'
+                      : 'bg-primary/10 text-primary'
+                }`}
+              >
+                {expired
+                  ? t('dashboard.timeUp')
+                  : endingSoon
+                    ? t('dashboard.endingSoon', { time: formatDuration(remainingSec) })
+                    : t('dashboard.remaining', { time: formatDuration(remainingSec) })}
+                {' · '}
+                {t('dashboard.bookedFor', {
+                  hours: (session.plannedDurationMinutes / 60).toFixed(
+                    session.plannedDurationMinutes % 60 === 0 ? 0 : 1
+                  ),
+                })}
+              </div>
+            );
+          })()}
           {session.plannedDurationMinutes != null && session.status === SessionStatus.Open && (
             <div className="flex gap-1">
               <Button variant="secondary" size="sm" className="flex-1" onClick={() => onExtend(30)}>
@@ -309,6 +328,10 @@ function DeviceCard({
             {t('dashboard.previewBill')}
             {` · ${formatCurrency(session.totalCost)}`}
           </Button>
+          <Button variant="secondary" size="sm" className="w-full" onClick={onTransfer}>
+            <Icon name="arrow" className="h-3.5 w-3.5" />
+            {t('dashboard.transfer')}
+          </Button>
           {session.canChangePricing && (
             <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
               <Icon name="settings" className="h-3.5 w-3.5" />
@@ -396,6 +419,10 @@ export function DashboardPage() {
   const [closeMatchCount, setCloseMatchCount] = useState('1');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
   const [billPreview, setBillPreview] = useState<SessionLive | null>(null);
+  const [transferModal, setTransferModal] = useState<SessionLive | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState('');
+  const [transferError, setTransferError] = useState('');
+  const [transferLoading, setTransferLoading] = useState(false);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
   const [cafCart, setCafCart] = useState<CafCartLine[]>([]);
   const [cafPickItem, setCafPickItem] = useState<CafeteriaItem | null>(null);
@@ -562,13 +589,30 @@ export function DashboardPage() {
   }, [queryClient]);
 
   // Sound the alarm once when a booked session's time runs out (re-arms if time is extended).
+  // Also warn once when remaining time enters the last 5 minutes.
   const timeUpAlertedRef = useRef<Set<string>>(new Set());
+  const endingSoonAlertedRef = useRef<Set<string>>(new Set());
+  const [endingSoonToast, setEndingSoonToast] = useState<string | null>(null);
   useEffect(() => {
     const check = () => {
       for (const s of sessions) {
         if (s.status !== SessionStatus.Open || s.plannedDurationMinutes == null) continue;
         const elapsed = Math.floor((Date.now() - parseServerUtc(s.startedAt)) / 1000) - s.totalPausedSeconds;
-        const expired = elapsed >= s.plannedDurationMinutes * 60;
+        const remaining = s.plannedDurationMinutes * 60 - elapsed;
+        const expired = remaining <= 0;
+        const endingSoon = !expired && remaining > 0 && remaining <= 300;
+
+        if (endingSoon && !endingSoonAlertedRef.current.has(s.id)) {
+          endingSoonAlertedRef.current.add(s.id);
+          playEndingSoonSound();
+          setEndingSoonToast(
+            t('dashboard.endingSoonToast', { device: s.deviceName || s.deviceIdentifier })
+          );
+        } else if ((!endingSoon || expired) && endingSoonAlertedRef.current.has(s.id) && remaining > 300) {
+          // Re-arm only after an extend pushes remaining back above 5 minutes.
+          endingSoonAlertedRef.current.delete(s.id);
+        }
+
         if (expired && !timeUpAlertedRef.current.has(s.id)) {
           timeUpAlertedRef.current.add(s.id);
           playTimeUpSound();
@@ -580,7 +624,13 @@ export function DashboardPage() {
     check();
     const id = setInterval(check, 1000);
     return () => clearInterval(id);
-  }, [sessions]);
+  }, [sessions, t]);
+
+  useEffect(() => {
+    if (!endingSoonToast) return;
+    const id = window.setTimeout(() => setEndingSoonToast(null), 12000);
+    return () => window.clearTimeout(id);
+  }, [endingSoonToast]);
 
   const onClosed = useCallback((sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
@@ -591,6 +641,27 @@ export function DashboardPage() {
   useSessionHub(onUpdate, onClosed);
 
   const sessionMap = new Map(sessions.map((s) => [s.deviceId, s]));
+  const idleTransferTargets = useMemo(() => {
+    if (!dashboard || !transferModal) return [] as { id: string; label: string }[];
+    const occupied = new Set(sessions.map((s) => s.deviceId));
+    const rows: { id: string; label: string }[] = [];
+    for (const room of dashboard.rooms ?? []) {
+      for (const d of room.devices) {
+        if (!d.isActive) continue;
+        if (d.id === transferModal.deviceId) continue;
+        if (occupied.has(d.id)) continue;
+        rows.push({ id: d.id, label: `${d.name} · ${room.name}` });
+      }
+    }
+    for (const d of dashboard.unassignedDevices ?? []) {
+      if (!d.isActive) continue;
+      if (d.id === transferModal.deviceId) continue;
+      if (occupied.has(d.id)) continue;
+      rows.push({ id: d.id, label: `${d.name} · ${t('dashboard.unassignedDevices')}` });
+    }
+    return rows;
+  }, [dashboard, transferModal, sessions, t]);
+
   const reservationMap = useMemo(() => {
     const map = new Map<string, DeviceReservation>();
     for (const reservation of reservations) {
@@ -631,6 +702,24 @@ export function DashboardPage() {
         ? ` · ${t('settings.packageBadge')} ${Math.round((p.packageDurationMinutes / 60) * 10) / 10}${t('session.hoursShort')} = ${formatCurrency(p.packagePrice)}`
         : '';
     return `${p.name} (${unit}${watching}${rate != null ? ` · ${formatCurrency(rate)}` : ''}${pkg})`;
+  }
+
+  async function handleTransfer() {
+    if (!transferModal || !transferTargetId) return;
+    setTransferLoading(true);
+    setTransferError('');
+    try {
+      const live = await sessionsApi.transfer(transferModal.id, transferTargetId);
+      setTransferModal(null);
+      setTransferTargetId('');
+      onUpdate(live);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    } catch (e) {
+      setTransferError(e instanceof Error ? e.message : t('common.error'));
+    } finally {
+      setTransferLoading(false);
+    }
   }
 
   function openSessionForDevice(device: AssetDashboardDevice) {
@@ -1080,6 +1169,22 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {endingSoonToast && (
+        <div
+          className="flex items-start justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+          role="status"
+        >
+          <p className="font-medium">{endingSoonToast}</p>
+          <button
+            type="button"
+            className="shrink-0 text-xs font-semibold underline"
+            onClick={() => setEndingSoonToast(null)}
+          >
+            {t('session.done')}
+          </button>
+        </div>
+      )}
+
       {canSellCafeteria && sessions.length > 0 && (
         <Card className="space-y-3">
           <div>
@@ -1198,6 +1303,12 @@ export function DashboardPage() {
                       if (!session) return;
                       setBillPreview(session);
                     }}
+                    onTransfer={() => {
+                      if (!session) return;
+                      setTransferModal(session);
+                      setTransferTargetId('');
+                      setTransferError('');
+                    }}
                     canAddCafeteria={canSellCafeteria}
                     dateLocale={dateLocale}
                   />
@@ -1269,6 +1380,12 @@ export function DashboardPage() {
                       if (!session) return;
                       setBillPreview(session);
                     }}
+                    onTransfer={() => {
+                      if (!session) return;
+                      setTransferModal(session);
+                      setTransferTargetId('');
+                      setTransferError('');
+                    }}
                     canAddCafeteria={canSellCafeteria}
                     dateLocale={dateLocale}
                   />
@@ -1279,6 +1396,70 @@ export function DashboardPage() {
         )}
         </>
       )}
+
+      <Modal
+        open={!!transferModal}
+        onClose={() => {
+          setTransferModal(null);
+          setTransferTargetId('');
+          setTransferError('');
+        }}
+        title={t('dashboard.transferTitle')}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setTransferModal(null);
+                setTransferTargetId('');
+                setTransferError('');
+              }}
+            >
+              {t('session.cancel')}
+            </Button>
+            <Button
+              loading={transferLoading}
+              disabled={!transferTargetId || idleTransferTargets.length === 0}
+              onClick={() => void handleTransfer()}
+            >
+              {t('dashboard.transferConfirm')}
+            </Button>
+          </>
+        }
+      >
+        {transferModal && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">{t('dashboard.transferHint')}</p>
+            <p className="text-sm">
+              <span className="text-muted">{t('session.device')}: </span>
+              <span className="font-medium">
+                {transferModal.deviceName}
+                {transferModal.roomName ? ` · ${transferModal.roomName}` : ''}
+              </span>
+            </p>
+            {idleTransferTargets.length === 0 ? (
+              <p className="text-sm text-danger">{t('dashboard.transferNoTargets')}</p>
+            ) : (
+              <label className="block space-y-1">
+                <span className="text-sm text-muted">{t('dashboard.transferTarget')}</span>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={transferTargetId}
+                  onChange={(e) => setTransferTargetId(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {idleTransferTargets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {transferError && <p className="text-sm text-danger">{transferError}</p>}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!billPreview}

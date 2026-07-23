@@ -327,6 +327,64 @@ public class SessionService : ISessionService
         return live;
     }
 
+    /// <summary>
+    /// Move an active session to another idle device in the same branch.
+    /// Preserves timer, pauses, cafeteria, billing segments, and planned duration.
+    /// </summary>
+    public async Task<SessionLiveDto> TransferSessionAsync(
+        Guid id, TransferSessionRequest request, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var billingRoundUp = await GetBillingRoundUpAsync(ct);
+
+        var session = await GetMutableActiveSessionAsync(id, branchId, ct);
+        var fromDeviceId = session.DeviceId;
+        var fromRoomId = session.RoomId;
+
+        if (request.TargetDeviceId == fromDeviceId)
+            throw new InvalidOperationException("Session is already on that device.");
+
+        var target = await _db.Devices
+            .Include(d => d.Room)
+            .FirstOrDefaultAsync(d => d.Id == request.TargetDeviceId && d.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Target device not found.");
+
+        if (!target.IsActive)
+            throw new InvalidOperationException("Target device is inactive.");
+
+        if (await _db.Sessions.AnyAsync(
+                s => s.DeviceId == target.Id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Target device already has an active session.");
+
+        if (await _db.DeviceMaintenances.AnyAsync(
+                m => m.DeviceId == target.Id && m.CompletedAt == null, ct))
+            throw new InvalidOperationException("Target device is in maintenance.");
+
+        if (session.SessionMode == SessionMode.Watching
+            && session.WatcherCount is > 0
+            && session.WatcherCount > GetMaxWatchingCapacity(target))
+            throw new InvalidOperationException(
+                $"Target watching capacity is {GetMaxWatchingCapacity(target)}, session has {session.WatcherCount} watchers.");
+
+        session.DeviceId = target.Id;
+        session.RoomId = target.RoomId;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Session.Transferred", "Session", session.Id, new
+        {
+            FromDeviceId = fromDeviceId,
+            FromRoomId = fromRoomId,
+            ToDeviceId = target.Id,
+            ToRoomId = target.RoomId,
+            TargetName = target.Name
+        }, ct: ct);
+
+        await LoadSessionGraphAsync(session, ct);
+        var transferred = MapLive(session, billingRoundUp);
+        await _notifier.NotifySessionUpdatedAsync(branchId, transferred, ct);
+        return transferred;
+    }
+
     /// <summary>Change the number of watchers on an active watching session.
     /// Per-screen (time-billed) plans accrue the elapsed segment at the old headcount first.</summary>
     public async Task<SessionLiveDto> UpdateWatcherCountAsync(Guid id, UpdateWatchersRequest request, CancellationToken ct = default)

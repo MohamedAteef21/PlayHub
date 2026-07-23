@@ -196,6 +196,11 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
+  transfer: (id: string, targetDeviceId: string) =>
+    apiFetch<import('@/types').SessionLive>(`/sessions/${id}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ targetDeviceId }),
+    }),
   convert: (id: string, data: {
     pricingPlanId: string;
     controllerCount?: number | null;

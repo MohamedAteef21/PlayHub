@@ -114,6 +114,9 @@ public record AddSessionCafeteriaRequest(
 /// <summary>AdditionalMinutes = null switches the session to an open (unlimited) timer.</summary>
 public record ExtendSessionRequest(int? AdditionalMinutes);
 
+/// <summary>Move an open/paused session to another idle device (same branch), preserving timer and charges.</summary>
+public record TransferSessionRequest(Guid TargetDeviceId);
+
 public record UpdateWatchersRequest(int WatcherCount);
 
 public record ReturnSessionCafeteriaRequest(Guid SessionCafeteriaLineId, int Quantity, string Reason);
@@ -223,6 +226,7 @@ public interface ISessionService
     Task<SessionLiveDto> PauseSessionAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> ResumeSessionAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> ExtendSessionAsync(Guid id, ExtendSessionRequest request, CancellationToken ct = default);
+    Task<SessionLiveDto> TransferSessionAsync(Guid id, TransferSessionRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> UpdateWatcherCountAsync(Guid id, UpdateWatchersRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> ConvertSessionAsync(Guid id, ConvertSessionRequest request, CancellationToken ct = default);
     Task<SessionDetailDto> CloseSessionAsync(Guid id, CloseSessionRequest request, CancellationToken ct = default);
