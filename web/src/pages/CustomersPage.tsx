@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { customersApi, offersApi, whatsappApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
+import { formatDateTimeEgypt } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import { WalletTransactionType, type Customer, type CustomerOffer } from '@/types';
+import { WalletTransactionType, SessionMode, SessionStatus, type Customer, type CustomerOffer } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -55,6 +56,9 @@ export function CustomersPage() {
   const [walletAmount, setWalletAmount] = useState('');
   const [walletBonus, setWalletBonus] = useState('');
   const [walletNote, setWalletNote] = useState('');
+  const [sessionsCustomer, setSessionsCustomer] = useState<Customer | null>(null);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsPageSize, setSessionsPageSize] = useState(10);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -182,6 +186,12 @@ export function CustomersPage() {
     queryKey: ['wallet-transactions', walletCustomer?.id],
     queryFn: () => customersApi.getWalletTransactions(walletCustomer!.id, 1, 10),
     enabled: !!walletCustomer,
+  });
+
+  const { data: customerSessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['customer-sessions', sessionsCustomer?.id, sessionsPage, sessionsPageSize],
+    queryFn: () => customersApi.getSessions(sessionsCustomer!.id, sessionsPage, sessionsPageSize),
+    enabled: !!sessionsCustomer,
   });
 
   const topUpMutation = useMutation({
@@ -332,6 +342,18 @@ export function CustomersPage() {
                           {canManage && (
                             <Button size="sm" variant="secondary" onClick={() => openEditCustomer(c)}>
                               {t('customers.edit')}
+                            </Button>
+                          )}
+                          {canView && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setSessionsPage(1);
+                                setSessionsCustomer(c);
+                              }}
+                            >
+                              {t('customers.sessionHistory')}
                             </Button>
                           )}
                           {canManage && (
@@ -720,6 +742,102 @@ export function CustomersPage() {
               )}
             </div>
             {error && <p className="text-sm text-danger">{error}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!sessionsCustomer}
+        onClose={() => setSessionsCustomer(null)}
+        size="xl"
+        title={
+          sessionsCustomer
+            ? t('customers.sessionHistoryFor', { name: sessionsCustomer.name })
+            : t('customers.sessionHistory')
+        }
+        footer={
+          <Button variant="secondary" onClick={() => setSessionsCustomer(null)}>
+            {t('session.cancel')}
+          </Button>
+        }
+      >
+        {sessionsCustomer && (
+          <div className="space-y-3">
+            {sessionsLoading ? (
+              <PageLoader />
+            ) : !customerSessions || customerSessions.items.length === 0 ? (
+              <p className="text-sm text-muted">{t('customers.sessionHistoryEmpty')}</p>
+            ) : (
+              <>
+                <DataTable
+                  headers={[
+                    t('session.device'),
+                    t('session.room'),
+                    t('session.branch'),
+                    t('session.mode'),
+                    t('common.status'),
+                    t('session.started'),
+                    t('session.closedAt'),
+                    t('session.timeCost'),
+                    t('session.cafeteria'),
+                    t('session.total'),
+                  ]}
+                >
+                  {customerSessions.items.map((s) => (
+                    <tr key={s.id} className="hover:bg-surface-hover/50">
+                      <td className="px-3 py-2 font-medium">{s.deviceName}</td>
+                      <td className="px-3 py-2">{s.roomName ?? '—'}</td>
+                      <td className="px-3 py-2">{s.branchName ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        {s.sessionMode === SessionMode.Gaming
+                          ? t('session.gaming')
+                          : t('session.watching')}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          status={
+                            s.status === SessionStatus.Open
+                              ? 'gaming'
+                              : s.status === SessionStatus.Paused
+                                ? 'watching'
+                                : 'idle'
+                          }
+                        >
+                          {s.status === SessionStatus.Open
+                            ? t('dashboard.gaming')
+                            : s.status === SessionStatus.Paused
+                              ? t('dashboard.paused')
+                              : t('sessionHistory.closed')}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
+                        {formatDateTimeEgypt(s.startedAt)}
+                      </td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
+                        {formatDateTimeEgypt(s.closedAt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {s.status === SessionStatus.Closed ? formatCurrency(s.timeCost) : '—'}
+                      </td>
+                      <td className="px-3 py-2">{formatCurrency(s.cafeteriaCost)}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {s.status === SessionStatus.Closed ? formatCurrency(s.totalCost) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </DataTable>
+                <Pagination
+                  page={sessionsPage}
+                  pageSize={sessionsPageSize}
+                  totalCount={customerSessions.totalCount}
+                  onPageChange={setSessionsPage}
+                  onPageSizeChange={(size) => {
+                    setSessionsPageSize(size);
+                    setSessionsPage(1);
+                  }}
+                />
+              </>
+            )}
           </div>
         )}
       </Modal>

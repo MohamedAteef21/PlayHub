@@ -76,6 +76,7 @@ export interface SessionLive {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   cafeteriaLines: SessionCafeteriaLine[];
+  billingSegments?: BillingSegment[];
 }
 
 export interface SessionCafeteriaLine {
@@ -122,6 +123,7 @@ export interface BillingSegment {
   startedAt: string;
   endedAt: string;
   controllerTier: number | null;
+  peopleCount?: number | null;
 }
 
 export interface SessionDetail {
@@ -219,6 +221,7 @@ export interface SessionHistory {
   deviceId: string;
   deviceName: string;
   roomName: string | null;
+  branchName?: string | null;
   sessionMode: number;
   status: number;
   startedAt: string;
@@ -228,6 +231,10 @@ export interface SessionHistory {
   timeCost: number;
   cafeteriaCost: number;
   totalCost: number;
+  customerId?: string | null;
+  customerName?: string | null;
+  isQuickGuest?: boolean;
+  quickGuestName?: string | null;
 }
 
 export interface AssetDashboard {
@@ -309,6 +316,36 @@ export interface Notification {
 
 export const SessionMode = { Gaming: 1, Watching: 2 } as const;
 export const SessionStatus = { Open: 1, Paused: 2, Closed: 3 } as const;
+export const ReservationStatus = { Pending: 1, Started: 2, Cancelled: 3 } as const;
+
+export interface DeviceReservation {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  roomName: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  guestName: string | null;
+  notes: string | null;
+  status: number;
+  sessionId: string | null;
+  createdByName: string;
+  createdAt: string;
+  warnWithinOneHour: boolean;
+}
+
+export interface ReservationConflict {
+  hasConflict: boolean;
+  reservationId: string | null;
+  deviceName: string | null;
+  startsAt: string | null;
+  guestLabel: string | null;
+  messageEn: string;
+  messageAr: string;
+}
+
 export const UserRole = { Staff: 0, MasterAdmin: 1, SuperAdmin: 2 } as const;
 export const PaymentMethod = { Cash: 1, BankTransfer: 2, DigitalWallet: 3, Deferred: 4, CustomerWallet: 5 } as const;
 export const PurchaseOrderStatus = { Draft: 1, Ordered: 2, Received: 3, Cancelled: 4 } as const;
@@ -566,7 +603,14 @@ export interface RevenueReport {
   totalRevenue: number;
   sessionRevenue: number;
   cafeteriaRevenue: number;
-  daily: { date: string; sessionRevenue: number; cafeteriaRevenue: number; total: number }[];
+  manualRevenue: number;
+  daily: {
+    date: string;
+    sessionRevenue: number;
+    cafeteriaRevenue: number;
+    manualRevenue: number;
+    total: number;
+  }[];
 }
 
 export interface BestSeller {
