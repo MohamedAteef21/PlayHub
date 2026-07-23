@@ -243,6 +243,11 @@ export const en = {
     ratePerHour: '{{rate}}/hour',
     ratePerMatch: '{{rate}}/match',
     consumedTime: 'Time used',
+    previewBill: 'View bill',
+    previewBillTitle: 'Bill preview',
+    previewBillHint:
+      'Live estimate before closing — totals update as the session runs. Match billing is finalized when you close.',
+    cafeteriaLines: 'Cafeteria items',
     outstandingDebtWarning: 'This customer has {{count}} unpaid debt(s) totaling {{amount}}.',
   },
   session: {
@@ -1139,6 +1144,11 @@ export const ar = {
     ratePerHour: '{{rate}}/ساعة',
     ratePerMatch: '{{rate}}/ماتش',
     consumedTime: 'الوقت المستهلك',
+    previewBill: 'عرض الفاتورة',
+    previewBillTitle: 'معاينة الفاتورة',
+    previewBillHint:
+      'تقدير لحظي قبل الإغلاق — الأرقام بتتحدّث والجلسة شغالة. تسعير الماتش بيتقفل نهائي عند الإغلاق.',
+    cafeteriaLines: 'أصناف الكافتيريا',
     outstandingDebtWarning: 'هذا العميل عليه {{count}} دين/آجل بإجمالي {{amount}}.',
   },
   session: {

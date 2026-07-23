@@ -42,7 +42,8 @@ public record SessionLiveDto(
     string? CustomerPhone,
     bool IsQuickGuest,
     string? QuickGuestName,
-    IReadOnlyList<SessionCafeteriaLineDto> CafeteriaLines);
+    IReadOnlyList<SessionCafeteriaLineDto> CafeteriaLines,
+    IReadOnlyList<BillingSegmentDto> BillingSegments);
 
 public record OpenSessionRequest(
     Guid DeviceId,

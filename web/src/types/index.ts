@@ -76,6 +76,7 @@ export interface SessionLive {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   cafeteriaLines: SessionCafeteriaLine[];
+  billingSegments?: BillingSegment[];
 }
 
 export interface SessionCafeteriaLine {

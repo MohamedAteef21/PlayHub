@@ -17,6 +17,7 @@ import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
 import type {
   AssetDashboardDevice,
+  BillingSegment,
   CafeteriaAddOn,
   CafeteriaItem,
   CafeteriaItemVariant,
@@ -65,6 +66,58 @@ function statusKey(status: string) {
   return status.toLowerCase() as 'idle' | 'gaming' | 'watching' | 'paused' | 'inactive';
 }
 
+function billingSegmentFormula(
+  seg: BillingSegment,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  const money = (n: number) => formatCurrency(n);
+  if (seg.quantityUnit === 'match') {
+    return t('session.formulaMatch', {
+      rate: money(seg.rate),
+      count: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'guest') {
+    return t('session.formulaWatching', {
+      rate: money(seg.rate),
+      count: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0) {
+    return t('session.formulaWatchingTime', {
+      rate: money(seg.rate),
+      people: seg.peopleCount,
+      hours: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'min' && (seg.peopleCount ?? 0) > 0) {
+    return t('session.formulaWatchingMin', {
+      rate: money(seg.rate),
+      people: seg.peopleCount,
+      mins: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'hour') {
+    return t('session.formulaHourly', {
+      rate: money(seg.rate),
+      hours: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'min') {
+    return t('session.formulaMinute', {
+      rate: money(seg.rate),
+      mins: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  return `${money(seg.rate)} × ${seg.quantity} = ${money(seg.amount)}`;
+}
+
 function DeviceCard({
   device,
   roomName,
@@ -81,6 +134,7 @@ function DeviceCard({
   onExtend,
   onWatchersChange,
   onAddCafeteria,
+  onPreviewBill,
   canAddCafeteria,
   dateLocale,
 }: {
@@ -99,6 +153,7 @@ function DeviceCard({
   onExtend: (additionalMinutes: number | null) => void;
   onWatchersChange: (watcherCount: number) => void;
   onAddCafeteria: () => void;
+  onPreviewBill: () => void;
   canAddCafeteria: boolean;
   dateLocale: string;
 }) {
@@ -249,6 +304,11 @@ function DeviceCard({
             )}
             <Button variant="danger" size="sm" className="flex-1" onClick={onClose}>{t('session.close')}</Button>
           </div>
+          <Button variant="secondary" size="sm" className="w-full" onClick={onPreviewBill}>
+            <Icon name="print" className="h-3.5 w-3.5" />
+            {t('dashboard.previewBill')}
+            {` · ${formatCurrency(session.totalCost)}`}
+          </Button>
           {session.canChangePricing && (
             <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
               <Icon name="settings" className="h-3.5 w-3.5" />
@@ -335,6 +395,7 @@ export function DashboardPage() {
   const [convertError, setConvertError] = useState('');
   const [closeMatchCount, setCloseMatchCount] = useState('1');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
+  const [billPreview, setBillPreview] = useState<SessionLive | null>(null);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
   const [cafCart, setCafCart] = useState<CafCartLine[]>([]);
   const [cafPickItem, setCafPickItem] = useState<CafeteriaItem | null>(null);
@@ -1133,6 +1194,10 @@ export function DashboardPage() {
                       setReturnReason('');
                       setCafError('');
                     }}
+                    onPreviewBill={() => {
+                      if (!session) return;
+                      setBillPreview(session);
+                    }}
                     canAddCafeteria={canSellCafeteria}
                     dateLocale={dateLocale}
                   />
@@ -1200,6 +1265,10 @@ export function DashboardPage() {
                       setReturnReason('');
                       setCafError('');
                     }}
+                    onPreviewBill={() => {
+                      if (!session) return;
+                      setBillPreview(session);
+                    }}
                     canAddCafeteria={canSellCafeteria}
                     dateLocale={dateLocale}
                   />
@@ -1210,6 +1279,113 @@ export function DashboardPage() {
         )}
         </>
       )}
+
+      <Modal
+        open={!!billPreview}
+        onClose={() => setBillPreview(null)}
+        title={t('dashboard.previewBillTitle')}
+        footer={
+          <Button variant="secondary" onClick={() => setBillPreview(null)}>
+            {t('session.done')}
+          </Button>
+        }
+      >
+        {billPreview && (() => {
+          const live = sessions.find((s) => s.id === billPreview.id) ?? billPreview;
+          const segments = live.billingSegments ?? [];
+          const cafLines = (live.cafeteriaLines ?? []).filter((l) => l.quantity - l.returnedQuantity > 0);
+          return (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">{t('dashboard.previewBillHint')}</p>
+              <div className="rounded-xl border border-border bg-surface p-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.device')}</span>
+                  <span>{live.deviceName}{live.roomName ? ` · ${live.roomName}` : ''}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.pricingPlan', { defaultValue: 'Pricing plan' })}</span>
+                  <span>{live.pricingPlanName}</span>
+                </div>
+                {(live.customerName || live.quickGuestName) && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">{t('session.guest')}</span>
+                    <span>{live.customerName || live.quickGuestName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('dashboard.elapsed')}</span>
+                  <span dir="ltr">{formatDuration(live.elapsedSeconds)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.timeCost')}</span>
+                  <span>{formatCurrency(live.currentTimeCost)}</span>
+                </div>
+                {segments.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
+                    <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
+                    {segments.map((seg, idx) => {
+                      const formula = billingSegmentFormula(seg, t);
+                      return (
+                        <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
+                          <div className="flex justify-between gap-2 text-xs">
+                            <span className="min-w-0 font-medium leading-snug">{formula}</span>
+                            <span className="shrink-0 font-semibold">{formatCurrency(seg.amount)}</span>
+                          </div>
+                          {seg.label && (
+                            <p className="text-[11px] text-muted leading-snug">{seg.label}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {live.timeUnit === TimeUnit.PerGame && (
+                  <p className="text-xs text-muted">{t('dashboard.perMatchHint')}</p>
+                )}
+                {live.roomSurchargeCost > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">{t('session.roomSurcharge')}</span>
+                    <span>{formatCurrency(live.roomSurchargeCost)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.cafeteria')}</span>
+                  <span>{formatCurrency(live.cafeteriaCost)}</span>
+                </div>
+                {cafLines.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
+                    <p className="text-xs font-medium text-muted">{t('dashboard.cafeteriaLines')}</p>
+                    {cafLines.map((line) => {
+                      const qty = line.quantity - line.returnedQuantity;
+                      return (
+                        <div key={line.id} className="flex justify-between gap-2 text-xs">
+                          <span className="min-w-0 leading-snug">
+                            {line.itemName} × {qty}
+                            {(line.addOns?.length ?? 0) > 0
+                              ? ` (+${line.addOns!.map((a) => a.name).join(', ')})`
+                              : ''}
+                          </span>
+                          <span className="shrink-0 font-semibold">
+                            {formatCurrency(
+                              line.quantity > 0
+                                ? (line.lineTotal * qty) / line.quantity
+                                : 0
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-border pt-2 text-lg font-bold text-success">
+                  <span>{t('session.total')}</span>
+                  <span>{formatCurrency(live.totalCost)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal
         open={!!invoiceResult}

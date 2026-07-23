@@ -1124,7 +1124,38 @@ public class SessionService : ISessionService
             session.Customer?.Phone,
             session.IsQuickGuest,
             session.QuickGuestName,
-            session.CafeteriaLines.Select(MapCafeteriaLine).ToList());
+            session.CafeteriaLines.Select(MapCafeteriaLine).ToList(),
+            BuildLiveBillingSegments(session, billingRoundUp, isPerGame));
+    }
+
+    /// <summary>
+    /// Accrued segments plus the current open segment (preview only — not persisted).
+    /// Per-match sessions omit the open segment until match count is entered at close.
+    /// </summary>
+    private List<BillingSegmentDto> BuildLiveBillingSegments(Session session, bool billingRoundUp, bool isPerGame)
+    {
+        var segments = SessionBillingSegments.Read(session);
+        if (session.Status == SessionStatus.Closed || isPerGame)
+            return segments;
+
+        try
+        {
+            var current = SessionBillingSegments.Build(
+                _costCalculator,
+                session,
+                DateTime.UtcNow,
+                billingRoundUp,
+                matchCount: null,
+                out _,
+                chargeFullPlannedBooking: false);
+            segments = [.. segments, current];
+        }
+        catch (InvalidOperationException)
+        {
+            // Leave accrued-only if the current segment cannot be priced yet.
+        }
+
+        return segments;
     }
 
     private static SessionCafeteriaLineDto MapCafeteriaLine(SessionCafeteriaLine l) =>
