@@ -180,6 +180,7 @@ export const sessionsApi = {
     customerId?: string;
     isQuickGuest?: boolean;
     quickGuestName?: string;
+    reservationId?: string;
   }) =>
     apiFetch<import('@/types').SessionLive>('/sessions/open', {
       method: 'POST',
@@ -195,7 +196,17 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number; matchCount?: number | null }) =>
+  transfer: (id: string, targetDeviceId: string) =>
+    apiFetch<import('@/types').SessionLive>(`/sessions/${id}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ targetDeviceId }),
+    }),
+  convert: (id: string, data: {
+    pricingPlanId: string;
+    controllerCount?: number | null;
+    watcherCount?: number | null;
+    matchCount?: number | null;
+  }) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -788,6 +799,28 @@ export const alertsApi = {
   },
 };
 
+export const reservationsApi = {
+  list: () => apiFetch<import('@/types').DeviceReservation[]>('/reservations'),
+  create: (data: {
+    deviceId: string;
+    startsAt: string;
+    endsAt?: string | null;
+    customerId?: string | null;
+    guestName?: string | null;
+    notes?: string | null;
+  }) =>
+    apiFetch<import('@/types').DeviceReservation>('/reservations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  cancel: (id: string) =>
+    apiFetch<{ message: string }>(`/reservations/${id}/cancel`, { method: 'POST' }),
+  checkConflict: (deviceId: string) =>
+    apiFetch<import('@/types').ReservationConflict>(
+      `/reservations/conflict?deviceId=${encodeURIComponent(deviceId)}`
+    ),
+};
+
 export const platformApi = {
   getDashboard: () => apiFetch<import('@/types').SuperAdminDashboard>('/platform/dashboard'),
   getAlertSettings: () =>
@@ -918,6 +951,10 @@ export const customersApi = {
   getWalletTransactions: (id: string, page = 1, pageSize = 20) =>
     apiFetch<import('@/types').PagedResult<import('@/types').WalletTransaction>>(
       `/customers/${id}/wallet?page=${page}&pageSize=${pageSize}`
+    ),
+  getSessions: (id: string, page = 1, pageSize = 20) =>
+    apiFetch<import('@/types').PagedResult<import('@/types').SessionHistory>>(
+      `/customers/${id}/sessions?page=${page}&pageSize=${pageSize}`
     ),
 };
 

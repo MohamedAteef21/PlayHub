@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using PlayHub.Api.Authorization;
 using PlayHub.Application.Common;
 using PlayHub.Application.Customers;
+using PlayHub.Application.Sessions;
 
 namespace PlayHub.Api.Controllers;
 
@@ -12,8 +13,13 @@ namespace PlayHub.Api.Controllers;
 public class CustomersController : ControllerBase
 {
     private readonly ICustomerService _customers;
+    private readonly ISessionService _sessions;
 
-    public CustomersController(ICustomerService customers) => _customers = customers;
+    public CustomersController(ICustomerService customers, ISessionService sessions)
+    {
+        _customers = customers;
+        _sessions = sessions;
+    }
 
     [HttpGet]
     [Authorize(Policy = PermissionPolicies.CustomersView)]
@@ -32,6 +38,23 @@ public class CustomersController : ControllerBase
     {
         var customer = await _customers.GetByIdAsync(id, ct);
         return customer is null ? NotFound() : Ok(customer);
+    }
+
+    [HttpGet("{id:guid}/sessions")]
+    [Authorize(Policy = PermissionPolicies.CustomersView)]
+    [ProducesResponseType(typeof(PagedResult<SessionHistoryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSessions(
+        Guid id,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
+    {
+        var customer = await _customers.GetByIdAsync(id, ct);
+        if (customer is null)
+            return NotFound(new { message = "Customer not found." });
+
+        return await ExecuteAsync(() =>
+            _sessions.GetSessionHistoryAsync(null, null, page, pageSize, id, ct));
     }
 
     [HttpPost]

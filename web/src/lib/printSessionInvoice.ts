@@ -1,5 +1,6 @@
 import type { SessionDetail } from '@/types';
 import { PaymentMethod } from '@/types';
+import { formatDateTimeEgypt } from '@/lib/dates';
 
 export interface InvoicePrintLabels {
   title: string;
@@ -69,8 +70,8 @@ export function printSessionInvoice(
   dir: 'rtl' | 'ltr' = 'ltr'
 ): void {
   const invoiceNo = detail.invoice?.invoiceNumber ?? '—';
-  const closedAt = detail.closedAt ? new Date(detail.closedAt) : new Date();
-  const startedAt = new Date(detail.startedAt);
+  const closedAtLabel = formatDateTimeEgypt(detail.closedAt ?? new Date().toISOString());
+  const startedAtLabel = formatDateTimeEgypt(detail.startedAt);
   const modeLabel = detail.sessionMode === 1 ? labels.gaming : labels.watching;
   const payMethod = paymentLabel(detail.invoice?.paymentMethod ?? PaymentMethod.Cash, labels);
 
@@ -88,18 +89,29 @@ export function printSessionInvoice(
 
   const segmentsHtml = (detail.billingSegments ?? [])
     .map((s) => {
-      const detailLine =
-        s.quantityUnit === 'match'
-          ? `${money(s.rate)} × ${s.quantity}`
-          : s.quantityUnit === 'hour'
-            ? `${money(s.rate)}/h × ${s.quantity}h`
-            : `${money(s.rate)} × ${s.quantity}`;
+      const people = s.peopleCount ?? 0;
+      let detailLine: string;
+      if (s.quantityUnit === 'match') {
+        detailLine = `تمن المباراة ${money(s.rate)} × ${s.quantity} مباريات = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'guest') {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${s.quantity} أفراد = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'hour' && people > 0) {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${people} أفراد × ${s.quantity} ساعة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'min' && people > 0) {
+        detailLine = `تمن الفرد ${money(s.rate)} × ${people} أفراد × ${s.quantity} دقيقة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'hour') {
+        detailLine = `سعر الساعة ${money(s.rate)} × ${s.quantity} ساعة = ${money(s.amount)}`;
+      } else if (s.quantityUnit === 'min') {
+        detailLine = `السعر ${money(s.rate)} × ${s.quantity} دقيقة = ${money(s.amount)}`;
+      } else {
+        detailLine = `${money(s.rate)} × ${s.quantity} = ${money(s.amount)}`;
+      }
       return `<tr>
         <td>
-          <div>${escapeHtml(s.label)}</div>
-          <div style="color:#666;font-size:11px">${escapeHtml(detailLine)}</div>
+          <div style="font-weight:600">${escapeHtml(detailLine)}</div>
+          <div style="color:#666;font-size:11px">${escapeHtml(s.label)}</div>
         </td>
-        <td style="text-align:end">${money(s.amount)}</td>
+        <td style="text-align:end;font-weight:600">${money(s.amount)}</td>
       </tr>`;
     })
     .join('');
@@ -143,13 +155,13 @@ export function printSessionInvoice(
   <div class="branch">${escapeHtml(branchName || labels.branch)}</div>
   <div class="meta">
     <div><span>${escapeHtml(labels.invoiceNumber)}</span><span>${escapeHtml(invoiceNo)}</span></div>
-    <div><span>${escapeHtml(labels.date)}</span><span>${closedAt.toLocaleString()}</span></div>
+    <div><span>${escapeHtml(labels.date)}</span><span>${closedAtLabel}</span></div>
     <div><span>${escapeHtml(labels.device)}</span><span>${escapeHtml(detail.deviceName)}</span></div>
     <div><span>${escapeHtml(labels.room)}</span><span>${escapeHtml(detail.roomName ?? '—')}</span></div>
     <div><span>${escapeHtml(labels.mode)}</span><span>${escapeHtml(modeLabel)}</span></div>
     <div><span>${escapeHtml(labels.plan)}</span><span>${escapeHtml(detail.pricingPlanName)}</span></div>
-    <div><span>${escapeHtml(labels.started)}</span><span>${startedAt.toLocaleString()}</span></div>
-    <div><span>${escapeHtml(labels.closed)}</span><span>${closedAt.toLocaleString()}</span></div>
+    <div><span>${escapeHtml(labels.started)}</span><span>${startedAtLabel}</span></div>
+    <div><span>${escapeHtml(labels.closed)}</span><span>${closedAtLabel}</span></div>
   </div>
   ${segmentsHtml ? `
   <hr />
