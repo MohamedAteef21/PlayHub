@@ -27,7 +27,7 @@ export function SettingsPage() {
   const canManageAssets = hasPermission(user, Permissions.AssetsManage);
   const canManageSettings = hasPermission(user, Permissions.SettingsManage);
   const isMaster = !!user?.isMaster;
-  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : canManageAssets ? 'venueAssets' : 'rooms');
+  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : 'rooms');
 
   const [branchOpen, setBranchOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchDetail | null>(null);
@@ -650,15 +650,9 @@ export function SettingsPage() {
 
   const tabs: { id: Tab; label: string; icon: IconName }[] = [
     ...(isMaster ? [{ id: 'branches' as const, label: t('settings.branches'), icon: 'branch' as const }] : []),
-    ...(canManageAssets
-      ? [{ id: 'venueAssets' as const, label: t('settings.venueAssets'), icon: 'inventory' as const }]
-      : []),
     { id: 'rooms', label: t('settings.rooms'), icon: 'room' },
     { id: 'devices', label: t('settings.devices'), icon: 'gaming' },
     { id: 'pricing', label: t('settings.pricing'), icon: 'pricing' },
-    ...(isMaster && alertSettings && alertSettings.allowedChannels !== NotificationChannel.None
-      ? [{ id: 'alerts' as const, label: t('settings.alerts'), icon: 'mail' as const }]
-      : []),
     ...(canManageAssets
       ? [{ id: 'maintenance' as const, label: t('settings.maintenance'), icon: 'wrench' as const }]
       : []),

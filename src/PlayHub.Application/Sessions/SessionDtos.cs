@@ -32,6 +32,8 @@ public record SessionLiveDto(
     int? RemainingSeconds,
     bool TimeExpired,
     bool CanConvertToGaming,
+    bool CanChangePricing,
+    TimeUnit? TimeUnit,
     Guid? CustomerId,
     string? CustomerCode,
     string? CustomerName,
@@ -53,13 +55,15 @@ public record OpenSessionRequest(
     bool IsQuickGuest = false);
 
 /// <summary>
-/// Convert an open Watching session to hourly Gaming.
-/// Accrues watching cost, then starts a new gaming timer with individual (1) or couple (2) pricing.
+/// Change pricing mid-session (watching→gaming, hourly↔per-match, individual↔couple).
+/// Accrues the current segment, then starts a new timer/segment with the selected plan.
 /// </summary>
 public record ConvertSessionRequest(
     Guid PricingPlanId,
-    /// <summary>1 = individual (فردي), 2 = couple (زوجي).</summary>
-    int ControllerCount);
+    /// <summary>1–2 = individual (فردي), 3–4 = couple (زوجي).</summary>
+    int ControllerCount,
+    /// <summary>Required when leaving a per-match (PerGame) segment.</summary>
+    int? MatchCount = null);
 
 public record CloseSessionPaymentRequest(
     PaymentMethod PaymentMethod,
@@ -72,7 +76,20 @@ public record CloseSessionPaymentRequest(
 public record CloseSessionRequest(
     CloseSessionPaymentRequest Payment,
     decimal DiscountAmount = 0,
-    string? DiscountReason = null);
+    string? DiscountReason = null,
+    /// <summary>Required when the current segment is billed per match.</summary>
+    int? MatchCount = null);
+
+public record BillingSegmentDto(
+    string Kind,
+    string Label,
+    decimal Rate,
+    decimal Quantity,
+    string QuantityUnit,
+    decimal Amount,
+    DateTime StartedAt,
+    DateTime EndedAt,
+    int? ControllerTier);
 
 public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
@@ -135,6 +152,7 @@ public record SessionDetailDto(
     bool IsQuickGuest,
     string? QuickGuestName,
     string? InvoiceNumber,
+    IReadOnlyList<BillingSegmentDto> BillingSegments,
     IReadOnlyList<SessionCafeteriaLineDto> CafeteriaLines,
     SessionInvoiceDto? Invoice);
 
@@ -206,5 +224,14 @@ public interface ISessionNotifier
 public interface ISessionCostCalculator
 {
     int GetElapsedSeconds(SessionStatus status, DateTime startedAt, int totalPausedSeconds, DateTime? activePauseStartedAt, DateTime? closedAt = null);
-    decimal CalculateTimeCost(string rateSnapshotJson, SessionMode mode, int elapsedSeconds, int? controllerCount, int? watcherCount, bool billingRoundUp);
+    decimal CalculateTimeCost(
+        string rateSnapshotJson,
+        SessionMode mode,
+        int elapsedSeconds,
+        int? controllerCount,
+        int? watcherCount,
+        bool billingRoundUp,
+        decimal? billableUnitsOverride = null);
+    TimeUnit? GetTimeUnit(string rateSnapshotJson);
+    decimal GetGamingRate(string rateSnapshotJson, int? controllerCount);
 }

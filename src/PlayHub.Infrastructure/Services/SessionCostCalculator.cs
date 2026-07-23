@@ -24,32 +24,44 @@ public class SessionCostCalculator : ISessionCostCalculator
         return Math.Max(0, totalSeconds - totalPausedSeconds);
     }
 
+    public TimeUnit? GetTimeUnit(string rateSnapshotJson)
+    {
+        var snapshot = Deserialize(rateSnapshotJson);
+        return snapshot?.TimeUnit;
+    }
+
+    public decimal GetGamingRate(string rateSnapshotJson, int? controllerCount)
+    {
+        var snapshot = Deserialize(rateSnapshotJson);
+        if (snapshot is null || controllerCount is null or <= 0)
+            return 0;
+
+        var tier = GamingRateTier(controllerCount.Value);
+        return snapshot.GamingRates
+            .Where(r => r.ControllerCount == tier)
+            .Select(r => r.Rate)
+            .FirstOrDefault();
+    }
+
     public decimal CalculateTimeCost(
         string rateSnapshotJson,
         SessionMode mode,
         int elapsedSeconds,
         int? controllerCount,
         int? watcherCount,
-        bool billingRoundUp)
+        bool billingRoundUp,
+        decimal? billableUnitsOverride = null)
     {
-        RateSnapshot? snapshot;
-        try
-        {
-            snapshot = JsonSerializer.Deserialize<RateSnapshot>(rateSnapshotJson, JsonOptions);
-        }
-        catch (JsonException)
-        {
-            snapshot = null;
-        }
-
+        var snapshot = Deserialize(rateSnapshotJson);
         // Corrupt/legacy snapshot: bill 0 instead of failing every session screen.
         if (snapshot is null)
             return 0;
 
-        if (mode == SessionMode.Gaming && snapshot.PackagePrice is > 0 && snapshot.PackageDurationMinutes is > 0)
+        if (mode == SessionMode.Gaming && snapshot.PackagePrice is > 0 && snapshot.PackageDurationMinutes is > 0
+            && billableUnitsOverride is null)
             return CalculatePackageCost(snapshot, controllerCount, elapsedSeconds, billingRoundUp);
 
-        var units = GetBillableUnits(snapshot.TimeUnit, elapsedSeconds, billingRoundUp);
+        var units = billableUnitsOverride ?? GetBillableUnits(snapshot.TimeUnit, elapsedSeconds, billingRoundUp);
 
         return mode switch
         {
@@ -59,11 +71,23 @@ public class SessionCostCalculator : ISessionCostCalculator
         };
     }
 
+    private static RateSnapshot? Deserialize(string rateSnapshotJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<RateSnapshot>(rateSnapshotJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static decimal GetBillableUnits(TimeUnit timeUnit, int elapsedSeconds, bool billingRoundUp)
     {
-        // Flat per game/match — ignore elapsed time
+        // Flat per game/match — ignore elapsed time (override with MatchCount on close/convert).
         if (timeUnit == TimeUnit.PerGame)
-            return 1;
+            return 0;
 
         var unitSeconds = timeUnit == TimeUnit.PerHour ? 3600 : 60;
         var units = billingRoundUp
@@ -79,9 +103,7 @@ public class SessionCostCalculator : ISessionCostCalculator
 
     private static decimal CalculateGamingCost(RateSnapshot snapshot, int? controllerCount, decimal units)
     {
-        // Misconfigured plan / legacy session: bill 0 for the time instead of breaking
-        // the whole active-sessions list (rates are validated at session open now).
-        if (controllerCount is null or <= 0)
+        if (controllerCount is null or <= 0 || units <= 0)
             return 0;
 
         var tier = GamingRateTier(controllerCount.Value);
@@ -117,11 +139,9 @@ public class SessionCostCalculator : ISessionCostCalculator
     private static decimal CalculateWatchingCost(RateSnapshot snapshot, int? watcherCount, decimal units)
     {
         var rate = snapshot.WatchingRates.FirstOrDefault()?.RatePerPerson ?? 0;
-        // Misconfigured plan / legacy session: bill 0 instead of breaking the active-sessions list.
         if (rate <= 0)
             return 0;
 
-        // Default PerPerson for old snapshots that omit WatchingBilling
         var billing = snapshot.WatchingBilling == 0
             ? WatchingBilling.PerPerson
             : snapshot.WatchingBilling;
@@ -129,11 +149,9 @@ public class SessionCostCalculator : ISessionCostCalculator
         if (watcherCount is null or <= 0)
             return 0;
 
-        // Per person = flat fee for each watcher for the whole watching session (no time).
         if (billing == WatchingBilling.PerPerson)
             return watcherCount.Value * rate;
 
-        // Per screen = each person added into the room in use, billed by time.
         return watcherCount.Value * rate * units;
     }
 

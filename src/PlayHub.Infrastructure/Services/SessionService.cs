@@ -393,11 +393,11 @@ public class SessionService : ISessionService
             .Include(s => s.Device).ThenInclude(d => d.DeviceControllers)
             .Include(s => s.Device).ThenInclude(d => d.Room)
             .Include(s => s.Device).ThenInclude(d => d.Screens)
+            .Include(s => s.PricingPlan)
+            .Include(s => s.OpenedByUser)
+            .Include(s => s.Customer)
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
-
-        if (session.SessionMode != SessionMode.Watching)
-            throw new InvalidOperationException("Only watching sessions can be converted to gaming.");
 
         if (request.ControllerCount is < 1 or > 4)
             throw new InvalidOperationException("Controller count must be between 1 and 4.");
@@ -415,7 +415,7 @@ public class SessionService : ISessionService
         if (!hasRate && !hasPackage)
             throw new InvalidOperationException($"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
 
-        // End any active pause and accrue watching segment cost
+        // End any active pause and finalize the current billing segment
         if (session.Status == SessionStatus.Paused)
         {
             var activePause = session.Pauses.LastOrDefault(p => p.ResumedAt == null);
@@ -427,13 +427,15 @@ public class SessionService : ISessionService
         }
 
         var convertAt = DateTime.UtcNow;
-        var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, convertAt);
-        var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
-        var watchingCost = _costCalculator.CalculateTimeCost(
-            session.RateSnapshot, SessionMode.Watching, billableSeconds,
-            session.ControllerCount, session.WatcherCount, billingRoundUp);
+        var leavingPerGame = session.SessionMode == SessionMode.Gaming
+            && _costCalculator.GetTimeUnit(session.RateSnapshot) == TimeUnit.PerGame;
 
-        session.AccruedTimeCost += watchingCost;
+        var segment = SessionBillingSegments.Build(
+            _costCalculator, session, convertAt, billingRoundUp,
+            leavingPerGame ? request.MatchCount : null,
+            out var segmentCost);
+        SessionBillingSegments.Append(session, segment);
+
         session.OriginalStartedAt ??= session.StartedAt;
 
         var snapshot = JsonSerializer.Serialize(new
@@ -459,12 +461,12 @@ public class SessionService : ISessionService
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Session.Converted", "Session", session.Id, new
         {
-            From = SessionMode.Watching,
-            To = SessionMode.Gaming,
-            AccruedWatchingCost = watchingCost,
+            SegmentCost = segmentCost,
             session.AccruedTimeCost,
             request.ControllerCount,
-            PlanName = plan.Name
+            PlanName = plan.Name,
+            plan.TimeUnit,
+            request.MatchCount
         }, ct: ct);
 
         await LoadSessionGraphAsync(session, ct);
@@ -500,12 +502,21 @@ public class SessionService : ISessionService
         }
 
         var closedAt = DateTime.UtcNow;
+        var currentTimeUnit = _costCalculator.GetTimeUnit(session.RateSnapshot);
+        var isPerGame = session.SessionMode == SessionMode.Gaming && currentTimeUnit == TimeUnit.PerGame;
+
+        var finalSegment = SessionBillingSegments.Build(
+            _costCalculator, session, closedAt, billingRoundUp,
+            isPerGame ? request.MatchCount : null,
+            out var segmentCost);
+        SessionBillingSegments.Append(session, finalSegment);
+
         var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, closedAt);
         var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
-        var segmentCost = _costCalculator.CalculateTimeCost(
-            session.RateSnapshot, session.SessionMode, billableSeconds, session.ControllerCount, session.WatcherCount, billingRoundUp);
-        session.TimeCost = decimal.Round(session.AccruedTimeCost + segmentCost, 2);
-        session.RoomSurchargeCost = decimal.Round(CalculateRoomSurcharge(session.RoomSurchargePerHour, billableSeconds), 2);
+        session.TimeCost = decimal.Round(session.AccruedTimeCost, 2);
+        session.RoomSurchargeCost = isPerGame
+            ? 0m
+            : decimal.Round(CalculateRoomSurcharge(session.RoomSurchargePerHour, billableSeconds), 2);
         session.CafeteriaCost = session.CafeteriaLines.Sum(l => l.LineTotal);
 
         var subtotal = session.TimeCost + session.RoomSurchargeCost + session.CafeteriaCost;
@@ -969,11 +980,15 @@ public class SessionService : ISessionService
             session.Status, session.StartedAt, session.TotalPausedSeconds, activePause?.PausedAt, session.ClosedAt);
 
         var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
+        var timeUnit = _costCalculator.GetTimeUnit(session.RateSnapshot);
+        var isPerGame = session.SessionMode == SessionMode.Gaming && timeUnit == TimeUnit.PerGame;
         var segmentCost = session.Status == SessionStatus.Closed
-            ? Math.Max(0, session.TimeCost - session.AccruedTimeCost)
-            : _costCalculator.CalculateTimeCost(
-                session.RateSnapshot, session.SessionMode, billableSeconds,
-                session.ControllerCount, session.WatcherCount, billingRoundUp);
+            ? Math.Max(0, session.TimeCost - SessionBillingSegments.Read(session).SkipLast(1).Sum(s => s.Amount))
+            : isPerGame
+                ? 0m
+                : _costCalculator.CalculateTimeCost(
+                    session.RateSnapshot, session.SessionMode, billableSeconds,
+                    session.ControllerCount, session.WatcherCount, billingRoundUp);
         var timeCost = session.Status == SessionStatus.Closed
             ? session.TimeCost
             : session.AccruedTimeCost + segmentCost;
@@ -1021,6 +1036,8 @@ public class SessionService : ISessionService
             remaining,
             timeExpired,
             session.SessionMode == SessionMode.Watching && session.Status != SessionStatus.Closed,
+            session.Status != SessionStatus.Closed,
+            timeUnit,
             session.CustomerId,
             session.Customer?.Code,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,
@@ -1130,6 +1147,7 @@ public class SessionService : ISessionService
             session.IsQuickGuest,
             session.QuickGuestName,
             session.Invoice?.InvoiceNumber,
+            SessionBillingSegments.Read(session),
             session.CafeteriaLines.Select(MapCafeteriaLine).ToList(),
             invoiceDto);
     }

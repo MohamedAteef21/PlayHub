@@ -222,6 +222,15 @@ function DeviceCard({
               {t('dashboard.convertToGaming')}
             </Button>
           )}
+          {!session.canConvertToGaming && session.canChangePricing && (
+            <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
+              <Icon name="settings" className="h-3.5 w-3.5" />
+              {t('dashboard.changePricing')}
+            </Button>
+          )}
+          {session.timeUnit === TimeUnit.PerGame && (
+            <p className="text-xs text-muted">{t('dashboard.perMatchHint')}</p>
+          )}
           {canAddCafeteria && (
             <Button variant="primary" size="sm" className="w-full" onClick={onAddCafeteria}>
               <Icon name="cafeteria" className="h-3.5 w-3.5" />
@@ -254,7 +263,9 @@ export function DashboardPage() {
   const [convertModal, setConvertModal] = useState<SessionLive | null>(null);
   const [convertPlanId, setConvertPlanId] = useState('');
   const [convertControllers, setConvertControllers] = useState(2);
+  const [convertMatchCount, setConvertMatchCount] = useState('1');
   const [convertError, setConvertError] = useState('');
+  const [closeMatchCount, setCloseMatchCount] = useState('1');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
   const [cafCart, setCafCart] = useState<CafCartLine[]>([]);
@@ -541,6 +552,13 @@ export function DashboardPage() {
         proofFileUrl = uploaded.url;
       }
 
+      const isClosePerMatch = closeModal.timeUnit === TimeUnit.PerGame;
+      const matchCount = Number(closeMatchCount) || 0;
+      if (isClosePerMatch && matchCount < 1) {
+        setCafError(t('session.matchCountRequired'));
+        return;
+      }
+
       const detail = await sessionsApi.close(closeModal.id, {
         payment: {
           paymentMethod,
@@ -550,8 +568,10 @@ export function DashboardPage() {
         },
         discountAmount: discount > 0 ? discount : 0,
         discountReason: discount > 0 ? discountReason.trim() || undefined : undefined,
+        matchCount: isClosePerMatch ? matchCount : undefined,
       });
       setCloseModal(null);
+      setCloseMatchCount('1');
       setDebtorName('');
       setDiscountAmount('');
       setDiscountReason('');
@@ -1087,6 +1107,17 @@ export function DashboardPage() {
                 <span className="text-muted">{t('session.timeCost')}</span>
                 <span>{formatCurrency(invoiceResult.timeCost)}</span>
               </div>
+              {(invoiceResult.billingSegments?.length ?? 0) > 0 && (
+                <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
+                  <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
+                  {invoiceResult.billingSegments.map((seg, idx) => (
+                    <div key={`${seg.startedAt}-${idx}`} className="flex justify-between gap-2 text-xs">
+                      <span className="min-w-0 truncate text-muted">{seg.label}</span>
+                      <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {invoiceResult.roomSurchargeCost > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted">{t('session.roomSurcharge')}</span>
@@ -1117,7 +1148,11 @@ export function DashboardPage() {
       <Modal
         open={!!convertModal}
         onClose={() => setConvertModal(null)}
-        title={t('dashboard.convertToGaming')}
+        title={
+          convertModal?.canConvertToGaming
+            ? t('dashboard.convertToGaming')
+            : t('dashboard.changePricing')
+        }
         footer={
           <>
             <Button variant="secondary" onClick={() => setConvertModal(null)}>{t('session.cancel')}</Button>
@@ -1126,15 +1161,23 @@ export function DashboardPage() {
               disabled={!convertPlanId}
               onClick={async () => {
                 if (!convertModal || !convertPlanId) return;
+                const leavingMatch = convertModal.timeUnit === TimeUnit.PerGame;
+                const matchCount = Number(convertMatchCount) || 0;
+                if (leavingMatch && matchCount < 1) {
+                  setConvertError(t('session.matchCountRequired'));
+                  return;
+                }
                 setLoading(true);
                 setConvertError('');
                 try {
                   const updated = await sessionsApi.convert(convertModal.id, {
                     pricingPlanId: convertPlanId,
                     controllerCount: convertControllers,
+                    matchCount: leavingMatch ? matchCount : undefined,
                   });
                   onUpdate(updated);
                   setConvertModal(null);
+                  setConvertMatchCount('1');
                 } catch (e) {
                   setConvertError(e instanceof Error ? e.message : String(e));
                 } finally {
@@ -1148,14 +1191,23 @@ export function DashboardPage() {
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-muted">{t('dashboard.convertHint')}</p>
-          {convertModal && convertModal.accruedTimeCost == null && (
+          <p className="text-sm text-muted">{t('dashboard.changePricingHint')}</p>
+          {convertModal && convertModal.sessionMode === SessionMode.Watching && (
             <p className="text-xs text-muted">
               {t('dashboard.convertWatchingNote', {
                 count: convertModal.watcherCount ?? 0,
                 cost: formatCurrency(convertModal.currentTimeCost),
               })}
             </p>
+          )}
+          {convertModal && convertModal.timeUnit === TimeUnit.PerGame && (
+            <Input
+              label={t('session.matchCount')}
+              type="number"
+              min={1}
+              value={convertMatchCount}
+              onChange={(e) => setConvertMatchCount(e.target.value)}
+            />
           )}
           <div>
             <label className="mb-1 block text-sm text-muted">{t('session.pricingPlan')}</label>
@@ -1168,7 +1220,11 @@ export function DashboardPage() {
               {(gamingPlans ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {p.gamingRates[0] ? ` · ${formatCurrency(p.gamingRates[0].rate)}` : ''}
+                  {p.timeUnit === TimeUnit.PerGame
+                    ? ` · ${t('settings.perGame')}`
+                    : p.gamingRates[0]
+                      ? ` · ${formatCurrency(p.gamingRates[0].rate)}`
+                      : ''}
                 </option>
               ))}
             </select>
@@ -1499,10 +1555,20 @@ export function DashboardPage() {
                 <span>{t('session.pricingPlan', { defaultValue: 'Pricing plan' })}</span>
                 <span>{closeModal.pricingPlanName}</span>
               </div>
-              <div className="flex justify-between text-sm text-muted">
-                <span>{t('session.timeCost')}</span>
-                <span>{formatCurrency(closeModal.currentTimeCost)}</span>
-              </div>
+              {closeModal.timeUnit === TimeUnit.PerGame ? (
+                <p className="text-xs text-muted">{t('session.matchCloseHint')}</p>
+              ) : (
+                <div className="flex justify-between text-sm text-muted">
+                  <span>{t('session.timeCost')}</span>
+                  <span>{formatCurrency(closeModal.currentTimeCost)}</span>
+                </div>
+              )}
+              {closeModal.accruedTimeCost > 0 && (
+                <div className="flex justify-between text-sm text-muted">
+                  <span>{t('dashboard.accrued')}</span>
+                  <span>{formatCurrency(closeModal.accruedTimeCost)}</span>
+                </div>
+              )}
               {closeModal.roomSurchargeCost > 0 && (
                 <div className="flex justify-between text-sm text-muted">
                   <span>{t('session.roomSurcharge')}</span>
@@ -1543,6 +1609,15 @@ export function DashboardPage() {
                 </span>
               </div>
             </div>
+          )}
+          {closeModal?.timeUnit === TimeUnit.PerGame && (
+            <Input
+              label={t('session.matchCount')}
+              type="number"
+              min={1}
+              value={closeMatchCount}
+              onChange={(e) => setCloseMatchCount(e.target.value)}
+            />
           )}
           <Input
             label={t('session.discount')}

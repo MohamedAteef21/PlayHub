@@ -65,6 +65,8 @@ export interface SessionLive {
   remainingSeconds: number | null;
   timeExpired: boolean;
   canConvertToGaming: boolean;
+  canChangePricing: boolean;
+  timeUnit: number | null;
   customerId: string | null;
   customerCode: string | null;
   customerName: string | null;
@@ -108,6 +110,18 @@ export interface SessionInvoice {
   paymentStatus: number;
 }
 
+export interface BillingSegment {
+  kind: string;
+  label: string;
+  rate: number;
+  quantity: number;
+  quantityUnit: string;
+  amount: number;
+  startedAt: string;
+  endedAt: string;
+  controllerTier: number | null;
+}
+
 export interface SessionDetail {
   id: string;
   branchId: string;
@@ -142,6 +156,7 @@ export interface SessionDetail {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   invoiceNumber: string | null;
+  billingSegments: BillingSegment[];
   cafeteriaLines: SessionCafeteriaLine[];
   invoice: SessionInvoice | null;
 }
