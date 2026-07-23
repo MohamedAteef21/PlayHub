@@ -174,7 +174,7 @@ export function AppLayout() {
   const railCollapsed = sidebarCollapsed;
   const visibleNav = navItems.filter((item) => {
     if (superAdmin) {
-      return item.to === '/' || item.to === '/users';
+      return item.to === '/' || item.to === '/users' || item.to === '/settings';
     }
     if (item.masterOnly && !user.isMaster) return false;
     if (item.anyPermission?.length) {

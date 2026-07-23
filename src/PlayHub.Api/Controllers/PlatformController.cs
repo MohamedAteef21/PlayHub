@@ -77,4 +77,39 @@ public class PlatformController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    [HttpGet("notification-targets")]
+    public async Task<IActionResult> GetNotificationTargets(CancellationToken ct)
+    {
+        if (!_tenant.IsSuperAdmin) return Forbid();
+        try
+        {
+            return Ok(await _platform.GetNotificationTargetsAsync(ct));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("notification-targets/{userId:guid}")]
+    public async Task<IActionResult> UpsertNotificationTarget(
+        Guid userId,
+        [FromBody] UpsertNotificationTargetRequest request,
+        CancellationToken ct)
+    {
+        if (!_tenant.IsSuperAdmin) return Forbid();
+        try
+        {
+            return Ok(await _platform.UpsertNotificationTargetAsync(userId, request, ct));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

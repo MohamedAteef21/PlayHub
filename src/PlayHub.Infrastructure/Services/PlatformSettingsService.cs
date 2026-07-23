@@ -148,6 +148,84 @@ public class PlatformSettingsService : IPlatformSettingsService
             lockedOrExpired);
     }
 
+    public async Task<IReadOnlyList<NotificationTargetDto>> GetNotificationTargetsAsync(CancellationToken ct = default)
+    {
+        EnsureSuperAdmin();
+
+        var masters = await _db.Users
+            .AsNoTracking()
+            .Include(u => u.AlertSettings)
+            .Where(u =>
+                u.TenantId == _tenant.TenantId &&
+                !u.IsDeleted &&
+                (u.Role == UserRole.MasterAdmin || (u.IsMaster && u.Role != UserRole.SuperAdmin)))
+            .OrderBy(u => u.FirstName)
+            .ThenBy(u => u.Email)
+            .ToListAsync(ct);
+
+        return masters.Select(MapTarget).ToList();
+    }
+
+    public async Task<NotificationTargetDto> UpsertNotificationTargetAsync(
+        Guid userId,
+        UpsertNotificationTargetRequest request,
+        CancellationToken ct = default)
+    {
+        EnsureSuperAdmin();
+
+        var user = await _db.Users
+            .Include(u => u.AlertSettings)
+            .FirstOrDefaultAsync(u =>
+                u.Id == userId &&
+                u.TenantId == _tenant.TenantId &&
+                !u.IsDeleted &&
+                (u.Role == UserRole.MasterAdmin || (u.IsMaster && u.Role != UserRole.SuperAdmin)), ct)
+            ?? throw new KeyNotFoundException("Owner not found.");
+
+        user.AllowedNotificationChannels = request.AllowedChannels;
+
+        var settings = user.AlertSettings;
+        if (settings is null)
+        {
+            settings = new MasterAlertSettings
+            {
+                TenantId = _tenant.TenantId,
+                UserId = user.Id
+            };
+            _db.MasterAlertSettings.Add(settings);
+            user.AlertSettings = settings;
+        }
+
+        settings.NotifyLowStock = request.NotifyLowStock;
+        settings.NotifySubscription = request.NotifySubscription;
+        settings.NotifyDeviceMaintenance = request.NotifyDeviceMaintenance;
+        settings.AlertRecipientEmail = string.IsNullOrWhiteSpace(request.AlertRecipientEmail)
+            ? null
+            : request.AlertRecipientEmail.Trim();
+        settings.OwnerWhatsAppPhone = string.IsNullOrWhiteSpace(request.OwnerWhatsAppPhone)
+            ? null
+            : request.OwnerWhatsAppPhone.Trim();
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("NotificationTarget.Updated", "User", user.Id, ct: ct);
+        return MapTarget(user);
+    }
+
+    private static NotificationTargetDto MapTarget(User u)
+    {
+        var s = u.AlertSettings;
+        return new NotificationTargetDto(
+            u.Id,
+            u.Email,
+            u.FullName,
+            u.AllowedNotificationChannels,
+            s?.NotifyLowStock ?? true,
+            s?.NotifySubscription ?? true,
+            s?.NotifyDeviceMaintenance ?? true,
+            s?.AlertRecipientEmail,
+            s?.OwnerWhatsAppPhone);
+    }
+
     private static MasterSubscriptionRowDto ToSubscriptionRow(UserDashRow u, DateTime today)
     {
         int? daysLeft = u.SubscriptionExpiresAt is null

@@ -85,13 +85,15 @@ public class AlertDispatcher : IAlertDispatcher
                 });
 
                 var body = $"{titleAr}\n{messageAr}\n\n{titleEn}\n{messageEn}";
+                var channels = master.AllowedNotificationChannels;
 
                 // Platform Gmail (Super Admin) is the single sender when configured.
                 var recipient = settings?.AlertRecipientEmail;
                 if (string.IsNullOrWhiteSpace(recipient))
                     recipient = master.Email;
 
-                var canEmail = !string.IsNullOrWhiteSpace(recipient) &&
+                var canEmail = channels.HasFlag(NotificationChannel.Email) &&
+                    !string.IsNullOrWhiteSpace(recipient) &&
                     (
                         (platform is not null &&
                          !string.IsNullOrWhiteSpace(platform.SmtpUsername) &&
@@ -130,8 +132,9 @@ public class AlertDispatcher : IAlertDispatcher
                     }
                 }
 
-                // Legacy per-owner WhatsApp until platform integration ships.
-                if (settings is not null &&
+                // Per-owner WhatsApp until platform integration ships.
+                if (channels.HasFlag(NotificationChannel.WhatsApp) &&
+                    settings is not null &&
                     !string.IsNullOrWhiteSpace(settings.OwnerWhatsAppPhone))
                 {
                     try

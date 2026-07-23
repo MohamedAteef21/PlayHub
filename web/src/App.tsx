@@ -16,10 +16,18 @@ import { UsersPage } from '@/pages/UsersPage';
 import { ActivityLogPage } from '@/pages/ActivityLogPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SuperAdminSettingsPage } from '@/pages/SuperAdminSettingsPage';
 import { useAuthStore, useUiStore } from '@/store';
 import { AuthSessionKeepAlive } from '@/components/AuthSessionKeepAlive';
 import { SuperAdminRouteGuard } from '@/components/SuperAdminRouteGuard';
+import { isSuperAdmin } from '@/lib/permissions';
 import '@/i18n';
+
+function SettingsRoute() {
+  const user = useAuthStore((s) => s.user);
+  if (isSuperAdmin(user)) return <SuperAdminSettingsPage />;
+  return <SettingsPage />;
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
@@ -75,7 +83,7 @@ export default function App() {
               <Route path="users" element={<UsersPage />} />
               <Route path="activity" element={<ActivityLogPage />} />
               <Route path="customers" element={<CustomersPage />} />
-              <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings" element={<SettingsRoute />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

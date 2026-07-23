@@ -43,10 +43,31 @@ public record SuperAdminDashboardDto(
     IReadOnlyList<MasterSubscriptionRowDto> UpcomingExpiries,
     IReadOnlyList<MasterSubscriptionRowDto> LockedOrExpired);
 
+public record NotificationTargetDto(
+    Guid UserId,
+    string Username,
+    string FullName,
+    NotificationChannel AllowedChannels,
+    bool NotifyLowStock,
+    bool NotifySubscription,
+    bool NotifyDeviceMaintenance,
+    string? AlertRecipientEmail,
+    string? OwnerWhatsAppPhone);
+
+public record UpsertNotificationTargetRequest(
+    NotificationChannel AllowedChannels,
+    bool NotifyLowStock,
+    bool NotifySubscription,
+    bool NotifyDeviceMaintenance,
+    string? AlertRecipientEmail,
+    string? OwnerWhatsAppPhone);
+
 public interface IPlatformSettingsService
 {
     Task<PlatformAlertSettingsDto> GetAlertSettingsAsync(CancellationToken ct = default);
     Task<PlatformAlertSettingsDto> UpsertAlertSettingsAsync(UpsertPlatformAlertSettingsRequest request, CancellationToken ct = default);
     Task SendPlatformTestEmailAsync(CancellationToken ct = default);
     Task<SuperAdminDashboardDto> GetDashboardAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<NotificationTargetDto>> GetNotificationTargetsAsync(CancellationToken ct = default);
+    Task<NotificationTargetDto> UpsertNotificationTargetAsync(Guid userId, UpsertNotificationTargetRequest request, CancellationToken ct = default);
 }

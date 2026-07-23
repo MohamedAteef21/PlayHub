@@ -2,8 +2,8 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store';
 import { isSuperAdmin } from '@/lib/permissions';
 
-/** Super Admin may only use dashboard + users. */
-const SUPER_ADMIN_PATHS = new Set(['/', '/users']);
+/** Super Admin may only use dashboard, users, and settings. */
+const SUPER_ADMIN_PATHS = new Set(['/', '/users', '/settings']);
 
 export function SuperAdminRouteGuard({ children }: { children?: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);

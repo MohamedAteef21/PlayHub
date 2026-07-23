@@ -792,6 +792,16 @@ export const platformApi = {
     }),
   testEmail: () =>
     apiFetch<{ message: string }>('/platform/alert-settings/test-email', { method: 'POST' }),
+  getNotificationTargets: () =>
+    apiFetch<import('@/types').NotificationTarget[]>('/platform/notification-targets'),
+  upsertNotificationTarget: (
+    userId: string,
+    data: import('@/types').UpsertNotificationTargetRequest
+  ) =>
+    apiFetch<import('@/types').NotificationTarget>(`/platform/notification-targets/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const auditApi = {

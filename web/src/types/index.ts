@@ -756,6 +756,27 @@ export interface SuperAdminDashboard {
   lockedOrExpired: MasterSubscriptionRow[];
 }
 
+export interface NotificationTarget {
+  userId: string;
+  username: string;
+  fullName: string;
+  allowedChannels: number;
+  notifyLowStock: boolean;
+  notifySubscription: boolean;
+  notifyDeviceMaintenance: boolean;
+  alertRecipientEmail: string | null;
+  ownerWhatsAppPhone: string | null;
+}
+
+export interface UpsertNotificationTargetRequest {
+  allowedChannels: number;
+  notifyLowStock: boolean;
+  notifySubscription: boolean;
+  notifyDeviceMaintenance: boolean;
+  alertRecipientEmail?: string | null;
+  ownerWhatsAppPhone?: string | null;
+}
+
 export interface BranchPaymentAccount {
   id: string;
   accountType: number;

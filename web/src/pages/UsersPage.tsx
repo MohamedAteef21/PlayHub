@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { branchesApi, platformApi, usersApi } from '@/api/client';
+import { branchesApi, usersApi } from '@/api/client';
 import { isSuperAdmin as checkSuperAdmin, normalizePermissionCatalog } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import type { ManagedUser, PermissionInfo } from '@/types';
 import { UserRole } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Icon } from '@/components/ui/Icons';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -52,12 +51,6 @@ export function UsersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const [platformSmtp, setPlatformSmtp] = useState('');
-  const [platformSmtpPassword, setPlatformSmtpPassword] = useState('');
-  const [platformSenderName, setPlatformSenderName] = useState('PlayHub System');
-  const [platformMsg, setPlatformMsg] = useState('');
-  const [platformError, setPlatformError] = useState('');
-
   const { data: usersPage, isLoading } = useQuery({
     queryKey: ['users', page, pageSize],
     queryFn: () => usersApi.getAll(page, pageSize),
@@ -76,51 +69,6 @@ export function UsersPage() {
     queryKey: ['branches'],
     queryFn: branchesApi.getAll,
     enabled: canManage && !isSuperAdmin,
-  });
-
-  const { data: platformSettings } = useQuery({
-    queryKey: ['platform-alert-settings'],
-    queryFn: platformApi.getAlertSettings,
-    enabled: isSuperAdmin,
-  });
-
-  useEffect(() => {
-    if (!platformSettings) return;
-    setPlatformSmtp(platformSettings.smtpUsername || '');
-    setPlatformSenderName(platformSettings.senderDisplayName || 'PlayHub System');
-    setPlatformSmtpPassword('');
-  }, [platformSettings]);
-
-  const savePlatformMutation = useMutation({
-    mutationFn: () =>
-      platformApi.upsertAlertSettings({
-        smtpUsername: platformSmtp.trim() || null,
-        smtpPassword: platformSmtpPassword.trim() || null,
-        senderDisplayName: platformSenderName.trim() || 'PlayHub System',
-        whatsAppIntegrationEnabled: false,
-      }),
-    onSuccess: () => {
-      setPlatformMsg(t('superAdmin.settingsSaved'));
-      setPlatformError('');
-      setPlatformSmtpPassword('');
-      queryClient.invalidateQueries({ queryKey: ['platform-alert-settings'] });
-    },
-    onError: (e: Error) => {
-      setPlatformError(e.message);
-      setPlatformMsg('');
-    },
-  });
-
-  const testPlatformEmailMutation = useMutation({
-    mutationFn: () => platformApi.testEmail(),
-    onSuccess: () => {
-      setPlatformMsg(t('superAdmin.testEmailSent'));
-      setPlatformError('');
-    },
-    onError: (e: Error) => {
-      setPlatformError(e.message);
-      setPlatformMsg('');
-    },
   });
 
   // Staff can never manage users, so the Users permission module is not offered.
@@ -334,70 +282,6 @@ export function UsersPage() {
       </PageHeader>
 
       <p className="mb-6 max-w-2xl text-sm text-muted">{t('users.hint')}</p>
-
-      {isSuperAdmin && (
-        <Card className="mb-6 space-y-4">
-          <div>
-            <h2 className="text-base font-semibold">{t('superAdmin.platformSettings')}</h2>
-            <p className="mt-1 text-sm text-muted">{t('superAdmin.platformSettingsHint')}</p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input
-              label={t('superAdmin.gmail')}
-              type="email"
-              value={platformSmtp}
-              onChange={(e) => setPlatformSmtp(e.target.value)}
-              placeholder="alerts@gmail.com"
-              dir="ltr"
-            />
-            <Input
-              label={t('superAdmin.gmailAppPassword')}
-              type="password"
-              value={platformSmtpPassword}
-              onChange={(e) => setPlatformSmtpPassword(e.target.value)}
-              placeholder={
-                platformSettings?.hasSmtpPassword
-                  ? t('superAdmin.passwordKeep')
-                  : 'App Password'
-              }
-              dir="ltr"
-            />
-            <Input
-              label={t('superAdmin.senderName')}
-              value={platformSenderName}
-              onChange={(e) => setPlatformSenderName(e.target.value)}
-            />
-          </div>
-
-          <div className="rounded-xl border border-border bg-surface/50 px-4 py-3">
-            <p className="text-sm font-medium">{t('superAdmin.whatsappTitle')}</p>
-            <p className="mt-1 text-sm text-muted">{t('superAdmin.whatsappComingSoon')}</p>
-          </div>
-
-          {(platformMsg || platformError) && (
-            <p className={`text-sm ${platformError ? 'text-danger' : 'text-success'}`}>
-              {platformError || platformMsg}
-            </p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              loading={savePlatformMutation.isPending}
-              onClick={() => savePlatformMutation.mutate()}
-            >
-              {t('common.save')}
-            </Button>
-            <Button
-              variant="secondary"
-              loading={testPlatformEmailMutation.isPending}
-              onClick={() => testPlatformEmailMutation.mutate()}
-            >
-              {t('superAdmin.testEmail')}
-            </Button>
-          </div>
-        </Card>
-      )}
 
       {error && !open && (
         <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
