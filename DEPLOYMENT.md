@@ -27,6 +27,10 @@
 
 ### ج. البناء والرفع
 ```powershell
+# 1) ابنِ الفرونت وانسخه داخل wwwroot بتاع الـ API
+powershell -File scripts/sync-spa.ps1
+
+# 2) انشر الـ API (مع الـ SPA جوه wwwroot)
 dotnet publish src/PlayHub.Api/PlayHub.Api.csproj -c Release -o publish/api
 Compress-Archive -Path publish/api/* -DestinationPath publish/playhub-api.zip -Force
 ```
