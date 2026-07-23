@@ -57,13 +57,15 @@ public record OpenSessionRequest(
     bool IsQuickGuest = false);
 
 /// <summary>
-/// Change pricing mid-session (watching→gaming, hourly↔per-match, individual↔couple).
+/// Change pricing / mode mid-session (gaming↔watching, hourly↔per-match, individual↔couple).
 /// Accrues the current segment, then starts a new timer/segment with the selected plan.
 /// </summary>
 public record ConvertSessionRequest(
     Guid PricingPlanId,
-    /// <summary>1–2 = individual (فردي), 3–4 = couple (زوجي).</summary>
-    int ControllerCount,
+    /// <summary>Required for gaming targets: 1–2 = individual (فردي), 3–4 = couple (زوجي).</summary>
+    int? ControllerCount = null,
+    /// <summary>Required for watching targets: number of watchers.</summary>
+    int? WatcherCount = null,
     /// <summary>Required when leaving a per-match (PerGame) segment.</summary>
     int? MatchCount = null);
 
@@ -91,7 +93,9 @@ public record BillingSegmentDto(
     decimal Amount,
     DateTime StartedAt,
     DateTime EndedAt,
-    int? ControllerTier);
+    int? ControllerTier,
+    /// <summary>Watcher/guest headcount when this segment is watching (for invoice formulas).</summary>
+    int? PeopleCount = null);
 
 public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
@@ -186,6 +190,7 @@ public record SessionHistoryDto(
     Guid DeviceId,
     string DeviceName,
     string? RoomName,
+    string? BranchName,
     SessionMode SessionMode,
     SessionStatus Status,
     DateTime StartedAt,
@@ -204,7 +209,12 @@ public interface ISessionService
 {
     Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default);
     Task<PlayHub.Application.Common.PagedResult<SessionHistoryDto>> GetSessionHistoryAsync(
-        DateTime? from = null, DateTime? to = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
+        Guid? customerId = null,
+        CancellationToken ct = default);
     Task<SessionDetailDto?> GetSessionByIdAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> OpenSessionAsync(OpenSessionRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> PauseSessionAsync(Guid id, CancellationToken ct = default);
@@ -236,4 +246,6 @@ public interface ISessionCostCalculator
         decimal? billableUnitsOverride = null);
     TimeUnit? GetTimeUnit(string rateSnapshotJson);
     decimal GetGamingRate(string rateSnapshotJson, int? controllerCount);
+    decimal GetWatchingRatePerPerson(string rateSnapshotJson);
+    WatchingBilling? GetWatchingBilling(string rateSnapshotJson);
 }

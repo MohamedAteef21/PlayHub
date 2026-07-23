@@ -31,8 +31,9 @@ public class SessionsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] Guid? customerId = null,
         CancellationToken ct = default) =>
-        await ExecuteAsync(() => _sessionService.GetSessionHistoryAsync(from, to, page, pageSize, ct));
+        await ExecuteAsync(() => _sessionService.GetSessionHistoryAsync(from, to, page, pageSize, customerId, ct));
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = PermissionPolicies.SessionsView)]

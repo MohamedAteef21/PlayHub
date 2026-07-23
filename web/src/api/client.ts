@@ -195,7 +195,12 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number; matchCount?: number | null }) =>
+  convert: (id: string, data: {
+    pricingPlanId: string;
+    controllerCount?: number | null;
+    watcherCount?: number | null;
+    matchCount?: number | null;
+  }) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -918,6 +923,10 @@ export const customersApi = {
   getWalletTransactions: (id: string, page = 1, pageSize = 20) =>
     apiFetch<import('@/types').PagedResult<import('@/types').WalletTransaction>>(
       `/customers/${id}/wallet?page=${page}&pageSize=${pageSize}`
+    ),
+  getSessions: (id: string, page = 1, pageSize = 20) =>
+    apiFetch<import('@/types').PagedResult<import('@/types').SessionHistory>>(
+      `/customers/${id}/sessions?page=${page}&pageSize=${pageSize}`
     ),
 };
 
