@@ -924,6 +924,10 @@ export const customersApi = {
     apiFetch<import('@/types').PagedResult<import('@/types').WalletTransaction>>(
       `/customers/${id}/wallet?page=${page}&pageSize=${pageSize}`
     ),
+  getSessions: (id: string, page = 1, pageSize = 20) =>
+    apiFetch<import('@/types').PagedResult<import('@/types').SessionHistory>>(
+      `/customers/${id}/sessions?page=${page}&pageSize=${pageSize}`
+    ),
 };
 
 export const offersApi = {

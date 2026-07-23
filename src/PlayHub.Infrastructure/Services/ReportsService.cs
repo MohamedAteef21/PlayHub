@@ -36,18 +36,32 @@ public class ReportsService : IReportsService
         var sessionRev = entries.Where(e => e.RevenueType == RevenueType.Session).Sum(e => e.Amount);
         var cafeteriaRev = entries.Where(e => e.RevenueType == RevenueType.Cafeteria).Sum(e => e.Amount);
 
+        var fromDay = DateOnly.FromDateTime(fromDate);
+        var toDay = DateOnly.FromDateTime(to.Date);
+        var manualEntries = await _db.Expenses
+            .Where(e => e.BranchId == effectiveBranchId
+                && e.ExpenseDate >= fromDay && e.ExpenseDate <= toDay
+                && e.Category.Kind == ExpenseCategoryKind.Revenue)
+            .Select(e => new { e.ExpenseDate, e.Amount })
+            .ToListAsync(ct);
+        var manualRev = manualEntries.Sum(e => e.Amount);
+
         var daily = new List<DailyRevenueDto>();
-        for (var day = DateOnly.FromDateTime(fromDate); day <= DateOnly.FromDateTime(toDate); day = day.AddDays(1))
+        for (var day = DateOnly.FromDateTime(fromDate); day <= DateOnly.FromDateTime(to.Date); day = day.AddDays(1))
         {
             var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var dayEnd = day.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
             var dayEntries = entries.Where(e => e.RecordedAt >= dayStart && e.RecordedAt <= dayEnd).ToList();
             var s = dayEntries.Where(e => e.RevenueType == RevenueType.Session).Sum(e => e.Amount);
             var c = dayEntries.Where(e => e.RevenueType == RevenueType.Cafeteria).Sum(e => e.Amount);
-            daily.Add(new DailyRevenueDto(day, s, c, s + c));
+            var m = manualEntries.Where(e => e.ExpenseDate == day).Sum(e => e.Amount);
+            daily.Add(new DailyRevenueDto(day, s, c, m, s + c + m));
         }
 
-        return new RevenueReportDto(fromDate, toDate, effectiveBranchId, sessionRev + cafeteriaRev, sessionRev, cafeteriaRev, daily);
+        return new RevenueReportDto(
+            fromDate, toDate, effectiveBranchId,
+            sessionRev + cafeteriaRev + manualRev,
+            sessionRev, cafeteriaRev, manualRev, daily);
     }
 
     public async Task<IReadOnlyList<BestSellerDto>> GetBestSellersAsync(

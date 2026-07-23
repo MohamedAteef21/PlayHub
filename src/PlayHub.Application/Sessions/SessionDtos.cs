@@ -190,6 +190,7 @@ public record SessionHistoryDto(
     Guid DeviceId,
     string DeviceName,
     string? RoomName,
+    string? BranchName,
     SessionMode SessionMode,
     SessionStatus Status,
     DateTime StartedAt,
@@ -208,7 +209,12 @@ public interface ISessionService
 {
     Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default);
     Task<PlayHub.Application.Common.PagedResult<SessionHistoryDto>> GetSessionHistoryAsync(
-        DateTime? from = null, DateTime? to = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
+        Guid? customerId = null,
+        CancellationToken ct = default);
     Task<SessionDetailDto?> GetSessionByIdAsync(Guid id, CancellationToken ct = default);
     Task<SessionLiveDto> OpenSessionAsync(OpenSessionRequest request, CancellationToken ct = default);
     Task<SessionLiveDto> PauseSessionAsync(Guid id, CancellationToken ct = default);

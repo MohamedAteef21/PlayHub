@@ -220,6 +220,7 @@ export interface SessionHistory {
   deviceId: string;
   deviceName: string;
   roomName: string | null;
+  branchName?: string | null;
   sessionMode: number;
   status: number;
   startedAt: string;
@@ -229,6 +230,10 @@ export interface SessionHistory {
   timeCost: number;
   cafeteriaCost: number;
   totalCost: number;
+  customerId?: string | null;
+  customerName?: string | null;
+  isQuickGuest?: boolean;
+  quickGuestName?: string | null;
 }
 
 export interface AssetDashboard {
@@ -567,7 +572,14 @@ export interface RevenueReport {
   totalRevenue: number;
   sessionRevenue: number;
   cafeteriaRevenue: number;
-  daily: { date: string; sessionRevenue: number; cafeteriaRevenue: number; total: number }[];
+  manualRevenue: number;
+  daily: {
+    date: string;
+    sessionRevenue: number;
+    cafeteriaRevenue: number;
+    manualRevenue: number;
+    total: number;
+  }[];
 }
 
 export interface BestSeller {

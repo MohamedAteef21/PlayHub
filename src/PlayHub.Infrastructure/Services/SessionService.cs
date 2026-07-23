@@ -44,20 +44,38 @@ public class SessionService : ISessionService
     }
 
     public async Task<PagedResult<SessionHistoryDto>> GetSessionHistoryAsync(
-        DateTime? from = null, DateTime? to = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
+        Guid? customerId = null,
+        CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
 
         var query = _db.Sessions
             .AsNoTracking()
             .Include(s => s.Device)
             .Include(s => s.Room)
+            .Include(s => s.Branch)
             .Include(s => s.OpenedByUser)
             .Include(s => s.ClosedByUser)
             .Include(s => s.Customer)
             .Include(s => s.CafeteriaLines)
-            .Where(s => s.BranchId == branchId);
+            .AsQueryable();
+
+        if (customerId.HasValue)
+        {
+            var allowed = _tenantContext.AllowedBranchIds;
+            query = query.Where(s =>
+                s.CustomerId == customerId.Value
+                && allowed.Contains(s.BranchId));
+        }
+        else
+        {
+            var branchId = BranchGuard.RequireBranchId(_tenantContext);
+            query = query.Where(s => s.BranchId == branchId);
+        }
 
         if (from.HasValue)
             query = query.Where(s => s.StartedAt >= from.Value);
@@ -1125,6 +1143,7 @@ public class SessionService : ISessionService
             session.DeviceId,
             session.Device.Name,
             session.Room?.Name,
+            session.Branch?.Name,
             session.SessionMode,
             session.Status,
             session.StartedAt,
