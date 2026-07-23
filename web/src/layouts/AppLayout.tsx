@@ -6,7 +6,7 @@ import { useAuthStore, useUiStore } from '@/store';
 import { authApi } from '@/api/client';
 import { Icon, type IconName } from '@/components/ui/Icons';
 import { GlobalBusyOverlay } from '@/components/ui/GlobalBusyOverlay';
-import { hasPermission, Permissions } from '@/lib/permissions';
+import { hasPermission, isSuperAdmin, Permissions } from '@/lib/permissions';
 
 const navItems: {
   to: string;
@@ -87,8 +87,10 @@ export function AppLayout() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [userMenuOpen]);
 
+  // Super Admin: no venue branch required — stay on dashboard/users.
   useEffect(() => {
     if (!user) return;
+    if (isSuperAdmin(user)) return;
     if (activeBranchId) return;
     // Master Admin with no venues yet: stay in the app and create a branch from Settings.
     if (user.isMaster && user.branches.length === 0) return;
@@ -111,9 +113,10 @@ export function AppLayout() {
     return null;
   }
 
-  const needsFirstBranch = user.isMaster && user.branches.length === 0 && !activeBranchId;
+  const superAdmin = isSuperAdmin(user);
+  const needsFirstBranch = !superAdmin && user.isMaster && user.branches.length === 0 && !activeBranchId;
 
-  if (!activeBranchId && !needsFirstBranch) {
+  if (!activeBranchId && !needsFirstBranch && !superAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-surface text-muted">
         {t('common.loading')}
@@ -170,6 +173,9 @@ export function AppLayout() {
 
   const railCollapsed = sidebarCollapsed;
   const visibleNav = navItems.filter((item) => {
+    if (superAdmin) {
+      return item.to === '/' || item.to === '/users';
+    }
     if (item.masterOnly && !user.isMaster) return false;
     if (item.anyPermission?.length) {
       return item.anyPermission.some((p) => hasPermission(user, p));

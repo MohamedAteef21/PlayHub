@@ -774,6 +774,26 @@ export const alertsApi = {
   },
 };
 
+export const platformApi = {
+  getDashboard: () => apiFetch<import('@/types').SuperAdminDashboard>('/platform/dashboard'),
+  getAlertSettings: () =>
+    apiFetch<import('@/types').PlatformAlertSettings>('/platform/alert-settings'),
+  upsertAlertSettings: (data: {
+    smtpUsername?: string | null;
+    smtpPassword?: string | null;
+    senderDisplayName?: string | null;
+    whatsAppIntegrationApiBaseUrl?: string | null;
+    whatsAppIntegrationApiKey?: string | null;
+    whatsAppIntegrationEnabled?: boolean;
+  }) =>
+    apiFetch<import('@/types').PlatformAlertSettings>('/platform/alert-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  testEmail: () =>
+    apiFetch<{ message: string }>('/platform/alert-settings/test-email', { method: 'POST' }),
+};
+
 export const auditApi = {
   getLogs: (params: {
     page?: number;

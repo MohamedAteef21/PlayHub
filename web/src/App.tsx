@@ -18,6 +18,7 @@ import { CustomersPage } from '@/pages/CustomersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { useAuthStore, useUiStore } from '@/store';
 import { AuthSessionKeepAlive } from '@/components/AuthSessionKeepAlive';
+import { SuperAdminRouteGuard } from '@/components/SuperAdminRouteGuard';
 import '@/i18n';
 
 export const queryClient = new QueryClient({
@@ -63,17 +64,19 @@ export default function App() {
           <Route element={
             <ProtectedRoute><AppLayout /></ProtectedRoute>
           }>
-            <Route index element={<HomeDashboardPage />} />
-            <Route path="floor" element={<DashboardPage />} />
-            <Route path="sessions" element={<SessionHistoryPage />} />
-            <Route path="cafeteria" element={<CafeteriaPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="accounting" element={<AccountingPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="activity" element={<ActivityLogPage />} />
-            <Route path="customers" element={<CustomersPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route element={<SuperAdminRouteGuard />}>
+              <Route index element={<HomeDashboardPage />} />
+              <Route path="floor" element={<DashboardPage />} />
+              <Route path="sessions" element={<SessionHistoryPage />} />
+              <Route path="cafeteria" element={<CafeteriaPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="accounting" element={<AccountingPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="activity" element={<ActivityLogPage />} />
+              <Route path="customers" element={<CustomersPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

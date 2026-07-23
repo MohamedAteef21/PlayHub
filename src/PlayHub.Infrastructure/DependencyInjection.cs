@@ -13,6 +13,7 @@ using PlayHub.Application.Customers;
 using PlayHub.Application.Inventory;
 using PlayHub.Application.Notifications;
 using PlayHub.Application.Offers;
+using PlayHub.Application.Platform;
 using PlayHub.Application.Pricing;
 using PlayHub.Application.PurchaseOrders;
 using PlayHub.Application.Receivables;
@@ -63,6 +64,7 @@ public static class DependencyInjection
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IAlertDispatcher, AlertDispatcher>();
         services.AddScoped<IAlertSettingsService, AlertSettingsService>();
+        services.AddScoped<IPlatformSettingsService, PlatformSettingsService>();
         services.AddScoped<IDeviceMaintenanceService, DeviceMaintenanceService>();
         services.AddScoped<IInvoicePdfService, InvoicePdfService>();
         services.AddHttpClient("WhatsApp", client =>

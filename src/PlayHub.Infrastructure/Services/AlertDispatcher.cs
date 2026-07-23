@@ -42,12 +42,17 @@ public class AlertDispatcher : IAlertDispatcher
 
         try
         {
+            var platform = await _db.PlatformAlertSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId, ct);
+
             var masters = await _db.Users
                 .IgnoreQueryFilters()
                 .Include(u => u.AlertSettings)
                 .Where(u =>
                     u.TenantId == tenantId &&
                     u.IsMaster &&
+                    u.Role != UserRole.SuperAdmin &&
                     u.IsActive &&
                     !u.IsDeleted)
                 .ToListAsync(ct);
@@ -79,18 +84,45 @@ public class AlertDispatcher : IAlertDispatcher
                     RelatedEntityId = relatedEntityId
                 });
 
-                var allowed = master.AllowedNotificationChannels;
                 var body = $"{titleAr}\n{messageAr}\n\n{titleEn}\n{messageEn}";
 
-                if (allowed.HasFlag(NotificationChannel.Email) &&
-                    settings is not null &&
-                    !string.IsNullOrWhiteSpace(settings.AlertRecipientEmail) &&
-                    !string.IsNullOrWhiteSpace(settings.SmtpUsername) &&
-                    !string.IsNullOrWhiteSpace(settings.SmtpPassword))
+                // Platform Gmail (Super Admin) is the single sender when configured.
+                var recipient = settings?.AlertRecipientEmail;
+                if (string.IsNullOrWhiteSpace(recipient))
+                    recipient = master.Email;
+
+                var canEmail = !string.IsNullOrWhiteSpace(recipient) &&
+                    (
+                        (platform is not null &&
+                         !string.IsNullOrWhiteSpace(platform.SmtpUsername) &&
+                         !string.IsNullOrWhiteSpace(platform.SmtpPassword))
+                        ||
+                        (settings is not null &&
+                         !string.IsNullOrWhiteSpace(settings.SmtpUsername) &&
+                         !string.IsNullOrWhiteSpace(settings.SmtpPassword))
+                    );
+
+                if (canEmail)
                 {
                     try
                     {
-                        await _email.SendAsync(settings, settings.AlertRecipientEmail, titleAr, body, ct: ct);
+                        if (platform is not null &&
+                            !string.IsNullOrWhiteSpace(platform.SmtpUsername) &&
+                            !string.IsNullOrWhiteSpace(platform.SmtpPassword))
+                        {
+                            await _email.SendWithCredentialsAsync(
+                                platform.SmtpUsername,
+                                platform.SmtpPassword,
+                                platform.SenderDisplayName,
+                                recipient!,
+                                titleAr,
+                                body,
+                                ct: ct);
+                        }
+                        else if (settings is not null)
+                        {
+                            await _email.SendAsync(settings, recipient!, titleAr, body, ct: ct);
+                        }
                     }
                     catch
                     {
@@ -98,8 +130,8 @@ public class AlertDispatcher : IAlertDispatcher
                     }
                 }
 
-                if (allowed.HasFlag(NotificationChannel.WhatsApp) &&
-                    settings is not null &&
+                // Legacy per-owner WhatsApp until platform integration ships.
+                if (settings is not null &&
                     !string.IsNullOrWhiteSpace(settings.OwnerWhatsAppPhone))
                 {
                     try

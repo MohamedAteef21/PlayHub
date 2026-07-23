@@ -73,6 +73,17 @@ public interface IEmailSender
         byte[]? pdfAttachment = null,
         string? pdfFileName = null,
         CancellationToken ct = default);
+
+    Task SendWithCredentialsAsync(
+        string smtpUsername,
+        string smtpPassword,
+        string? senderDisplayName,
+        string toEmail,
+        string subject,
+        string bodyText,
+        byte[]? pdfAttachment = null,
+        string? pdfFileName = null,
+        CancellationToken ct = default);
 }
 
 public interface IAlertDispatcher

@@ -484,6 +484,22 @@ public class MasterAlertSettingsConfiguration : IEntityTypeConfiguration<MasterA
     }
 }
 
+public class PlatformAlertSettingsConfiguration : IEntityTypeConfiguration<PlatformAlertSettings>
+{
+    public void Configure(EntityTypeBuilder<PlatformAlertSettings> builder)
+    {
+        builder.ToTable("platform_alert_settings");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.SmtpUsername).HasMaxLength(256);
+        builder.Property(x => x.SmtpPassword).HasMaxLength(500);
+        builder.Property(x => x.SenderDisplayName).HasMaxLength(200);
+        builder.Property(x => x.WhatsAppIntegrationApiBaseUrl).HasMaxLength(500);
+        builder.Property(x => x.WhatsAppIntegrationApiKey).HasMaxLength(500);
+        builder.HasIndex(x => x.TenantId).IsUnique();
+        builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+    }
+}
+
 public class DeviceMaintenanceConfiguration : IEntityTypeConfiguration<DeviceMaintenance>
 {
     public void Configure(EntityTypeBuilder<DeviceMaintenance> builder)

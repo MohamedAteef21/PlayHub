@@ -8,7 +8,7 @@ namespace PlayHub.Infrastructure.Services;
 
 public class EmailSender : IEmailSender
 {
-    public async Task SendAsync(
+    public Task SendAsync(
         MasterAlertSettings settings,
         string toEmail,
         string subject,
@@ -20,17 +20,43 @@ public class EmailSender : IEmailSender
         if (string.IsNullOrWhiteSpace(settings.SmtpUsername) || string.IsNullOrWhiteSpace(settings.SmtpPassword))
             throw new InvalidOperationException("Gmail SMTP credentials are not configured.");
 
+        return SendWithCredentialsAsync(
+            settings.SmtpUsername,
+            settings.SmtpPassword,
+            settings.SenderDisplayName,
+            toEmail,
+            subject,
+            bodyText,
+            pdfAttachment,
+            pdfFileName,
+            ct);
+    }
+
+    public async Task SendWithCredentialsAsync(
+        string smtpUsername,
+        string smtpPassword,
+        string? senderDisplayName,
+        string toEmail,
+        string subject,
+        string bodyText,
+        byte[]? pdfAttachment = null,
+        string? pdfFileName = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(smtpUsername) || string.IsNullOrWhiteSpace(smtpPassword))
+            throw new InvalidOperationException("Gmail SMTP credentials are not configured.");
+
         if (string.IsNullOrWhiteSpace(toEmail))
             throw new InvalidOperationException("Recipient email is required.");
 
-        var host = string.IsNullOrWhiteSpace(settings.SmtpHost) ? "smtp.gmail.com" : settings.SmtpHost.Trim();
-        var port = settings.SmtpPort > 0 ? settings.SmtpPort : 587;
+        const string host = "smtp.gmail.com";
+        const int port = 587;
 
         var message = new MimeMessage();
-        var fromName = string.IsNullOrWhiteSpace(settings.SenderDisplayName)
-            ? "PlayHub"
-            : settings.SenderDisplayName.Trim();
-        message.From.Add(new MailboxAddress(fromName, settings.SmtpUsername.Trim()));
+        var fromName = string.IsNullOrWhiteSpace(senderDisplayName)
+            ? "PlayHub System"
+            : senderDisplayName.Trim();
+        message.From.Add(new MailboxAddress(fromName, smtpUsername.Trim()));
         message.To.Add(MailboxAddress.Parse(toEmail.Trim()));
         message.Subject = subject;
 
@@ -47,7 +73,7 @@ public class EmailSender : IEmailSender
 
         using var client = new SmtpClient();
         await client.ConnectAsync(host, port, SecureSocketOptions.StartTls, ct);
-        await client.AuthenticateAsync(settings.SmtpUsername.Trim(), settings.SmtpPassword, ct);
+        await client.AuthenticateAsync(smtpUsername.Trim(), smtpPassword, ct);
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(true, ct);
     }

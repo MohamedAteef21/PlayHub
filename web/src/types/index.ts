@@ -722,6 +722,40 @@ export const PaymentAccountType = { BankTransfer: 1, DigitalWallet: 2 } as const
 export { NotificationChannel } from './alerts';
 export type { MasterAlertSettings, DeviceMaintenance } from './alerts';
 
+export interface PlatformAlertSettings {
+  id: string | null;
+  smtpUsername: string | null;
+  hasSmtpPassword: boolean;
+  senderDisplayName: string | null;
+  whatsAppComingSoon: boolean;
+  whatsAppIntegrationApiBaseUrl: string | null;
+  hasWhatsAppIntegrationApiKey: boolean;
+  whatsAppIntegrationEnabled: boolean;
+}
+
+export interface MasterSubscriptionRow {
+  id: string;
+  username: string;
+  fullName: string;
+  subscriptionExpiresAt: string | null;
+  isActive: boolean;
+  isLocked: boolean;
+  daysLeft: number | null;
+}
+
+export interface SuperAdminDashboard {
+  mastersCount: number;
+  activeMastersCount: number;
+  inactiveMastersCount: number;
+  staffCount: number;
+  totalUsers: number;
+  expiringWithin7Days: number;
+  expiringWithin30Days: number;
+  expiredOrLocked: number;
+  upcomingExpiries: MasterSubscriptionRow[];
+  lockedOrExpired: MasterSubscriptionRow[];
+}
+
 export interface BranchPaymentAccount {
   id: string;
   accountType: number;

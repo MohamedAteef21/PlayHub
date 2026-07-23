@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { branchesApi, usersApi } from '@/api/client';
-import { normalizePermissionCatalog } from '@/lib/permissions';
+import { branchesApi, platformApi, usersApi } from '@/api/client';
+import { isSuperAdmin as checkSuperAdmin, normalizePermissionCatalog } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import type { ManagedUser, PermissionInfo } from '@/types';
-import { NotificationChannel, UserRole } from '@/types';
+import { UserRole } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Icon } from '@/components/ui/Icons';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -32,7 +33,7 @@ export function UsersPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
   const canManage = !!user?.isMaster;
-  const isSuperAdmin = user?.role === UserRole.SuperAdmin || (user?.isMaster && user?.role == null);
+  const isSuperAdmin = checkSuperAdmin(user);
 
   const [open, setOpen] = useState(false);
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
@@ -43,7 +44,6 @@ export function UsersPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<number>(UserRole.Staff);
-  const [allowedChannels, setAllowedChannels] = useState<number>(NotificationChannel.EmailAndWhatsApp);
   const [isActive, setIsActive] = useState(true);
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState('');
   const [selectedPerms, setSelectedPerms] = useState<string[]>([]);
@@ -51,6 +51,12 @@ export function UsersPage() {
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+
+  const [platformSmtp, setPlatformSmtp] = useState('');
+  const [platformSmtpPassword, setPlatformSmtpPassword] = useState('');
+  const [platformSenderName, setPlatformSenderName] = useState('PlayHub System');
+  const [platformMsg, setPlatformMsg] = useState('');
+  const [platformError, setPlatformError] = useState('');
 
   const { data: usersPage, isLoading } = useQuery({
     queryKey: ['users', page, pageSize],
@@ -69,7 +75,52 @@ export function UsersPage() {
   const { data: branches = [] } = useQuery({
     queryKey: ['branches'],
     queryFn: branchesApi.getAll,
-    enabled: canManage,
+    enabled: canManage && !isSuperAdmin,
+  });
+
+  const { data: platformSettings } = useQuery({
+    queryKey: ['platform-alert-settings'],
+    queryFn: platformApi.getAlertSettings,
+    enabled: isSuperAdmin,
+  });
+
+  useEffect(() => {
+    if (!platformSettings) return;
+    setPlatformSmtp(platformSettings.smtpUsername || '');
+    setPlatformSenderName(platformSettings.senderDisplayName || 'PlayHub System');
+    setPlatformSmtpPassword('');
+  }, [platformSettings]);
+
+  const savePlatformMutation = useMutation({
+    mutationFn: () =>
+      platformApi.upsertAlertSettings({
+        smtpUsername: platformSmtp.trim() || null,
+        smtpPassword: platformSmtpPassword.trim() || null,
+        senderDisplayName: platformSenderName.trim() || 'PlayHub System',
+        whatsAppIntegrationEnabled: false,
+      }),
+    onSuccess: () => {
+      setPlatformMsg(t('superAdmin.settingsSaved'));
+      setPlatformError('');
+      setPlatformSmtpPassword('');
+      queryClient.invalidateQueries({ queryKey: ['platform-alert-settings'] });
+    },
+    onError: (e: Error) => {
+      setPlatformError(e.message);
+      setPlatformMsg('');
+    },
+  });
+
+  const testPlatformEmailMutation = useMutation({
+    mutationFn: () => platformApi.testEmail(),
+    onSuccess: () => {
+      setPlatformMsg(t('superAdmin.testEmailSent'));
+      setPlatformError('');
+    },
+    onError: (e: Error) => {
+      setPlatformError(e.message);
+      setPlatformMsg('');
+    },
   });
 
   // Staff can never manage users, so the Users permission module is not offered.
@@ -149,7 +200,6 @@ export function UsersPage() {
     setFirstName('');
     setLastName('');
     setRole(isSuperAdmin ? UserRole.MasterAdmin : UserRole.Staff);
-    setAllowedChannels(NotificationChannel.EmailAndWhatsApp);
     setIsActive(true);
     setSubscriptionExpiresAt('');
     setSelectedPerms([]);
@@ -170,7 +220,6 @@ export function UsersPage() {
     setFirstName(u.firstName);
     setLastName(u.lastName);
     setRole(u.role ?? (u.isMaster ? UserRole.SuperAdmin : UserRole.Staff));
-    setAllowedChannels(u.allowedNotificationChannels ?? NotificationChannel.EmailAndWhatsApp);
     setIsActive(u.isActive);
     setSubscriptionExpiresAt(u.subscriptionExpiresAt ? u.subscriptionExpiresAt.slice(0, 10) : '');
     setSelectedPerms(u.permissions.filter((p) => p !== '*'));
@@ -221,7 +270,6 @@ export function UsersPage() {
         role,
         isMaster: isPrivilegedRole,
         subscriptionExpiresAt: isSuperAdmin ? subscriptionExpiresAt || null : null,
-        allowedNotificationChannels: isSuperAdmin && isPrivilegedRole ? allowedChannels : undefined,
         permissionCodes: role === UserRole.Staff ? selectedPerms : undefined,
         branchIds: isPrivilegedRole ? [] : selectedBranches,
       }),
@@ -243,7 +291,6 @@ export function UsersPage() {
         role,
         isMaster: isPrivilegedRole,
         subscriptionExpiresAt: isSuperAdmin ? subscriptionExpiresAt || null : editUser!.subscriptionExpiresAt,
-        allowedNotificationChannels: isSuperAdmin && isPrivilegedRole ? allowedChannels : undefined,
         permissionCodes: role === UserRole.Staff ? selectedPerms : undefined,
         branchIds: isPrivilegedRole ? [] : selectedBranches,
       }),
@@ -287,6 +334,70 @@ export function UsersPage() {
       </PageHeader>
 
       <p className="mb-6 max-w-2xl text-sm text-muted">{t('users.hint')}</p>
+
+      {isSuperAdmin && (
+        <Card className="mb-6 space-y-4">
+          <div>
+            <h2 className="text-base font-semibold">{t('superAdmin.platformSettings')}</h2>
+            <p className="mt-1 text-sm text-muted">{t('superAdmin.platformSettingsHint')}</p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              label={t('superAdmin.gmail')}
+              type="email"
+              value={platformSmtp}
+              onChange={(e) => setPlatformSmtp(e.target.value)}
+              placeholder="alerts@gmail.com"
+              dir="ltr"
+            />
+            <Input
+              label={t('superAdmin.gmailAppPassword')}
+              type="password"
+              value={platformSmtpPassword}
+              onChange={(e) => setPlatformSmtpPassword(e.target.value)}
+              placeholder={
+                platformSettings?.hasSmtpPassword
+                  ? t('superAdmin.passwordKeep')
+                  : 'App Password'
+              }
+              dir="ltr"
+            />
+            <Input
+              label={t('superAdmin.senderName')}
+              value={platformSenderName}
+              onChange={(e) => setPlatformSenderName(e.target.value)}
+            />
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface/50 px-4 py-3">
+            <p className="text-sm font-medium">{t('superAdmin.whatsappTitle')}</p>
+            <p className="mt-1 text-sm text-muted">{t('superAdmin.whatsappComingSoon')}</p>
+          </div>
+
+          {(platformMsg || platformError) && (
+            <p className={`text-sm ${platformError ? 'text-danger' : 'text-success'}`}>
+              {platformError || platformMsg}
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              loading={savePlatformMutation.isPending}
+              onClick={() => savePlatformMutation.mutate()}
+            >
+              {t('common.save')}
+            </Button>
+            <Button
+              variant="secondary"
+              loading={testPlatformEmailMutation.isPending}
+              onClick={() => testPlatformEmailMutation.mutate()}
+            >
+              {t('superAdmin.testEmail')}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {error && !open && (
         <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -418,43 +529,6 @@ export function UsersPage() {
                   : t('users.permissionsHint')}
             </p>
           </div>
-
-          {isSuperAdmin && isPrivilegedRole && (
-            <div>
-              <p className="mb-2 text-sm font-medium">{t('users.notificationChannels')}</p>
-              <p className="mb-2 text-xs text-muted">{t('users.notificationChannelsHint')}</p>
-              <div className="flex flex-wrap gap-4">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={(allowedChannels & NotificationChannel.Email) !== 0}
-                    onChange={(e) =>
-                      setAllowedChannels((prev) =>
-                        e.target.checked
-                          ? prev | NotificationChannel.Email
-                          : prev & ~NotificationChannel.Email
-                      )
-                    }
-                  />
-                  {t('users.channelGmail')}
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={(allowedChannels & NotificationChannel.WhatsApp) !== 0}
-                    onChange={(e) =>
-                      setAllowedChannels((prev) =>
-                        e.target.checked
-                          ? prev | NotificationChannel.WhatsApp
-                          : prev & ~NotificationChannel.WhatsApp
-                      )
-                    }
-                  />
-                  {t('users.channelWhatsApp')}
-                </label>
-              </div>
-            </div>
-          )}
 
           {editUser && (
             <>
