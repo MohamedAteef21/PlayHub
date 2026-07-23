@@ -38,7 +38,18 @@ public record SessionLiveDto(
     string? CustomerPhone,
     bool IsQuickGuest,
     string? QuickGuestName,
-    IReadOnlyList<SessionCafeteriaLineDto> CafeteriaLines);
+    IReadOnlyList<SessionCafeteriaLineDto> CafeteriaLines,
+    IReadOnlyList<SessionEquipmentAllocationDto> EquipmentAllocations);
+
+public record SessionEquipmentAllocationDto(
+    Guid BranchEquipmentId,
+    string EquipmentName,
+    short EquipmentKind,
+    int Quantity);
+
+public record SessionEquipmentLineRequest(
+    Guid BranchEquipmentId,
+    int Quantity);
 
 public record OpenSessionRequest(
     Guid DeviceId,
@@ -50,7 +61,8 @@ public record OpenSessionRequest(
     int? PlannedDurationMinutes = null,
     Guid? CustomerId = null,
     string? QuickGuestName = null,
-    bool IsQuickGuest = false);
+    bool IsQuickGuest = false,
+    IReadOnlyList<SessionEquipmentLineRequest>? Equipment = null);
 
 /// <summary>
 /// Convert an open Watching session to hourly Gaming.
@@ -59,7 +71,8 @@ public record OpenSessionRequest(
 public record ConvertSessionRequest(
     Guid PricingPlanId,
     /// <summary>1 = individual (فردي), 2 = couple (زوجي).</summary>
-    int ControllerCount);
+    int ControllerCount,
+    IReadOnlyList<SessionEquipmentLineRequest>? Equipment = null);
 
 public record CloseSessionPaymentRequest(
     PaymentMethod PaymentMethod,

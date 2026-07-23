@@ -149,6 +149,52 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> DeleteDevice(Guid id, CancellationToken ct) =>
         await ExecuteNoContentAsync(() => _assetService.SoftDeleteDeviceAsync(id, ct));
 
+    // --- Branch equipment (controllers, paddles, cues, balls) ---
+
+    [HttpGet("equipment")]
+    [Authorize(Policy = PermissionPolicies.SessionsView)]
+    [ProducesResponseType(typeof(IReadOnlyList<BranchEquipmentDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetEquipment(CancellationToken ct) =>
+        await ExecuteAsync(() => _assetService.GetBranchEquipmentAsync(ct));
+
+    [HttpPost("equipment/ensure-defaults")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(typeof(IReadOnlyList<BranchEquipmentDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> EnsureDefaultEquipment(CancellationToken ct) =>
+        await ExecuteAsync(() => _assetService.EnsureDefaultBranchEquipmentAsync(ct));
+
+    [HttpPost("equipment")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(typeof(BranchEquipmentDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> CreateEquipment([FromBody] CreateBranchEquipmentRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _assetService.CreateBranchEquipmentAsync(request, ct);
+            return CreatedAtAction(nameof(GetEquipment), result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("equipment/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(typeof(BranchEquipmentDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateEquipment(Guid id, [FromBody] UpdateBranchEquipmentRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _assetService.UpdateBranchEquipmentAsync(id, request, ct));
+
+    [HttpDelete("equipment/{id:guid}")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> DeleteEquipment(Guid id, CancellationToken ct) =>
+        await ExecuteNoContentAsync(() => _assetService.SoftDeleteBranchEquipmentAsync(id, ct));
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
         try

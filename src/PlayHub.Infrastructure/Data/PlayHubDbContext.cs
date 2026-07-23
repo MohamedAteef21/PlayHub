@@ -52,6 +52,8 @@ public class PlayHubDbContext : DbContext
     public DbSet<Screen> Screens => Set<Screen>();
     public DbSet<VenueAssetType> VenueAssetTypes => Set<VenueAssetType>();
     public DbSet<RoomAsset> RoomAssets => Set<RoomAsset>();
+    public DbSet<BranchEquipment> BranchEquipments => Set<BranchEquipment>();
+    public DbSet<SessionEquipmentAllocation> SessionEquipmentAllocations => Set<SessionEquipmentAllocation>();
     public DbSet<MasterAlertSettings> MasterAlertSettings => Set<MasterAlertSettings>();
     public DbSet<PlatformAlertSettings> PlatformAlertSettings => Set<PlatformAlertSettings>();
     public DbSet<DeviceMaintenance> DeviceMaintenances => Set<DeviceMaintenance>();
@@ -294,6 +296,14 @@ public class PlayHubDbContext : DbContext
              || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
                  && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
+        modelBuilder.Entity<BranchEquipment>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
+
         modelBuilder.Entity<Session>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
@@ -445,6 +455,14 @@ public class PlayHubDbContext : DbContext
                  && _tenantContext.AllowedBranchIds.Contains(e.Session.BranchId))));
 
         modelBuilder.Entity<SessionPause>().HasQueryFilter(e =>
+            e.Session.TenantId == _tenantContext.TenantId &&
+            !e.Session.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.Session.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.Session.BranchId))));
+
+        modelBuilder.Entity<SessionEquipmentAllocation>().HasQueryFilter(e =>
             e.Session.TenantId == _tenantContext.TenantId &&
             !e.Session.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)

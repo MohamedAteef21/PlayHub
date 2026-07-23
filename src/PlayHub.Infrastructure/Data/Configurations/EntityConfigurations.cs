@@ -466,6 +466,30 @@ public class RoomAssetConfiguration : IEntityTypeConfiguration<RoomAsset>
     }
 }
 
+public class BranchEquipmentConfiguration : IEntityTypeConfiguration<BranchEquipment>
+{
+    public void Configure(EntityTypeBuilder<BranchEquipment> builder)
+    {
+        builder.ToTable("branch_equipment");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Name).HasMaxLength(100).IsRequired();
+        builder.HasIndex(x => new { x.BranchId, x.Kind, x.Name });
+        builder.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
+    }
+}
+
+public class SessionEquipmentAllocationConfiguration : IEntityTypeConfiguration<SessionEquipmentAllocation>
+{
+    public void Configure(EntityTypeBuilder<SessionEquipmentAllocation> builder)
+    {
+        builder.ToTable("session_equipment_allocations");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.SessionId, x.BranchEquipmentId });
+        builder.HasOne(x => x.Session).WithMany(x => x.EquipmentAllocations).HasForeignKey(x => x.SessionId);
+        builder.HasOne(x => x.BranchEquipment).WithMany(x => x.Allocations).HasForeignKey(x => x.BranchEquipmentId);
+    }
+}
+
 public class MasterAlertSettingsConfiguration : IEntityTypeConfiguration<MasterAlertSettings>
 {
     public void Configure(EntityTypeBuilder<MasterAlertSettings> builder)

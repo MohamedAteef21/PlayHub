@@ -17,6 +17,16 @@ public enum SessionMode : short
     Watching = 2
 }
 
+/// <summary>Branch-level play equipment stock (controllers, paddles, cues, balls).</summary>
+public enum EquipmentKind : short
+{
+    Controller = 1,
+    Paddle = 2,
+    Cue = 3,
+    Ball = 4,
+    Other = 99
+}
+
 public enum TimeUnit : short
 {
     PerMinute = 1,

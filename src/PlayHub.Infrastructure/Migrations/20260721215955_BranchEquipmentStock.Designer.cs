@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PlayHub.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using PlayHub.Infrastructure.Data;
 namespace PlayHub.Infrastructure.Migrations
 {
     [DbContext(typeof(PlayHubDbContext))]
-    partial class PlayHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260721215955_BranchEquipmentStock")]
+    partial class BranchEquipmentStock
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1991,48 +1994,6 @@ namespace PlayHub.Infrastructure.Migrations
                         });
                 });
 
-            modelBuilder.Entity("PlayHub.Domain.Entities.PlatformAlertSettings", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("SenderDisplayName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("SmtpPassword")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("SmtpUsername")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("WhatsAppIntegrationApiBaseUrl")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<string>("WhatsAppIntegrationApiKey")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<bool>("WhatsAppIntegrationEnabled")
-                        .HasColumnType("bit");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId")
-                        .IsUnique();
-
-                    b.ToTable("platform_alert_settings", (string)null);
-                });
-
             modelBuilder.Entity("PlayHub.Domain.Entities.PricingPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3889,17 +3850,6 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("InvoicePayment");
 
                     b.Navigation("UploadedByUser");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.PlatformAlertSettings", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.PricingPlan", b =>

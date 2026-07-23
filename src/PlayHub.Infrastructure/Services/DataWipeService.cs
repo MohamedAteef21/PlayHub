@@ -62,6 +62,8 @@ public class DataWipeService
             "cafeteria_items",
             "inventory_units",
             "room_assets",
+            "session_equipment_allocations",
+            "branch_equipment",
             "DeviceControllers",
             "Screens",
             "device_pricing_plans",

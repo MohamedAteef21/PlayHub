@@ -458,6 +458,140 @@ public class AssetService : IAssetService
         await _audit.LogAsync("Device.SoftDeleted", "Device", device.Id, new { device.Identifier, device.Name }, ct: ct);
     }
 
+    public async Task<IReadOnlyList<BranchEquipmentDto>> GetBranchEquipmentAsync(CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var inUseMap = await GetEquipmentInUseMapAsync(branchId, ct);
+
+        var items = await _db.BranchEquipments
+            .Where(e => e.BranchId == branchId)
+            .OrderBy(e => e.Kind)
+            .ThenBy(e => e.Name)
+            .ToListAsync(ct);
+
+        return items.Select(e => MapEquipment(e, inUseMap.GetValueOrDefault(e.Id))).ToList();
+    }
+
+    public async Task<IReadOnlyList<BranchEquipmentDto>> EnsureDefaultBranchEquipmentAsync(CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        var existingKinds = await _db.BranchEquipments
+            .Where(e => e.BranchId == branchId)
+            .Select(e => e.Kind)
+            .ToListAsync(ct);
+
+        var defaults = new (EquipmentKind Kind, string Name)[]
+        {
+            (EquipmentKind.Controller, "دراع"),
+            (EquipmentKind.Paddle, "مضرب"),
+            (EquipmentKind.Cue, "عصاية"),
+            (EquipmentKind.Ball, "كورة"),
+        };
+
+        var added = false;
+        foreach (var (kind, name) in defaults)
+        {
+            if (existingKinds.Contains(kind)) continue;
+            _db.BranchEquipments.Add(new BranchEquipment
+            {
+                TenantId = _tenantContext.TenantId,
+                BranchId = branchId,
+                Name = name,
+                Kind = kind,
+                TotalQuantity = 0,
+                MaintenanceQuantity = 0,
+                IsActive = true,
+            });
+            added = true;
+        }
+
+        if (added)
+        {
+            await _db.SaveChangesAsync(ct);
+            await _audit.LogAsync("BranchEquipment.DefaultsEnsured", "Branch", branchId, new { branchId }, ct: ct);
+        }
+
+        return await GetBranchEquipmentAsync(ct);
+    }
+
+    public async Task<BranchEquipmentDto> CreateBranchEquipmentAsync(CreateBranchEquipmentRequest request, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        ValidateEquipmentQuantities(request.TotalQuantity, request.MaintenanceQuantity);
+        if (string.IsNullOrWhiteSpace(request.Name))
+            throw new InvalidOperationException("Equipment name is required.");
+        if (!Enum.IsDefined(typeof(EquipmentKind), (EquipmentKind)request.Kind))
+            throw new InvalidOperationException("Invalid equipment kind.");
+
+        var entity = new BranchEquipment
+        {
+            TenantId = _tenantContext.TenantId,
+            BranchId = branchId,
+            Name = request.Name.Trim(),
+            Kind = (EquipmentKind)request.Kind,
+            TotalQuantity = request.TotalQuantity,
+            MaintenanceQuantity = request.MaintenanceQuantity,
+            IsActive = true,
+        };
+
+        _db.BranchEquipments.Add(entity);
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("BranchEquipment.Created", "BranchEquipment", entity.Id,
+            new { entity.Name, entity.Kind, entity.TotalQuantity }, ct: ct);
+
+        return MapEquipment(entity, 0);
+    }
+
+    public async Task<BranchEquipmentDto> UpdateBranchEquipmentAsync(Guid id, UpdateBranchEquipmentRequest request, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        ValidateEquipmentQuantities(request.TotalQuantity, request.MaintenanceQuantity);
+        if (string.IsNullOrWhiteSpace(request.Name))
+            throw new InvalidOperationException("Equipment name is required.");
+        if (!Enum.IsDefined(typeof(EquipmentKind), (EquipmentKind)request.Kind))
+            throw new InvalidOperationException("Invalid equipment kind.");
+
+        var entity = await _db.BranchEquipments
+            .FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Equipment not found.");
+
+        var inUse = await GetEquipmentInUseAsync(branchId, id, ct);
+        var freeAfter = request.TotalQuantity - request.MaintenanceQuantity - inUse;
+        if (freeAfter < 0)
+            throw new InvalidOperationException(
+                $"Cannot set stock that low — {inUse} are in use on open sessions. Total − maintenance must be at least {inUse}.");
+
+        entity.Name = request.Name.Trim();
+        entity.Kind = (EquipmentKind)request.Kind;
+        entity.TotalQuantity = request.TotalQuantity;
+        entity.MaintenanceQuantity = request.MaintenanceQuantity;
+        entity.IsActive = request.IsActive;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("BranchEquipment.Updated", "BranchEquipment", entity.Id,
+            new { entity.Name, entity.Kind, entity.TotalQuantity, entity.MaintenanceQuantity, entity.IsActive }, ct: ct);
+
+        return MapEquipment(entity, inUse);
+    }
+
+    public async Task SoftDeleteBranchEquipmentAsync(Guid id, CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var entity = await _db.BranchEquipments
+            .FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Equipment not found.");
+
+        var inUse = await GetEquipmentInUseAsync(branchId, id, ct);
+        if (inUse > 0)
+            throw new InvalidOperationException("Cannot delete equipment that is allocated to open sessions.");
+
+        entity.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
+        entity.IsActive = false;
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("BranchEquipment.SoftDeleted", "BranchEquipment", entity.Id, new { entity.Name }, ct: ct);
+    }
+
     public async Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default)
     {
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
@@ -506,7 +640,50 @@ public class AssetService : IAssetService
                 liveStatuses))
             .ToList();
 
-        return new AssetDashboardDto(branchId, branch.Name, roomDtos, unassignedDtos);
+        var equipment = await GetBranchEquipmentAsync(ct);
+        return new AssetDashboardDto(branchId, branch.Name, roomDtos, unassignedDtos, equipment);
+    }
+
+    private static void ValidateEquipmentQuantities(int total, int maintenance)
+    {
+        if (total < 0 || maintenance < 0)
+            throw new InvalidOperationException("Equipment quantities cannot be negative.");
+        if (maintenance > total)
+            throw new InvalidOperationException("Maintenance quantity cannot exceed total quantity.");
+    }
+
+    private async Task<Dictionary<Guid, int>> GetEquipmentInUseMapAsync(Guid branchId, CancellationToken ct)
+    {
+        return await _db.SessionEquipmentAllocations
+            .Where(a => a.Session.BranchId == branchId && a.Session.Status != SessionStatus.Closed)
+            .GroupBy(a => a.BranchEquipmentId)
+            .Select(g => new { Id = g.Key, Qty = g.Sum(x => x.Quantity) })
+            .ToDictionaryAsync(x => x.Id, x => x.Qty, ct);
+    }
+
+    private async Task<int> GetEquipmentInUseAsync(Guid branchId, Guid equipmentId, CancellationToken ct)
+    {
+        return await _db.SessionEquipmentAllocations
+            .Where(a => a.BranchEquipmentId == equipmentId
+                && a.Session.BranchId == branchId
+                && a.Session.Status != SessionStatus.Closed)
+            .SumAsync(a => (int?)a.Quantity, ct) ?? 0;
+    }
+
+    private static BranchEquipmentDto MapEquipment(BranchEquipment e, int inUse)
+    {
+        var free = Math.Max(0, e.TotalQuantity - e.MaintenanceQuantity - inUse);
+        return new BranchEquipmentDto(
+            e.Id,
+            e.BranchId,
+            e.Name,
+            (short)e.Kind,
+            e.TotalQuantity,
+            e.MaintenanceQuantity,
+            inUse,
+            free,
+            e.IsActive,
+            e.CreatedAt);
     }
 
     private async Task ReplaceRoomAssetsAsync(Room room, IReadOnlyList<UpsertRoomAssetRequest> assets, CancellationToken ct)
@@ -626,7 +803,9 @@ public class AssetService : IAssetService
 
     private static DeviceDto MapDevice(Device device, Dictionary<Guid, string> liveStatuses)
     {
+        // Controllers moved to branch equipment stock; keep a usable gaming cap for the floor UI.
         var maxPlayers = device.DeviceControllers.Sum(c => c.WorkingCount);
+        if (maxPlayers <= 0) maxPlayers = 4;
         var liveStatus = liveStatuses.TryGetValue(device.Id, out var status) ? status : "Idle";
         var maxWatching = device.Room?.MaxWatchingCapacity
             ?? Math.Max(device.Screens.Sum(s => s.WorkingCount), 10);
@@ -652,6 +831,8 @@ public class AssetService : IAssetService
     {
         var totalControllers = device.DeviceControllers.Sum(c => c.Quantity);
         var workingControllers = device.DeviceControllers.Sum(c => c.WorkingCount);
+        if (workingControllers <= 0) workingControllers = 4;
+        if (totalControllers <= 0) totalControllers = 4;
         var liveStatus = liveStatuses.TryGetValue(device.Id, out var status) ? status : "Idle";
 
         return new AssetDashboardDeviceDto(

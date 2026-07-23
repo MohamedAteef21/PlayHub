@@ -30,6 +30,13 @@ public interface IAssetService
     Task<DeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken ct = default);
     Task SoftDeleteDeviceAsync(Guid id, CancellationToken ct = default);
 
+    // Branch equipment stock (controllers, paddles, cues, balls)
+    Task<IReadOnlyList<BranchEquipmentDto>> GetBranchEquipmentAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<BranchEquipmentDto>> EnsureDefaultBranchEquipmentAsync(CancellationToken ct = default);
+    Task<BranchEquipmentDto> CreateBranchEquipmentAsync(CreateBranchEquipmentRequest request, CancellationToken ct = default);
+    Task<BranchEquipmentDto> UpdateBranchEquipmentAsync(Guid id, UpdateBranchEquipmentRequest request, CancellationToken ct = default);
+    Task SoftDeleteBranchEquipmentAsync(Guid id, CancellationToken ct = default);
+
     // Dashboard
     Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default);
 }

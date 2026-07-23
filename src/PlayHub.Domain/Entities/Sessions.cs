@@ -52,7 +52,19 @@ public class Session : BaseEntity, IBranchEntity, ISoftDelete
     public Customer? Customer { get; set; }
     public ICollection<SessionPause> Pauses { get; set; } = [];
     public ICollection<SessionCafeteriaLine> CafeteriaLines { get; set; } = [];
+    public ICollection<SessionEquipmentAllocation> EquipmentAllocations { get; set; } = [];
     public Invoice? Invoice { get; set; }
+}
+
+/// <summary>Equipment checked out to an open session (released when the session closes — row kept for history).</summary>
+public class SessionEquipmentAllocation : BaseEntity
+{
+    public Guid SessionId { get; set; }
+    public Guid BranchEquipmentId { get; set; }
+    public int Quantity { get; set; }
+
+    public Session Session { get; set; } = null!;
+    public BranchEquipment BranchEquipment { get; set; } = null!;
 }
 
 public class SessionPause : BaseEntity

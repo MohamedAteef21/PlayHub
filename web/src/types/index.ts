@@ -72,6 +72,14 @@ export interface SessionLive {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   cafeteriaLines: SessionCafeteriaLine[];
+  equipmentAllocations?: SessionEquipmentAllocation[];
+}
+
+export interface SessionEquipmentAllocation {
+  branchEquipmentId: string;
+  equipmentName: string;
+  equipmentKind: number;
+  quantity: number;
 }
 
 export interface SessionCafeteriaLine {
@@ -218,7 +226,29 @@ export interface AssetDashboard {
   branchName: string;
   rooms: AssetDashboardRoom[];
   unassignedDevices: AssetDashboardDevice[];
+  equipment: BranchEquipment[];
 }
+
+export interface BranchEquipment {
+  id: string;
+  branchId: string;
+  name: string;
+  kind: number;
+  totalQuantity: number;
+  maintenanceQuantity: number;
+  inUseQuantity: number;
+  freeQuantity: number;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export const EquipmentKind = {
+  Controller: 1,
+  Paddle: 2,
+  Cue: 3,
+  Ball: 4,
+  Other: 99,
+} as const;
 
 export interface AssetDashboardRoom {
   id: string;

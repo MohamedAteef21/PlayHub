@@ -124,3 +124,24 @@ public class DevicePricingPlan
     public Device Device { get; set; } = null!;
     public PricingPlan PricingPlan { get; set; } = null!;
 }
+
+/// <summary>
+/// Branch stock of play equipment (controllers, paddles, cues, balls).
+/// Free = Total − Maintenance − currently allocated to open sessions.
+/// </summary>
+public class BranchEquipment : BaseEntity, IBranchEntity, ISoftDelete
+{
+    public Guid TenantId { get; set; }
+    public Guid BranchId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public Enums.EquipmentKind Kind { get; set; }
+    public int TotalQuantity { get; set; }
+    public int MaintenanceQuantity { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public Guid? DeletedByUserId { get; set; }
+
+    public Branch Branch { get; set; } = null!;
+    public ICollection<SessionEquipmentAllocation> Allocations { get; set; } = [];
+}

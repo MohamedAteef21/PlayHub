@@ -191,6 +191,26 @@ function VenueHomeDashboard() {
         />
       </div>
 
+      {(dashboard?.equipment?.length ?? 0) > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {dashboard!.equipment.filter((e) => e.isActive).map((e) => (
+            <Card key={e.id} className="!p-3">
+              <p className="text-sm font-semibold">{e.name}</p>
+              <p className="mt-1 text-xs text-muted">
+                {t('dashboard.equipmentFree')}: {e.freeQuantity}
+                {' · '}
+                {t('dashboard.equipmentInUse')}: {e.inUseQuantity}
+              </p>
+              <p className="text-xs text-muted">
+                {t('dashboard.equipmentMaintenance')}: {e.maintenanceQuantity}
+                {' / '}
+                {t('dashboard.equipmentTotal')}: {e.totalQuantity}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {quickLinks.map((link) => (
           <Link key={link.to} to={link.to}>
