@@ -748,6 +748,7 @@ export function CustomersPage() {
       <Modal
         open={!!sessionsCustomer}
         onClose={() => setSessionsCustomer(null)}
+        size="xl"
         title={
           sessionsCustomer
             ? t('customers.sessionHistoryFor', { name: sessionsCustomer.name })
