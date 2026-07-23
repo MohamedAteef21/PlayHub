@@ -71,9 +71,9 @@ export function UsersPage() {
     enabled: canManage && !isSuperAdmin,
   });
 
-  // Staff can never manage users, so the Users permission module is not offered.
+  // Staff can never manage users; Assets is managed in Settings, not via staff grants.
   const grantablePermissions = useMemo(
-    () => permissions.filter((p) => p.module !== 'Users'),
+    () => permissions.filter((p) => p.module !== 'Users' && p.module !== 'Assets'),
     [permissions],
   );
 
@@ -85,7 +85,6 @@ export function UsersPage() {
       'PurchaseOrders',
       'Expenses',
       'Reports',
-      'Assets',
       'Customers',
       'Offers',
       'Settings',

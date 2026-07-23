@@ -223,6 +223,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.ToTable("sessions");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.RateSnapshot).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.BillingSegmentsJson).HasColumnType("nvarchar(max)");
         builder.Property(x => x.TimeCost).HasPrecision(18, 2);
         builder.Property(x => x.AccruedTimeCost).HasPrecision(18, 2);
         builder.Property(x => x.RoomSurchargePerHour).HasPrecision(18, 2);

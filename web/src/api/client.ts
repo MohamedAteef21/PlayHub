@@ -195,7 +195,7 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number }) =>
+  convert: (id: string, data: { pricingPlanId: string; controllerCount: number; matchCount?: number | null }) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -210,6 +210,7 @@ export const sessionsApi = {
     };
     discountAmount?: number;
     discountReason?: string;
+    matchCount?: number | null;
   }) =>
     apiFetch<import('@/types').SessionDetail>(`/sessions/${id}/close`, {
       method: 'POST',
