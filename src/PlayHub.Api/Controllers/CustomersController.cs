@@ -28,8 +28,9 @@ public class CustomersController : ControllerBase
         [FromQuery] string? q,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] bool withOutstandingDebt = false,
         CancellationToken ct = default) =>
-        await ExecuteAsync(() => _customers.SearchAsync(q, page, pageSize, ct));
+        await ExecuteAsync(() => _customers.SearchAsync(q, page, pageSize, withOutstandingDebt, ct));
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = PermissionPolicies.CustomersView)]

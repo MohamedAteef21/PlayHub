@@ -932,11 +932,12 @@ export const uploadsApi = {
 };
 
 export const customersApi = {
-  getAll: (q?: string, page = 1, pageSize = 20) => {
+  getAll: (q?: string, page = 1, pageSize = 20, withOutstandingDebt = false) => {
     const params = new URLSearchParams();
     if (q?.trim()) params.set('q', q.trim());
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
+    if (withOutstandingDebt) params.set('withOutstandingDebt', 'true');
     return apiFetch<import('@/types').PagedResult<import('@/types').Customer>>(
       `/customers?${params}`
     );
@@ -969,6 +970,20 @@ export const customersApi = {
     apiFetch<import('@/types').PagedResult<import('@/types').SessionHistory>>(
       `/customers/${id}/sessions?page=${page}&pageSize=${pageSize}`
     ),
+};
+
+export const receivablesApi = {
+  list: (customerId?: string) => {
+    const q = customerId ? `?customerId=${encodeURIComponent(customerId)}` : '';
+    return apiFetch<import('@/types').Receivable[]>(`/receivables${q}`);
+  },
+  summary: () =>
+    apiFetch<import('@/types').ReceivableSummary>('/receivables/summary'),
+  collect: (paymentId: string, data: { collectionMethod: number; proofFileUrl?: string }) =>
+    apiFetch<import('@/types').Receivable>(`/receivables/${paymentId}/collect`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const offersApi = {

@@ -22,7 +22,7 @@ public class CustomerService : ICustomerService
     }
 
     public async Task<PagedResult<CustomerDto>> SearchAsync(
-        string? q = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
+        string? q = null, int page = 1, int pageSize = 20, bool withOutstandingDebt = false, CancellationToken ct = default)
     {
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
         var query = _db.Customers.AsNoTracking().AsQueryable();
@@ -50,6 +50,19 @@ public class CustomerService : ICustomerService
                 c.Name.Contains(term) ||
                 c.Code.Contains(term) ||
                 (phoneDigits.Length > 0 && c.Phone.Contains(phoneDigits)));
+        }
+
+        if (withOutstandingDebt)
+        {
+            var deferred = _db.InvoicePayments.AsNoTracking()
+                .Where(p => p.Status == PaymentStatus.Deferred && p.PaymentMethod == PaymentMethod.Deferred);
+            var debtorIds = deferred
+                .Where(p => p.CustomerId != null)
+                .Select(p => p.CustomerId!.Value);
+            var debtorPhones = deferred
+                .Where(p => p.DebtorPhone != null && p.DebtorPhone != "")
+                .Select(p => p.DebtorPhone!);
+            query = query.Where(c => debtorIds.Contains(c.Id) || debtorPhones.Contains(c.Phone));
         }
 
         var total = await query.CountAsync(ct);

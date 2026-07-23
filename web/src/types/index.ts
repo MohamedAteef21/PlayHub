@@ -178,6 +178,26 @@ export interface Customer {
   outstandingDebtCount: number;
 }
 
+export interface Receivable {
+  paymentId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  debtorName: string;
+  debtorPhone: string | null;
+  customerId: string | null;
+  createdAt: string;
+  daysOutstanding: number;
+  branchId: string;
+  branchName: string;
+  invoiceType: number;
+}
+
+export interface ReceivableSummary {
+  outstandingTotal: number;
+  outstandingCount: number;
+}
+
 export const WalletTransactionType = { TopUp: 1, Bonus: 2, Payment: 3, Adjustment: 4 } as const;
 
 export interface WalletTransaction {
