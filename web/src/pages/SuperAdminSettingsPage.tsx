@@ -222,65 +222,83 @@ export function SuperAdminSettingsPage() {
                   key={row.userId}
                   className="rounded-xl border border-border bg-surface/40 p-4 space-y-3"
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div>
-                      <p className="font-medium">{row.fullName || row.username}</p>
-                      <p className="text-sm text-muted" dir="ltr">
-                        {row.username}
-                      </p>
-                    </div>
-                    <label className="flex flex-col gap-1 text-sm">
-                      <span className="text-muted">{t('superAdmin.channel')}</span>
-                      <select
-                        className="rounded-lg border border-border bg-bg px-3 py-2"
-                        value={draft.allowedChannels}
-                        onChange={(e) =>
-                          patchDraft(row.userId, { allowedChannels: Number(e.target.value) })
-                        }
-                      >
-                        <option value={NotificationChannel.None}>{t('superAdmin.channelNone')}</option>
-                        <option value={NotificationChannel.Email}>{t('superAdmin.channelEmail')}</option>
-                        <option value={NotificationChannel.WhatsApp}>
-                          {t('superAdmin.channelWhatsApp')}
-                        </option>
-                        <option value={NotificationChannel.EmailAndWhatsApp}>
-                          {t('superAdmin.channelBoth')}
-                        </option>
-                      </select>
-                    </label>
+                  <div>
+                    <p className="font-medium">{row.fullName || row.username}</p>
+                    <p className="text-sm text-muted" dir="ltr">
+                      {row.username}
+                    </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={draft.notifyLowStock}
-                        onChange={(e) =>
-                          patchDraft(row.userId, { notifyLowStock: e.target.checked })
-                        }
-                      />
-                      {t('superAdmin.notifyLowStock')}
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={draft.notifySubscription}
-                        onChange={(e) =>
-                          patchDraft(row.userId, { notifySubscription: e.target.checked })
-                        }
-                      />
-                      {t('superAdmin.notifySubscription')}
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={draft.notifyDeviceMaintenance}
-                        onChange={(e) =>
-                          patchDraft(row.userId, { notifyDeviceMaintenance: e.target.checked })
-                        }
-                      />
-                      {t('superAdmin.notifyDeviceMaintenance')}
-                    </label>
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted">{t('superAdmin.channel')}</p>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={(draft.allowedChannels & NotificationChannel.Email) !== 0}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? draft.allowedChannels | NotificationChannel.Email
+                              : draft.allowedChannels & ~NotificationChannel.Email;
+                            patchDraft(row.userId, { allowedChannels: next });
+                          }}
+                        />
+                        {t('superAdmin.channelEmail')}
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={(draft.allowedChannels & NotificationChannel.WhatsApp) !== 0}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? draft.allowedChannels | NotificationChannel.WhatsApp
+                              : draft.allowedChannels & ~NotificationChannel.WhatsApp;
+                            patchDraft(row.userId, { allowedChannels: next });
+                          }}
+                        />
+                        {t('superAdmin.channelWhatsApp')}
+                      </label>
+                    </div>
+                    {(draft.allowedChannels & (NotificationChannel.Email | NotificationChannel.WhatsApp)) ===
+                      0 && (
+                      <p className="text-xs text-muted">{t('superAdmin.channelNoneHint')}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted">{t('superAdmin.alertTypes')}</p>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.notifyLowStock}
+                          onChange={(e) =>
+                            patchDraft(row.userId, { notifyLowStock: e.target.checked })
+                          }
+                        />
+                        {t('superAdmin.notifyLowStock')}
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.notifySubscription}
+                          onChange={(e) =>
+                            patchDraft(row.userId, { notifySubscription: e.target.checked })
+                          }
+                        />
+                        {t('superAdmin.notifySubscription')}
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.notifyDeviceMaintenance}
+                          onChange={(e) =>
+                            patchDraft(row.userId, { notifyDeviceMaintenance: e.target.checked })
+                          }
+                        />
+                        {t('superAdmin.notifyDeviceMaintenance')}
+                      </label>
+                    </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
