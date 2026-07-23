@@ -82,11 +82,39 @@ public class InvoicePdfService : IInvoicePdfService
 
                     col.Item().PaddingTop(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
 
-                    col.Item().PaddingTop(6).Row(r =>
+                    var segments = SessionBillingSegments.Read(session);
+                    if (segments.Count > 0)
                     {
-                        r.RelativeItem().Text("Time / الوقت");
-                        r.ConstantItem(80).AlignRight().Text($"{session.TimeCost:0.00}");
-                    });
+                        col.Item().PaddingTop(6).Text("Billing detail / تفصيل الحساب").Bold();
+                        foreach (var seg in segments)
+                        {
+                            var detail = seg.QuantityUnit switch
+                            {
+                                "match" => $"{seg.Rate:0.##}/match × {seg.Quantity}",
+                                "hour" => $"{seg.Rate:0.##}/h × {seg.Quantity}h",
+                                "min" => $"{seg.Rate:0.##}/min × {seg.Quantity} min",
+                                "guest" => $"{seg.Rate:0.##} × {seg.Quantity} guests",
+                                _ => $"{seg.Rate:0.##} × {seg.Quantity}"
+                            };
+                            col.Item().Row(r =>
+                            {
+                                r.RelativeItem().Column(c =>
+                                {
+                                    c.Item().Text(seg.Label);
+                                    c.Item().Text(detail).FontSize(8).FontColor(Colors.Grey.Darken1);
+                                });
+                                r.ConstantItem(80).AlignRight().Text($"{seg.Amount:0.00}");
+                            });
+                        }
+                    }
+                    else
+                    {
+                        col.Item().PaddingTop(6).Row(r =>
+                        {
+                            r.RelativeItem().Text("Time / الوقت");
+                            r.ConstantItem(80).AlignRight().Text($"{session.TimeCost:0.00}");
+                        });
+                    }
                     if (session.RoomSurchargeCost > 0)
                     {
                         col.Item().Row(r =>

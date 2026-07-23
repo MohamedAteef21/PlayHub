@@ -90,10 +90,14 @@ export function printSessionInvoice(
     .map((s) => {
       const detailLine =
         s.quantityUnit === 'match'
-          ? `${money(s.rate)} × ${s.quantity}`
+          ? `${money(s.rate)}/match × ${s.quantity}`
           : s.quantityUnit === 'hour'
             ? `${money(s.rate)}/h × ${s.quantity}h`
-            : `${money(s.rate)} × ${s.quantity}`;
+            : s.quantityUnit === 'guest'
+              ? `${money(s.rate)} × ${s.quantity} guests`
+              : s.quantityUnit === 'min'
+                ? `${money(s.rate)}/min × ${s.quantity} min`
+                : `${money(s.rate)} × ${s.quantity}`;
       return `<tr>
         <td>
           <div>${escapeHtml(s.label)}</div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -202,12 +202,21 @@ function DeviceCard({
             <p className="text-xs text-muted">
               {session.appliedHourlyRate != null && session.appliedHourlyRate > 0 && (
                 <>
-                  {session.appliedRateTier === 'Couple'
-                    ? t('settings.couple')
-                    : t('settings.individual')}
+                  {session.sessionMode === SessionMode.Watching
+                    ? t('session.watching')
+                    : session.appliedRateTier === 'Couple'
+                      ? t('settings.couple')
+                      : t('settings.individual')}
                   {': '}
                   {formatCurrency(session.appliedHourlyRate)}
-                  {session.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}
+                  {session.timeUnit === TimeUnit.PerGame
+                    ? `/${t('dashboard.match')}`
+                    : session.sessionMode === SessionMode.Watching
+                      ? `/${t('session.hoursShort')}/${t('dashboard.guestsShort')}`
+                      : `/${t('session.hoursShort')}`}
+                  {session.sessionMode === SessionMode.Watching && session.watcherCount
+                    ? ` · ${session.watcherCount} ${t('dashboard.guestsShort')}`
+                    : ''}
                   {' · '}
                 </>
               )}
@@ -227,13 +236,7 @@ function DeviceCard({
             )}
             <Button variant="danger" size="sm" className="flex-1" onClick={onClose}>{t('session.close')}</Button>
           </div>
-          {session.canConvertToGaming && (
-            <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
-              <Icon name="play" className="h-3.5 w-3.5" />
-              {t('dashboard.convertToGaming')}
-            </Button>
-          )}
-          {!session.canConvertToGaming && session.canChangePricing && (
+          {session.canChangePricing && (
             <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
               <Icon name="settings" className="h-3.5 w-3.5" />
               {t('dashboard.changePricing')}
@@ -274,6 +277,7 @@ export function DashboardPage() {
   const [convertModal, setConvertModal] = useState<SessionLive | null>(null);
   const [convertPlanId, setConvertPlanId] = useState('');
   const [convertControllers, setConvertControllers] = useState(2);
+  const [convertWatchers, setConvertWatchers] = useState(2);
   const [convertMatchCount, setConvertMatchCount] = useState('1');
   const [convertError, setConvertError] = useState('');
   const [closeMatchCount, setCloseMatchCount] = useState('1');
@@ -367,14 +371,28 @@ export function DashboardPage() {
   const { data: gamingPlans } = useQuery({
     queryKey: ['plans', SessionMode.Gaming],
     queryFn: () => pricingApi.getPlans(SessionMode.Gaming),
-    enabled: !!openModal,
+    enabled: !!openModal || !!convertModal,
   });
 
   const { data: watchingPlans } = useQuery({
     queryKey: ['plans', SessionMode.Watching],
     queryFn: () => pricingApi.getPlans(SessionMode.Watching),
-    enabled: !!openModal,
+    enabled: !!openModal || !!convertModal,
   });
+
+  const convertPlans = useMemo(
+    () => [...(gamingPlans ?? []), ...(watchingPlans ?? [])],
+    [gamingPlans, watchingPlans]
+  );
+  const convertSelectedPlan = convertPlans.find((p) => p.id === convertPlanId);
+  const convertDevice = useMemo(() => {
+    if (!convertModal || !dashboard?.rooms) return null;
+    for (const room of dashboard.rooms) {
+      const d = room.devices.find((x) => x.id === convertModal.deviceId);
+      if (d) return d;
+    }
+    return null;
+  }, [convertModal, dashboard?.rooms]);
 
   const { data: customerSearchResults } = useQuery({
     queryKey: ['customers', 'open-session', debouncedCustomerQ],
@@ -920,7 +938,9 @@ export function DashboardPage() {
                       if (!session) return;
                       setConvertModal(session);
                       setConvertPlanId('');
-                      setConvertControllers(2);
+                      setConvertControllers(session.controllerCount && session.controllerCount > 0 ? session.controllerCount : 2);
+                      setConvertWatchers(session.watcherCount && session.watcherCount > 0 ? session.watcherCount : 2);
+                      setConvertMatchCount('1');
                       setConvertError('');
                     }}
                     onClose={() => {
@@ -986,7 +1006,9 @@ export function DashboardPage() {
                       if (!session) return;
                       setConvertModal(session);
                       setConvertPlanId('');
-                      setConvertControllers(2);
+                      setConvertControllers(session.controllerCount && session.controllerCount > 0 ? session.controllerCount : 2);
+                      setConvertWatchers(session.watcherCount && session.watcherCount > 0 ? session.watcherCount : 2);
+                      setConvertMatchCount('1');
                       setConvertError('');
                     }}
                     onClose={() => {
@@ -1092,12 +1114,15 @@ export function DashboardPage() {
                         <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
                       </div>
                       <p className="text-[11px] text-muted">
-                        {t('session.hourlyRate')}: {formatCurrency(seg.rate)}
                         {seg.quantityUnit === 'match'
-                          ? ` · ${seg.quantity} ${t('dashboard.match')}`
+                          ? `${formatCurrency(seg.rate)}/${t('dashboard.match')} · ${seg.quantity} ${t('dashboard.match')}`
                           : seg.quantityUnit === 'hour'
-                            ? ` · ${seg.quantity} ${t('session.hoursShort')}`
-                            : ` · ${seg.quantity} ${seg.quantityUnit}`}
+                            ? `${t('session.hourlyRate')}: ${formatCurrency(seg.rate)} · ${t('dashboard.consumedTime')}: ${seg.quantity} ${t('session.hoursShort')}`
+                            : seg.quantityUnit === 'guest'
+                              ? `${formatCurrency(seg.rate)} · ${seg.quantity} ${t('dashboard.guestsShort')}`
+                              : seg.quantityUnit === 'min'
+                                ? `${formatCurrency(seg.rate)}/${t('dashboard.minutesShort')} · ${t('dashboard.consumedTime')}: ${seg.quantity} ${t('dashboard.minutesShort')}`
+                                : `${t('session.hourlyRate')}: ${formatCurrency(seg.rate)} · ${seg.quantity} ${seg.quantityUnit}`}
                       </p>
                     </div>
                   ))}
@@ -1132,31 +1157,45 @@ export function DashboardPage() {
       <Modal
         open={!!convertModal}
         onClose={() => setConvertModal(null)}
-        title={
-          convertModal?.canConvertToGaming
-            ? t('dashboard.convertToGaming')
-            : t('dashboard.changePricing')
-        }
+        title={t('dashboard.changePricing')}
         footer={
           <>
             <Button variant="secondary" onClick={() => setConvertModal(null)}>{t('session.cancel')}</Button>
             <Button
               loading={loading}
-              disabled={!convertPlanId}
+              disabled={
+                !convertPlanId ||
+                (convertSelectedPlan?.sessionMode === SessionMode.Gaming && !convertControllers) ||
+                (convertSelectedPlan?.sessionMode === SessionMode.Watching && !convertWatchers)
+              }
               onClick={async () => {
-                if (!convertModal || !convertPlanId) return;
+                if (!convertModal || !convertPlanId || !convertSelectedPlan) return;
                 const leavingMatch = convertModal.timeUnit === TimeUnit.PerGame;
                 const matchCount = Number(convertMatchCount) || 0;
                 if (leavingMatch && matchCount < 1) {
                   setConvertError(t('session.matchCountRequired'));
                   return;
                 }
+                if (convertSelectedPlan.sessionMode === SessionMode.Watching) {
+                  const max = convertDevice?.maxWatchingCapacity ?? 20;
+                  if (convertWatchers < 1 || convertWatchers > max) {
+                    setConvertError(t('session.watchers'));
+                    return;
+                  }
+                }
                 setLoading(true);
                 setConvertError('');
                 try {
                   const updated = await sessionsApi.convert(convertModal.id, {
                     pricingPlanId: convertPlanId,
-                    controllerCount: convertControllers,
+                    controllerCount:
+                      convertSelectedPlan.sessionMode === SessionMode.Gaming
+                        ? convertControllers
+                        : undefined,
+                    watcherCount:
+                      convertSelectedPlan.sessionMode === SessionMode.Watching
+                        ? convertWatchers
+                        : undefined,
                     matchCount: leavingMatch ? matchCount : undefined,
                   });
                   onUpdate(updated);
@@ -1184,6 +1223,13 @@ export function DashboardPage() {
               })}
             </p>
           )}
+          {convertModal && convertModal.sessionMode === SessionMode.Gaming && (
+            <p className="text-xs text-muted">
+              {t('dashboard.convertGamingNote', {
+                cost: formatCurrency(convertModal.currentTimeCost),
+              })}
+            </p>
+          )}
           {convertModal && convertModal.timeUnit === TimeUnit.PerGame && (
             <Input
               label={t('session.matchCount')}
@@ -1198,63 +1244,115 @@ export function DashboardPage() {
             <select
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
               value={convertPlanId}
-              onChange={(e) => setConvertPlanId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                setConvertPlanId(id);
+                const plan = convertPlans.find((p) => p.id === id);
+                if (plan?.sessionMode === SessionMode.Watching && convertModal?.watcherCount) {
+                  setConvertWatchers(convertModal.watcherCount);
+                }
+              }}
             >
               <option value="">{t('session.pricingPlan')}</option>
-              {(gamingPlans ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.timeUnit === TimeUnit.PerGame
-                    ? ` · ${t('settings.perGame')}`
-                    : p.gamingRates[0]
-                      ? ` · ${formatCurrency(p.gamingRates[0].rate)}`
-                      : ''}
-                </option>
-              ))}
+              {convertPlans.map((p) => {
+                const modeLabel =
+                  p.sessionMode === SessionMode.Watching
+                    ? t('session.watching')
+                    : p.timeUnit === TimeUnit.PerGame
+                      ? t('settings.perGame')
+                      : t('session.gaming');
+                const rateHint =
+                  p.sessionMode === SessionMode.Watching
+                    ? p.watchingRates[0]
+                      ? ` · ${formatCurrency(p.watchingRates[0].ratePerPerson)}`
+                      : ''
+                    : p.timeUnit === TimeUnit.PerGame
+                      ? p.gamingRates[0]
+                        ? ` · ${formatCurrency(p.gamingRates[0].rate)}/${t('dashboard.match')}`
+                        : ''
+                      : p.gamingRates[0]
+                        ? ` · ${formatCurrency(p.gamingRates[0].rate)}/${t('session.hoursShort')}`
+                        : '';
+                return (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {modeLabel}
+                    {rateHint}
+                  </option>
+                );
+              })}
             </select>
           </div>
-          <div>
-            <p className="mb-2 text-sm text-muted">{t('dashboard.playMode')}</p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant={convertControllers <= 2 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(2)}
-              >
-                {t('settings.individual')}
-                {(() => {
-                  const plan = (gamingPlans ?? []).find((p) => p.id === convertPlanId);
-                  const rate = plan?.gamingRates.find((r) => r.controllerCount === 1)?.rate;
-                  return rate != null ? ` · ${formatCurrency(rate)}` : '';
-                })()}
-              </Button>
-              <Button
-                size="sm"
-                variant={convertControllers >= 3 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(4)}
-              >
-                {t('settings.couple')}
-                {(() => {
-                  const plan = (gamingPlans ?? []).find((p) => p.id === convertPlanId);
-                  const rate = plan?.gamingRates.find((r) => r.controllerCount === 2)?.rate;
-                  return rate != null ? ` · ${formatCurrency(rate)}` : '';
-                })()}
-              </Button>
-            </div>
-            <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
-            <div className="flex gap-2">
-              {(convertControllers <= 2 ? [1, 2] : [3, 4]).map((n) => (
+
+          {convertSelectedPlan?.sessionMode === SessionMode.Gaming && (
+            <div>
+              <p className="mb-2 text-sm text-muted">{t('dashboard.playMode')}</p>
+              <div className="flex gap-2">
                 <Button
-                  key={n}
                   size="sm"
-                  variant={convertControllers === n ? 'primary' : 'secondary'}
-                  onClick={() => setConvertControllers(n)}
+                  variant={convertControllers <= 2 ? 'primary' : 'secondary'}
+                  onClick={() => setConvertControllers(2)}
                 >
-                  {n}
+                  {t('settings.individual')}
+                  {(() => {
+                    const rate = convertSelectedPlan.gamingRates.find((r) => r.controllerCount === 1)?.rate;
+                    return rate != null
+                      ? ` · ${formatCurrency(rate)}${convertSelectedPlan.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}`
+                      : '';
+                  })()}
                 </Button>
-              ))}
+                <Button
+                  size="sm"
+                  variant={convertControllers >= 3 ? 'primary' : 'secondary'}
+                  onClick={() => setConvertControllers(4)}
+                >
+                  {t('settings.couple')}
+                  {(() => {
+                    const rate = convertSelectedPlan.gamingRates.find((r) => r.controllerCount === 2)?.rate;
+                    return rate != null
+                      ? ` · ${formatCurrency(rate)}${convertSelectedPlan.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}`
+                      : '';
+                  })()}
+                </Button>
+              </div>
+              <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
+              <div className="flex gap-2">
+                {(convertControllers <= 2 ? [1, 2] : [3, 4]).map((n) => (
+                  <Button
+                    key={n}
+                    size="sm"
+                    variant={convertControllers === n ? 'primary' : 'secondary'}
+                    onClick={() => setConvertControllers(n)}
+                  >
+                    {n}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {convertSelectedPlan?.sessionMode === SessionMode.Watching && (
+            <div>
+              <p className="mb-2 text-sm text-muted">{t('dashboard.watchMode')}</p>
+              {convertSelectedPlan.watchingRates[0] && (
+                <p className="mb-2 text-xs text-muted">
+                  {t('dashboard.ratePerHour', {
+                    rate: formatCurrency(convertSelectedPlan.watchingRates[0].ratePerPerson),
+                  })}
+                  {convertSelectedPlan.watchingBilling === WatchingBilling.PerPerson
+                    ? ` · ${t('settings.perPerson')}`
+                    : ` · ${t('settings.perScreen')}`}
+                </p>
+              )}
+              <Input
+                label={t('dashboard.watchers')}
+                type="number"
+                min={1}
+                max={convertDevice?.maxWatchingCapacity ?? 20}
+                value={convertWatchers}
+                onChange={(e) => setConvertWatchers(Math.max(1, Number(e.target.value) || 1))}
+              />
+            </div>
+          )}
           {convertError && <p className="text-sm text-danger">{convertError}</p>}
         </div>
       </Modal>

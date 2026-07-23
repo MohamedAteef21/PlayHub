@@ -114,13 +114,38 @@ internal static class SessionBillingSegments
         decimal qty;
         string qtyUnit;
         var tierName = tier == 2 ? "Couple" : "Individual";
+        var minutes = decimal.Round(billableSeconds / 60m, 2);
 
         if (session.SessionMode == SessionMode.Watching)
         {
-            rate = amount;
-            qty = 1;
-            qtyUnit = "segment";
-            label = $"Watching · {session.WatcherCount ?? 0} guest(s) · {amount:0.##}";
+            var watchers = session.WatcherCount ?? 0;
+            var perPerson = calc.GetWatchingRatePerPerson(session.RateSnapshot);
+            var watchingBilling = calc.GetWatchingBilling(session.RateSnapshot) ?? WatchingBilling.PerPerson;
+
+            if (watchingBilling == WatchingBilling.PerPerson)
+            {
+                // Flat fee per guest for this segment (not time-based).
+                rate = perPerson;
+                qty = watchers;
+                qtyUnit = "guest";
+                label = $"Watching · {watchers} guest(s) × {perPerson:0.##}";
+            }
+            else if (timeUnit == TimeUnit.PerHour)
+            {
+                rate = perPerson;
+                qty = !billingRoundUp
+                    ? decimal.Round(billableSeconds / 3600m, 4)
+                    : (hours > 0 ? (decimal)hours : 0);
+                qtyUnit = "hour";
+                label = $"Watching · {watchers} × {perPerson:0.##}/h × {qty:0.####}h · {minutes:0.##} min";
+            }
+            else
+            {
+                rate = perPerson;
+                qty = minutes;
+                qtyUnit = "min";
+                label = $"Watching · {watchers} × {perPerson:0.##}/min × {qty:0.##} min";
+            }
         }
         else if (timeUnit == TimeUnit.PerHour)
         {
@@ -130,14 +155,14 @@ internal static class SessionBillingSegments
             if (!billingRoundUp)
                 qty = decimal.Round(billableSeconds / 3600m, 4);
             qtyUnit = "hour";
-            label = $"{tierName} · {rate:0.##}/h × {qty:0.####}h";
+            label = $"{tierName} · {rate:0.##}/h × {qty:0.####}h · {minutes:0.##} min";
         }
         else
         {
             rate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
-            qty = decimal.Round(billableSeconds / 60m, 2);
+            qty = minutes;
             qtyUnit = "min";
-            label = $"{tierName} · {rate:0.##}/unit × {qty:0.##}{qtyUnit}";
+            label = $"{tierName} · {rate:0.##}/min × {qty:0.##} min";
         }
 
         return new BillingSegmentDto(
