@@ -155,6 +155,17 @@ public class SessionService : ISessionService
         if (request.PlannedDurationMinutes is > 24 * 60)
             throw new InvalidOperationException("Planned duration cannot exceed 24 hours.");
 
+        DeviceReservation? linkedReservation = null;
+        if (request.ReservationId.HasValue)
+        {
+            linkedReservation = await _db.DeviceReservations.FirstOrDefaultAsync(
+                r => r.Id == request.ReservationId.Value
+                     && r.BranchId == branchId
+                     && r.DeviceId == device.Id
+                     && r.Status == ReservationStatus.Pending, ct)
+                ?? throw new InvalidOperationException("Reservation not found or already used.");
+        }
+
         var snapshot = JsonSerializer.Serialize(new
         {
             plan.TimeUnit,
@@ -189,7 +200,13 @@ public class SessionService : ISessionService
         };
 
         _db.Sessions.Add(session);
+        if (linkedReservation is not null)
+        {
+            linkedReservation.Status = ReservationStatus.Started;
+            linkedReservation.SessionId = session.Id;
+        }
         await _db.SaveChangesAsync(ct);
+
         await _audit.LogAsync("Session.Opened", "Session", session.Id, new
         {
             device.Identifier,
@@ -200,7 +217,8 @@ public class SessionService : ISessionService
             PlanName = plan.Name,
             session.CustomerId,
             session.IsQuickGuest,
-            session.QuickGuestName
+            session.QuickGuestName,
+            request.ReservationId
         }, ct: ct);
 
         await _db.Entry(session).Reference(s => s.Device).LoadAsync(ct);

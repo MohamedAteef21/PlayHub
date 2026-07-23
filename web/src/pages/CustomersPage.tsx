@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { customersApi, offersApi, whatsappApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
+import { formatDateTimeEgypt } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import { WalletTransactionType, SessionMode, SessionStatus, type Customer, type CustomerOffer } from '@/types';
@@ -810,10 +811,10 @@ export function CustomersPage() {
                         </Badge>
                       </td>
                       <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
-                        {new Date(s.startedAt).toLocaleString()}
+                        {formatDateTimeEgypt(s.startedAt)}
                       </td>
                       <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
-                        {s.closedAt ? new Date(s.closedAt).toLocaleString() : '—'}
+                        {formatDateTimeEgypt(s.closedAt)}
                       </td>
                       <td className="px-3 py-2">
                         {s.status === SessionStatus.Closed ? formatCurrency(s.timeCost) : '—'}

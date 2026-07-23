@@ -77,8 +77,8 @@ public class InvoicePdfService : IInvoicePdfService
                     col.Item().Text($"Mode: {(session.SessionMode == SessionMode.Gaming ? "Gaming" : "Watching")} · {session.PricingPlan.Name}");
                     if (!string.IsNullOrWhiteSpace(guest))
                         col.Item().Text($"Customer: {guest}");
-                    col.Item().Text($"Started: {session.StartedAt:yyyy-MM-dd HH:mm}");
-                    col.Item().Text($"Closed: {session.ClosedAt:yyyy-MM-dd HH:mm}");
+                    col.Item().Text($"Started: {FormatEgypt(session.StartedAt)}");
+                    col.Item().Text($"Closed: {FormatEgypt(session.ClosedAt)}");
 
                     col.Item().PaddingTop(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
 
@@ -165,5 +165,15 @@ public class InvoicePdfService : IInvoicePdfService
                 page.Footer().AlignCenter().Text("شكراً لزيارتكم · Thank you").FontSize(9).FontColor(Colors.Grey.Darken1);
             });
         }).GeneratePdf();
+    }
+
+    private static string FormatEgypt(DateTime? utc)
+    {
+        if (utc is null) return "—";
+        var tz = TimeZoneInfo.FindSystemTimeZoneById(
+            OperatingSystem.IsWindows() ? "Egypt Standard Time" : "Africa/Cairo");
+        var local = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc), tz);
+        return local.ToString("yyyy-MM-dd hh:mm tt");
     }
 }

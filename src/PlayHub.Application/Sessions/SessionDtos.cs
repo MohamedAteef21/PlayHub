@@ -54,7 +54,9 @@ public record OpenSessionRequest(
     int? PlannedDurationMinutes = null,
     Guid? CustomerId = null,
     string? QuickGuestName = null,
-    bool IsQuickGuest = false);
+    bool IsQuickGuest = false,
+    /// <summary>When opening from a pending device reservation, mark it started.</summary>
+    Guid? ReservationId = null);
 
 /// <summary>
 /// Change pricing / mode mid-session (gaming↔watching, hourly↔per-match, individual↔couple).

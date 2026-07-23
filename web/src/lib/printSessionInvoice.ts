@@ -1,5 +1,6 @@
 import type { SessionDetail } from '@/types';
 import { PaymentMethod } from '@/types';
+import { formatDateTimeEgypt } from '@/lib/dates';
 
 export interface InvoicePrintLabels {
   title: string;
@@ -69,8 +70,8 @@ export function printSessionInvoice(
   dir: 'rtl' | 'ltr' = 'ltr'
 ): void {
   const invoiceNo = detail.invoice?.invoiceNumber ?? '—';
-  const closedAt = detail.closedAt ? new Date(detail.closedAt) : new Date();
-  const startedAt = new Date(detail.startedAt);
+  const closedAtLabel = formatDateTimeEgypt(detail.closedAt ?? new Date().toISOString());
+  const startedAtLabel = formatDateTimeEgypt(detail.startedAt);
   const modeLabel = detail.sessionMode === 1 ? labels.gaming : labels.watching;
   const payMethod = paymentLabel(detail.invoice?.paymentMethod ?? PaymentMethod.Cash, labels);
 
@@ -154,13 +155,13 @@ export function printSessionInvoice(
   <div class="branch">${escapeHtml(branchName || labels.branch)}</div>
   <div class="meta">
     <div><span>${escapeHtml(labels.invoiceNumber)}</span><span>${escapeHtml(invoiceNo)}</span></div>
-    <div><span>${escapeHtml(labels.date)}</span><span>${closedAt.toLocaleString()}</span></div>
+    <div><span>${escapeHtml(labels.date)}</span><span>${closedAtLabel}</span></div>
     <div><span>${escapeHtml(labels.device)}</span><span>${escapeHtml(detail.deviceName)}</span></div>
     <div><span>${escapeHtml(labels.room)}</span><span>${escapeHtml(detail.roomName ?? '—')}</span></div>
     <div><span>${escapeHtml(labels.mode)}</span><span>${escapeHtml(modeLabel)}</span></div>
     <div><span>${escapeHtml(labels.plan)}</span><span>${escapeHtml(detail.pricingPlanName)}</span></div>
-    <div><span>${escapeHtml(labels.started)}</span><span>${startedAt.toLocaleString()}</span></div>
-    <div><span>${escapeHtml(labels.closed)}</span><span>${closedAt.toLocaleString()}</span></div>
+    <div><span>${escapeHtml(labels.started)}</span><span>${startedAtLabel}</span></div>
+    <div><span>${escapeHtml(labels.closed)}</span><span>${closedAtLabel}</span></div>
   </div>
   ${segmentsHtml ? `
   <hr />

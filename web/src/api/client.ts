@@ -180,6 +180,7 @@ export const sessionsApi = {
     customerId?: string;
     isQuickGuest?: boolean;
     quickGuestName?: string;
+    reservationId?: string;
   }) =>
     apiFetch<import('@/types').SessionLive>('/sessions/open', {
       method: 'POST',
@@ -791,6 +792,28 @@ export const alertsApi = {
     if (!res.ok) throw new Error('Failed to download PDF');
     return res.blob();
   },
+};
+
+export const reservationsApi = {
+  list: () => apiFetch<import('@/types').DeviceReservation[]>('/reservations'),
+  create: (data: {
+    deviceId: string;
+    startsAt: string;
+    endsAt?: string | null;
+    customerId?: string | null;
+    guestName?: string | null;
+    notes?: string | null;
+  }) =>
+    apiFetch<import('@/types').DeviceReservation>('/reservations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  cancel: (id: string) =>
+    apiFetch<{ message: string }>(`/reservations/${id}/cancel`, { method: 'POST' }),
+  checkConflict: (deviceId: string) =>
+    apiFetch<import('@/types').ReservationConflict>(
+      `/reservations/conflict?deviceId=${encodeURIComponent(deviceId)}`
+    ),
 };
 
 export const platformApi = {

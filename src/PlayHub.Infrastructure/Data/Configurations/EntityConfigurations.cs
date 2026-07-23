@@ -588,3 +588,21 @@ public class CafeteriaHoldLineIngredientDeductConfiguration : IEntityTypeConfigu
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public class DeviceReservationConfiguration : IEntityTypeConfiguration<DeviceReservation>
+{
+    public void Configure(EntityTypeBuilder<DeviceReservation> builder)
+    {
+        builder.ToTable("device_reservations");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.GuestName).HasMaxLength(200);
+        builder.Property(x => x.Notes).HasMaxLength(1000);
+        builder.HasIndex(x => new { x.DeviceId, x.Status, x.StartsAt });
+        builder.HasIndex(x => new { x.TenantId, x.BranchId, x.StartsAt });
+        builder.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId);
+        builder.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
+        builder.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId);
+        builder.HasOne(x => x.Session).WithMany().HasForeignKey(x => x.SessionId);
+        builder.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
+    }
+}

@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { reportsApi } from '@/api/client';
-import { formatCurrency, parseServerUtc } from '@/hooks/useSessions';
-import { startOfMonth, today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
+import { formatCurrency } from '@/hooks/useSessions';
+import { formatTimeEgypt, startOfMonth, today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -174,7 +174,7 @@ export function ReportsPage() {
                   {drawer.dayCollections.map((c) => (
                     <tr key={c.id} className="hover:bg-surface-hover">
                       <td className="px-4 py-3 text-sm text-muted">
-                        {new Date(parseServerUtc(c.collectedAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {formatTimeEgypt(c.collectedAt)}
                       </td>
                       <td className="px-4 py-3">{c.collectedByName}</td>
                       <td className="px-4 py-3 font-medium text-success">{formatCurrency(c.amount)}</td>
