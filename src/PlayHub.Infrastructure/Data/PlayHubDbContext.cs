@@ -55,6 +55,7 @@ public class PlayHubDbContext : DbContext
     public DbSet<MasterAlertSettings> MasterAlertSettings => Set<MasterAlertSettings>();
     public DbSet<PlatformAlertSettings> PlatformAlertSettings => Set<PlatformAlertSettings>();
     public DbSet<DeviceMaintenance> DeviceMaintenances => Set<DeviceMaintenance>();
+    public DbSet<DeviceReservation> DeviceReservations => Set<DeviceReservation>();
     public DbSet<DevicePricingPlan> DevicePricingPlans => Set<DevicePricingPlan>();
     public DbSet<PricingPlan> PricingPlans => Set<PricingPlan>();
     public DbSet<GamingRate> GamingRates => Set<GamingRate>();
@@ -271,6 +272,14 @@ public class PlayHubDbContext : DbContext
                  && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
 
         modelBuilder.Entity<DeviceMaintenance>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
+             || (_tenantContext.BranchId != null && e.BranchId == _tenantContext.BranchId)
+             || (!_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null
+                 && _tenantContext.AllowedBranchIds.Contains(e.BranchId))));
+
+        modelBuilder.Entity<DeviceReservation>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&
             !e.IsDeleted &&
             ((_tenantContext.IsSuperAdmin && _tenantContext.BranchId == null)
