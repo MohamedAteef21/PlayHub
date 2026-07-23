@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { cafeteriaApi, inventoryApi } from '@/api/client';
+import { cafeteriaApi, inventoryApi, branchesApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
@@ -49,6 +49,8 @@ const movementLabels: Record<number, string> = {
   [InventoryMovementType.StockIn]: 'Stock in',
   [InventoryMovementType.StockCount]: 'Count',
   [InventoryMovementType.Settlement]: 'Settlement',
+  [InventoryMovementType.TransferOut]: 'Transfer out',
+  [InventoryMovementType.TransferIn]: 'Transfer in',
 };
 
 function newRecipeLineRow(partial?: Partial<RecipeLineFormRow>): RecipeLineFormRow {
@@ -128,11 +130,17 @@ export function InventoryPage() {
   const [unitName, setUnitName] = useState('');
   const [unitNameAr, setUnitNameAr] = useState('');
   const [unitIsActive, setUnitIsActive] = useState(true);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferItemId, setTransferItemId] = useState('');
+  const [transferToBranchId, setTransferToBranchId] = useState('');
+  const [transferQty, setTransferQty] = useState('1');
+  const [transferNotes, setTransferNotes] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
   const canAdjust = hasPermission(user, Permissions.InventoryAdjust);
   const canManageItems = hasPermission(user, Permissions.InventoryManageItems);
+  const isMaster = !!user?.isMaster;
 
   const { data: allItems = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['cafeteria-items', user?.id, activeBranchId],
@@ -148,6 +156,12 @@ export function InventoryPage() {
     queryKey: ['inventory-units', user?.id, activeBranchId, 'all'],
     queryFn: () => inventoryApi.getUnits(false),
     enabled: tab === 'units',
+  });
+
+  const { data: branches = [] } = useQuery({
+    queryKey: ['branches', user?.id],
+    queryFn: branchesApi.getAll,
+    enabled: isMaster,
   });
 
   const warehouseItems = useMemo(
@@ -368,6 +382,34 @@ export function InventoryPage() {
     onSuccess: () => {
       setError('');
       queryClient.invalidateQueries({ queryKey: ['inventory-units'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: () => {
+      if (!activeBranchId) throw new Error(t('inventory.transferNeedBranch'));
+      const qty = Number(transferQty);
+      if (!transferItemId || !transferToBranchId || !Number.isFinite(qty) || qty <= 0) {
+        throw new Error(t('inventory.transferInvalid'));
+      }
+      return inventoryApi.transfer({
+        fromBranchId: activeBranchId,
+        toBranchId: transferToBranchId,
+        cafeteriaItemId: transferItemId,
+        quantity: qty,
+        notes: transferNotes.trim() || undefined,
+      });
+    },
+    onSuccess: () => {
+      setTransferOpen(false);
+      setTransferItemId('');
+      setTransferToBranchId('');
+      setTransferQty('1');
+      setTransferNotes('');
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -659,11 +701,30 @@ export function InventoryPage() {
   return (
     <div>
       <PageHeader title={t('inventory.title')}>
-        {tab === 'warehouse' && canManageItems && (
-          <Button onClick={() => openCreateItem('warehouse')}>
-            <Icon name="plus" className="h-4 w-4" />
-            {t('inventory.addItem')}
-          </Button>
+        {tab === 'warehouse' && (
+          <div className="flex flex-wrap gap-2">
+            {canManageItems && (
+              <Button onClick={() => openCreateItem('warehouse')}>
+                <Icon name="plus" className="h-4 w-4" />
+                {t('inventory.addItem')}
+              </Button>
+            )}
+            {isMaster && canAdjust && branches.length > 1 && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setTransferOpen(true);
+                  setError('');
+                  setTransferItemId('');
+                  setTransferToBranchId('');
+                  setTransferQty('1');
+                  setTransferNotes('');
+                }}
+              >
+                {t('inventory.transferStock')}
+              </Button>
+            )}
+          </div>
         )}
         {tab === 'menu' && canManageItems && (
           <Button onClick={() => openCreateItem('menu')}>
@@ -1490,6 +1551,75 @@ export function InventoryPage() {
             onClick={() => saveAddonMutation.mutate()}
           >
             {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        title={t('inventory.transferStock')}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">{t('inventory.transferHint')}</p>
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('inventory.transferItem')}</label>
+            <select
+              value={transferItemId}
+              onChange={(e) => setTransferItemId(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            >
+              <option value="">{t('inventory.selectItem')}</option>
+              {stockItems
+                .filter((i) => i.currentQuantity > 0)
+                .map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {itemLabel(i)} · {i.currentQuantity} {i.baseUnitName}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('inventory.transferToBranch')}</label>
+            <select
+              value={transferToBranchId}
+              onChange={(e) => setTransferToBranchId(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+            >
+              <option value="">{t('inventory.selectBranch')}</option>
+              {branches
+                .filter((b) => b.id !== activeBranchId)
+                .map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <Input
+            label={t('inventory.transferQty')}
+            type="number"
+            min={1}
+            value={transferQty}
+            onChange={(e) => setTransferQty(e.target.value)}
+          />
+          <Input
+            label={t('inventory.notes')}
+            value={transferNotes}
+            onChange={(e) => setTransferNotes(e.target.value)}
+          />
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            type="button"
+            loading={transferMutation.isPending}
+            disabled={!transferItemId || !transferToBranchId || !transferQty}
+            onClick={() => {
+              setError('');
+              transferMutation.mutate();
+            }}
+          >
+            {t('inventory.confirmTransfer')}
           </Button>
         </div>
       </Modal>

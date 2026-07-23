@@ -17,6 +17,25 @@ public record InventoryMovementDto(
 
 public record AdjustInventoryRequest(int NewQuantity, string Reason);
 
+public record TransferStockRequest(
+    Guid FromBranchId,
+    Guid ToBranchId,
+    Guid CafeteriaItemId,
+    int Quantity,
+    string? Notes = null);
+
+public record TransferStockResult(
+    Guid FromBranchId,
+    string FromBranchName,
+    Guid ToBranchId,
+    string ToBranchName,
+    Guid SourceItemId,
+    Guid DestinationItemId,
+    string ItemName,
+    int Quantity,
+    int SourceQuantityAfter,
+    int DestinationQuantityAfter);
+
 public record StockVoucherLineInput(
     Guid CafeteriaItemId,
     int Quantity,
@@ -59,6 +78,7 @@ public interface IInventoryService
     Task<PlayHub.Application.Common.PagedResult<InventoryMovementDto>> GetMovementsAsync(
         Guid? itemId = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
     Task<CafeteriaItemDto> AdjustQuantityAsync(Guid itemId, AdjustInventoryRequest request, CancellationToken ct = default);
+    Task<TransferStockResult> TransferStockAsync(TransferStockRequest request, CancellationToken ct = default);
 
     Task<PlayHub.Application.Common.PagedResult<StockVoucherDto>> GetVouchersAsync(
         StockVoucherType? type = null, int page = 1, int pageSize = 20, CancellationToken ct = default);

@@ -321,6 +321,8 @@ export const InventoryMovementType = {
   StockIn: 6,
   StockCount: 7,
   Settlement: 8,
+  TransferOut: 9,
+  TransferIn: 10,
 } as const;
 
 export const StockVoucherType = {

@@ -123,7 +123,9 @@ public enum InventoryMovementType : short
     InitialStock = 5,
     StockIn = 6,
     StockCount = 7,
-    Settlement = 8
+    Settlement = 8,
+    TransferOut = 9,
+    TransferIn = 10
 }
 
 /// <summary>Dispense / stock-entry unit. Stock is always stored in Base units.</summary>
