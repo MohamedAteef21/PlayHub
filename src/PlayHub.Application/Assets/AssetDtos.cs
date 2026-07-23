@@ -104,6 +104,9 @@ public record UpdateDeviceRequest(
     IReadOnlyList<UpsertDeviceControllerRequest>? Controllers = null,
     UpsertScreenRequest? Screen = null);
 
+/// <summary>Master-only: move a device to another owned branch (optional room on the target).</summary>
+public record MoveDeviceRequest(Guid TargetBranchId, Guid? TargetRoomId = null);
+
 public record AssetDashboardRoomDto(
     Guid Id,
     string Name,

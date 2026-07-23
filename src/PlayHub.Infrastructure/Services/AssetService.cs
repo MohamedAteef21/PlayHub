@@ -21,15 +21,15 @@ public class AssetService : IAssetService
         _audit = audit;
     }
 
-    public async Task<IReadOnlyList<RoomDto>> GetRoomsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<RoomDto>> GetRoomsAsync(Guid? branchId = null, CancellationToken ct = default)
     {
-        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var resolvedBranchId = await ResolveReadableBranchIdAsync(branchId, ct);
         var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
         var rooms = await _db.Rooms
             .Include(r => r.Devices)
             .Include(r => r.RoomAssets).ThenInclude(a => a.VenueAssetType)
-            .Where(r => r.BranchId == branchId)
+            .Where(r => r.BranchId == resolvedBranchId)
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
 
@@ -456,6 +456,105 @@ public class AssetService : IAssetService
         device.IsActive = false;
         await _db.SaveChangesAsync(ct);
         await _audit.LogAsync("Device.SoftDeleted", "Device", device.Id, new { device.Identifier, device.Name }, ct: ct);
+    }
+
+    public async Task<DeviceDto> MoveDeviceAsync(Guid id, MoveDeviceRequest request, CancellationToken ct = default)
+    {
+        if (!_tenantContext.IsMaster && !_tenantContext.IsSuperAdmin)
+            throw new UnauthorizedAccessException("Only Master Admin can move devices between branches.");
+
+        var sourceBranchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+        var targetBranchId = request.TargetBranchId;
+        if (targetBranchId == Guid.Empty)
+            throw new InvalidOperationException("Target branch is required.");
+
+        if (targetBranchId == sourceBranchId)
+            throw new InvalidOperationException("Device is already on this branch. Pick a different branch.");
+
+        await EnsureOwnedBranchAsync(targetBranchId, ct);
+
+        var device = await _db.Devices
+            .Include(d => d.Room)
+            .Include(d => d.DeviceControllers).ThenInclude(dc => dc.ControllerType)
+            .Include(d => d.Screens)
+            .FirstOrDefaultAsync(d => d.Id == id && d.BranchId == sourceBranchId, ct)
+            ?? throw new KeyNotFoundException("Device not found.");
+
+        if (await _db.Sessions.AnyAsync(s => s.DeviceId == id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Cannot move a device with an active session. Close the session first.");
+
+        if (await _db.DeviceMaintenances.AnyAsync(m => m.DeviceId == id && m.CompletedAt == null, ct))
+            throw new InvalidOperationException("Cannot move a device that is in maintenance. Complete maintenance first.");
+
+        Room? targetRoom = null;
+        if (request.TargetRoomId.HasValue)
+        {
+            targetRoom = await _db.Rooms.FirstOrDefaultAsync(
+                r => r.Id == request.TargetRoomId.Value && r.BranchId == targetBranchId && r.IsActive, ct)
+                ?? throw new KeyNotFoundException("Target room not found on the destination branch.");
+        }
+
+        if (await _db.Devices.AnyAsync(
+                d => d.BranchId == targetBranchId && d.Identifier == device.Identifier && d.Id != device.Id, ct))
+            throw new InvalidOperationException(
+                "A device with the same name already exists on the destination branch. Rename it first.");
+
+        var fromBranchId = device.BranchId;
+        var fromRoomId = device.RoomId;
+        device.BranchId = targetBranchId;
+        device.RoomId = targetRoom?.Id;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Device.Moved", "Device", device.Id, new
+        {
+            device.Identifier,
+            device.Name,
+            FromBranchId = fromBranchId,
+            ToBranchId = targetBranchId,
+            FromRoomId = fromRoomId,
+            ToRoomId = device.RoomId,
+            TargetRoomName = targetRoom?.Name
+        }, ct: ct);
+
+        await _db.Entry(device).Reference(d => d.Room).LoadAsync(ct);
+        var liveStatuses = await GetLiveStatusMapAsync(targetBranchId, ct);
+        return MapDevice(device, liveStatuses);
+    }
+
+    /// <summary>
+    /// Active branch by default. Masters may pass another owned branch id (e.g. rooms for a move target).
+    /// </summary>
+    private async Task<Guid> ResolveReadableBranchIdAsync(Guid? branchId, CancellationToken ct)
+    {
+        if (branchId is null || branchId == Guid.Empty)
+            return await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        if (!_tenantContext.IsMaster && !_tenantContext.IsSuperAdmin)
+            throw new UnauthorizedAccessException("Only Master Admin can read another branch.");
+
+        await EnsureOwnedBranchAsync(branchId.Value, ct);
+        return branchId.Value;
+    }
+
+    private async Task EnsureOwnedBranchAsync(Guid branchId, CancellationToken ct)
+    {
+        if (!_tenantContext.IsSuperAdmin
+            && _tenantContext.AllowedBranchIds.Count > 0
+            && !_tenantContext.AllowedBranchIds.Contains(branchId))
+        {
+            throw new UnauthorizedAccessException("You do not have access to this branch.");
+        }
+
+        var branch = await _db.Branches.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == branchId, ct)
+            ?? throw new KeyNotFoundException("Branch not found.");
+
+        if (_tenantContext.IsSuperAdmin)
+            return;
+
+        var businessOwnerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
+        if (branch.OwnerUserId.HasValue && branch.OwnerUserId.Value != businessOwnerId)
+            throw new UnauthorizedAccessException("You do not have access to this branch.");
     }
 
     public async Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default)

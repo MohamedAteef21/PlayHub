@@ -26,8 +26,8 @@ public class AssetsController : ControllerBase
     [HttpGet("rooms")]
     [Authorize(Policy = PermissionPolicies.SessionsView)]
     [ProducesResponseType(typeof(IReadOnlyList<RoomDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetRooms(CancellationToken ct) =>
-        await ExecuteAsync(() => _assetService.GetRoomsAsync(ct));
+    public async Task<IActionResult> GetRooms([FromQuery] Guid? branchId, CancellationToken ct) =>
+        await ExecuteAsync(() => _assetService.GetRoomsAsync(branchId, ct));
 
     [HttpGet("rooms/{id:guid}")]
     [Authorize(Policy = PermissionPolicies.SessionsView)]
@@ -149,11 +149,22 @@ public class AssetsController : ControllerBase
     public async Task<IActionResult> DeleteDevice(Guid id, CancellationToken ct) =>
         await ExecuteNoContentAsync(() => _assetService.SoftDeleteDeviceAsync(id, ct));
 
+    /// <summary>Master-only: move a device to another owned branch.</summary>
+    [HttpPost("devices/{id:guid}/move")]
+    [Authorize(Policy = PermissionPolicies.AssetsManage)]
+    [ProducesResponseType(typeof(DeviceDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> MoveDevice(Guid id, [FromBody] MoveDeviceRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _assetService.MoveDeviceAsync(id, request, ct));
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
         try
         {
             return Ok(await action());
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -172,6 +183,10 @@ public class AssetsController : ControllerBase
             await action();
             return NoContent();
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
@@ -188,6 +203,10 @@ public class AssetsController : ControllerBase
         {
             var result = await action();
             return CreatedAtAction(getActionName, new { id = idSelector(result) }, result);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

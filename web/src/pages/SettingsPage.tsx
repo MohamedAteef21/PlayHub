@@ -61,6 +61,11 @@ export function SettingsPage() {
   const [ctrlTypeId, setCtrlTypeId] = useState('');
   const [ctrlQty, setCtrlQty] = useState('2');
 
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [movingDevice, setMovingDevice] = useState<Device | null>(null);
+  const [moveTargetBranchId, setMoveTargetBranchId] = useState('');
+  const [moveTargetRoomId, setMoveTargetRoomId] = useState('');
+
   const [planOpen, setPlanOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<PricingPlan | null>(null);
   const [planIsActive, setPlanIsActive] = useState(true);
@@ -105,7 +110,7 @@ export function SettingsPage() {
 
   const { data: rooms = [] } = useQuery({
     queryKey: ['rooms', user?.id, activeBranchId],
-    queryFn: assetsApi.getRooms,
+    queryFn: () => assetsApi.getRooms(),
   });
   const { data: devices = [] } = useQuery({
     queryKey: ['devices', user?.id, activeBranchId],
@@ -118,7 +123,13 @@ export function SettingsPage() {
   const { data: branches = [] } = useQuery({
     queryKey: ['branches', user?.id],
     queryFn: branchesApi.getAll,
-    enabled: (isMaster && tab === 'branches') || tab === 'payments',
+    enabled: (isMaster && (tab === 'branches' || tab === 'devices')) || tab === 'payments',
+  });
+
+  const { data: moveTargetRooms = [] } = useQuery({
+    queryKey: ['rooms-for-move', moveTargetBranchId, user?.id],
+    queryFn: () => assetsApi.getRooms(moveTargetBranchId),
+    enabled: isMaster && moveOpen && !!moveTargetBranchId,
   });
 
   const { data: paymentBranch } = useQuery({
@@ -562,6 +573,34 @@ export function SettingsPage() {
     onError: (e: Error) => setError(e.message),
   });
 
+  const moveDeviceMutation = useMutation({
+    mutationFn: () => {
+      if (!movingDevice || !moveTargetBranchId) throw new Error(t('settings.moveDevicePickBranch'));
+      return assetsApi.moveDevice(movingDevice.id, {
+        targetBranchId: moveTargetBranchId,
+        targetRoomId: moveTargetRoomId || null,
+      });
+    },
+    onSuccess: (_data, _vars) => {
+      const movedId = movingDevice?.id;
+      setMoveOpen(false);
+      setMovingDevice(null);
+      setMoveTargetBranchId('');
+      setMoveTargetRoomId('');
+      setError('');
+      if (movedId) {
+        queryClient.setQueriesData<import('@/types').Device[]>(
+          { queryKey: ['devices'] },
+          (old) => old?.filter((d) => d.id !== movedId)
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
   const deletePlanMutation = useMutation({
     mutationFn: (id: string) => pricingApi.deletePlan(id),
     onSuccess: (_data, id) => {
@@ -976,6 +1015,22 @@ export function SettingsPage() {
                       >
                         {t('users.edit')}
                       </Button>
+                      {isMaster && branches.filter((b) => b.id !== activeBranchId && b.isActive !== false).length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setError('');
+                            setMovingDevice(d);
+                            const other = branches.find((b) => b.id !== activeBranchId && b.isActive !== false);
+                            setMoveTargetBranchId(other?.id ?? '');
+                            setMoveTargetRoomId('');
+                            setMoveOpen(true);
+                          }}
+                        >
+                          {t('settings.moveDevice')}
+                        </Button>
+                      )}
                       <Button
                         variant="danger"
                         size="sm"
@@ -1670,6 +1725,65 @@ export function SettingsPage() {
             onClick={() => deviceMutation.mutate()}
           >
             {t('common.save')}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={moveOpen}
+        onClose={() => {
+          setMoveOpen(false);
+          setMovingDevice(null);
+          setMoveTargetBranchId('');
+          setMoveTargetRoomId('');
+        }}
+        title={t('settings.moveDevice')}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            {t('settings.moveDeviceHint', { name: movingDevice?.name ?? '' })}
+          </p>
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('settings.moveTargetBranch')}</label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+              value={moveTargetBranchId}
+              onChange={(e) => {
+                setMoveTargetBranchId(e.target.value);
+                setMoveTargetRoomId('');
+              }}
+            >
+              <option value="">{t('settings.moveDevicePickBranch')}</option>
+              {branches
+                .filter((b) => b.id !== activeBranchId && b.isActive !== false)
+                .map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('settings.room')}</label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+              value={moveTargetRoomId}
+              onChange={(e) => setMoveTargetRoomId(e.target.value)}
+              disabled={!moveTargetBranchId}
+            >
+              <option value="">{t('settings.noRoom')}</option>
+              {moveTargetRooms.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted">{t('settings.deviceRoomOptional')}</p>
+          </div>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <Button
+            className="w-full"
+            loading={moveDeviceMutation.isPending}
+            disabled={!movingDevice || !moveTargetBranchId}
+            onClick={() => moveDeviceMutation.mutate()}
+          >
+            {t('settings.confirmMoveDevice')}
           </Button>
         </div>
       </Modal>
