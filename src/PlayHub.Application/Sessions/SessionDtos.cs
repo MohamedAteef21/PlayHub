@@ -34,6 +34,8 @@ public record SessionLiveDto(
     bool CanConvertToGaming,
     bool CanChangePricing,
     TimeUnit? TimeUnit,
+    decimal? AppliedHourlyRate,
+    string? AppliedRateTier,
     Guid? CustomerId,
     string? CustomerCode,
     string? CustomerName,

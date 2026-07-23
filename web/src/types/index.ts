@@ -67,6 +67,8 @@ export interface SessionLive {
   canConvertToGaming: boolean;
   canChangePricing: boolean;
   timeUnit: number | null;
+  appliedHourlyRate: number | null;
+  appliedRateTier: string | null;
   customerId: string | null;
   customerCode: string | null;
   customerName: string | null;

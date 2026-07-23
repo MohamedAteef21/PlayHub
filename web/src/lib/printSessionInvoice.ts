@@ -88,15 +88,17 @@ export function printSessionInvoice(
 
   const segmentsHtml = (detail.billingSegments ?? [])
     .map((s) => {
-      const qtyLabel =
+      const detailLine =
         s.quantityUnit === 'match'
-          ? `${s.quantity} × ${money(s.rate)}`
+          ? `${money(s.rate)} × ${s.quantity}`
           : s.quantityUnit === 'hour'
-            ? `${s.quantity}h × ${money(s.rate)}`
-            : money(s.rate);
+            ? `${money(s.rate)}/h × ${s.quantity}h`
+            : `${money(s.rate)} × ${s.quantity}`;
       return `<tr>
-        <td>${escapeHtml(s.label)}</td>
-        <td style="text-align:center">${escapeHtml(qtyLabel)}</td>
+        <td>
+          <div>${escapeHtml(s.label)}</div>
+          <div style="color:#666;font-size:11px">${escapeHtml(detailLine)}</div>
+        </td>
         <td style="text-align:end">${money(s.amount)}</td>
       </tr>`;
     })
@@ -154,7 +156,6 @@ export function printSessionInvoice(
   <table>
     <thead><tr>
       <th>${escapeHtml(labels.timeCost)}</th>
-      <th style="text-align:center">${escapeHtml(labels.qty)}</th>
       <th style="text-align:end">${escapeHtml(labels.total)}</th>
     </tr></thead>
     <tbody>${segmentsHtml}</tbody>

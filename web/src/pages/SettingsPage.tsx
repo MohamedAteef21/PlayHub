@@ -74,7 +74,6 @@ export function SettingsPage() {
   const [planPackageHours, setPlanPackageHours] = useState('5');
   const [planPackagePrice, setPlanPackagePrice] = useState('');
   const [planPackageCouplePrice, setPlanPackageCouplePrice] = useState('');
-  const [planVipSurcharge, setPlanVipSurcharge] = useState('0');
   const [error, setError] = useState('');
 
   const [assetTypeOpen, setAssetTypeOpen] = useState(false);
@@ -586,7 +585,7 @@ export function SettingsPage() {
         timeUnit: isPkg ? TimeUnit.PerHour : unit,
         watchingBilling:
           planMode === SessionMode.Watching ? planWatchingBilling : WatchingBilling.PerPerson,
-        vipSurchargePerHour: Number(planVipSurcharge) || 0,
+        vipSurchargePerHour: 0,
         gamingRates:
           planMode === SessionMode.Gaming
             ? isPkg
@@ -622,7 +621,6 @@ export function SettingsPage() {
       setPlanIsPackage(false);
       setPlanPackagePrice('');
       setPlanPackageCouplePrice('');
-      setPlanVipSurcharge('0');
       setPlanIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -1009,7 +1007,6 @@ export function SettingsPage() {
                 setPlanPackageHours('5');
                 setPlanPackagePrice('');
                 setPlanPackageCouplePrice('');
-                setPlanVipSurcharge('0');
                 setPlanIsActive(true);
                 setPlanOpen(true);
               }}
@@ -1049,11 +1046,6 @@ export function SettingsPage() {
                         {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')}
                       </p>
                     )}
-                    {(p.vipSurchargePerHour ?? 0) > 0 && (
-                      <p className="mt-1 text-xs text-muted">
-                        {t('settings.planVipSurcharge')}: {formatCurrency(p.vipSurchargePerHour)}
-                      </p>
-                    )}
                     {!p.isActive && (
                       <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>
                     )}
@@ -1091,7 +1083,6 @@ export function SettingsPage() {
                               ? String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? p.packagePrice ?? '')
                               : ''
                           );
-                          setPlanVipSurcharge(String(p.vipSurchargePerHour ?? 0));
                           setPlanIsActive(p.isActive);
                           setPlanOpen(true);
                         }}
@@ -1797,16 +1788,6 @@ export function SettingsPage() {
           ) : planMode === SessionMode.Watching ? (
             <Input label={planRateLabel()} type="number" value={planRate} onChange={(e) => setPlanRate(e.target.value)} />
           ) : null}
-
-          <div>
-            <Input
-              label={t('settings.planVipSurcharge')}
-              type="number"
-              value={planVipSurcharge}
-              onChange={(e) => setPlanVipSurcharge(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted">{t('settings.vipSurchargeHint')}</p>
-          </div>
 
           {editingPlan && (
             <label className="flex items-center gap-2 text-sm">

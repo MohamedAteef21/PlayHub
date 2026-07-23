@@ -157,7 +157,7 @@ public class SessionService : ISessionService
             PricingPlanId = plan.Id,
             ControllerCount = request.ControllerCount,
             WatcherCount = request.WatcherCount,
-            RoomSurchargePerHour = plan.VipSurchargePerHour,
+            RoomSurchargePerHour = 0,
             RateSnapshot = snapshot,
             Status = SessionStatus.Open,
             OpenedByUserId = _tenantContext.UserId,
@@ -451,7 +451,7 @@ public class SessionService : ISessionService
         session.SessionMode = SessionMode.Gaming;
         session.PricingPlanId = plan.Id;
         session.ControllerCount = request.ControllerCount;
-        session.RoomSurchargePerHour = plan.VipSurchargePerHour;
+        session.RoomSurchargePerHour = 0;
         session.RateSnapshot = snapshot;
         session.StartedAt = convertAt;
         session.TotalPausedSeconds = 0;
@@ -1038,6 +1038,12 @@ public class SessionService : ISessionService
             session.SessionMode == SessionMode.Watching && session.Status != SessionStatus.Closed,
             session.Status != SessionStatus.Closed,
             timeUnit,
+            session.SessionMode == SessionMode.Gaming
+                ? _costCalculator.GetGamingRate(session.RateSnapshot, session.ControllerCount)
+                : null,
+            session.SessionMode == SessionMode.Gaming && session.ControllerCount is > 0
+                ? (SessionCostCalculator.GamingRateTier(session.ControllerCount.Value) == 2 ? "Couple" : "Individual")
+                : null,
             session.CustomerId,
             session.Customer?.Code,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,

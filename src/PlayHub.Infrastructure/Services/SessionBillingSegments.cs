@@ -63,8 +63,8 @@ internal static class SessionBillingSegments
             var matchRate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
             amount = decimal.Round(matchRate * matchCount.Value, 2);
             var matchLabel = tier == 2
-                ? $"Matches · Couple × {matchCount}"
-                : $"Matches · Individual × {matchCount}";
+                ? $"Couple · {matchRate:0.##}/match × {matchCount}"
+                : $"Individual · {matchRate:0.##}/match × {matchCount}";
 
             return new BillingSegmentDto(
                 "Match",
@@ -101,29 +101,31 @@ internal static class SessionBillingSegments
         decimal rate;
         decimal qty;
         string qtyUnit;
+        var tierName = tier == 2 ? "Couple" : "Individual";
 
         if (session.SessionMode == SessionMode.Watching)
         {
-            label = $"Watching · {session.WatcherCount ?? 0} guest(s)";
             rate = amount;
             qty = 1;
             qtyUnit = "segment";
+            label = $"Watching · {session.WatcherCount ?? 0} guest(s) · {amount:0.##}";
         }
         else if (timeUnit == TimeUnit.PerHour)
         {
             rate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
-            qty = (decimal)hours;
+            qty = hours > 0 ? (decimal)hours : 0;
+            // Prefer exact hours from billable seconds when not rounding up, so label matches amount.
+            if (!billingRoundUp)
+                qty = decimal.Round(billableSeconds / 3600m, 4);
             qtyUnit = "hour";
-            label = tier == 2
-                ? $"Hourly · Couple · {qty}h @ {rate:0.##}"
-                : $"Hourly · Individual · {qty}h @ {rate:0.##}";
+            label = $"{tierName} · {rate:0.##}/h × {qty:0.####}h";
         }
         else
         {
             rate = calc.GetGamingRate(session.RateSnapshot, session.ControllerCount);
-            qty = billableSeconds / 60m;
+            qty = decimal.Round(billableSeconds / 60m, 2);
             qtyUnit = "min";
-            label = tier == 2 ? $"Timed · Couple" : $"Timed · Individual";
+            label = $"{tierName} · {rate:0.##}/unit × {qty:0.##}{qtyUnit}";
         }
 
         return new BillingSegmentDto(

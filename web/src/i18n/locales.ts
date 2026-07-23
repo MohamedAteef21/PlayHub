@@ -216,6 +216,7 @@ export const en = {
     playMode: 'Play mode',
     accrued: 'Previous segment',
     perMatchHint: 'Per-match billing — enter match count when closing or changing pricing.',
+    match: 'match',
     outstandingDebtWarning: 'This customer has {{count}} unpaid debt(s) totaling {{amount}}.',
   },
   session: {
@@ -231,6 +232,7 @@ export const en = {
     matchCountRequired: 'Enter how many matches were played',
     matchCloseHint: 'This segment is billed per match — enter the match count below. Previous segments are already included.',
     billingSegments: 'Billing breakdown',
+    hourlyRate: 'Hourly rate',
     paymentMethod: 'Payment',
     cash: 'Cash',
     deferred: 'Deferred',
@@ -1062,6 +1064,7 @@ export const ar = {
     playMode: 'نظام اللعب',
     accrued: 'الجزء السابق',
     perMatchHint: 'التسعير بالماتش — اكتب عدد الماتشات عند الإغلاق أو تغيير التسعير.',
+    match: 'ماتش',
     outstandingDebtWarning: 'هذا العميل عليه {{count}} دين/آجل بإجمالي {{amount}}.',
   },
   session: {
@@ -1077,6 +1080,7 @@ export const ar = {
     matchCountRequired: 'اكتب كام ماتش اتلعب',
     matchCloseHint: 'الجزء الحالي بالماتش — اكتب العدد تحت. الأجزاء السابقة محسوبة.',
     billingSegments: 'تفصيل الحساب',
+    hourlyRate: 'سعر الساعة',
     paymentMethod: 'طريقة الدفع',
     cash: 'نقدي',
     deferred: 'آجل',

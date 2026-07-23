@@ -198,8 +198,19 @@ function DeviceCard({
               </span>
             </div>
           )}
-          {(session.cafeteriaCost > 0 || session.currentTimeCost > 0) && (
+          {(session.cafeteriaCost > 0 || session.currentTimeCost > 0 || (session.appliedHourlyRate ?? 0) > 0) && (
             <p className="text-xs text-muted">
+              {session.appliedHourlyRate != null && session.appliedHourlyRate > 0 && (
+                <>
+                  {session.appliedRateTier === 'Couple'
+                    ? t('settings.couple')
+                    : t('settings.individual')}
+                  {': '}
+                  {formatCurrency(session.appliedHourlyRate)}
+                  {session.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}
+                  {' · '}
+                </>
+              )}
               {t('dashboard.timeCost')}: {formatCurrency(session.currentTimeCost)}
               {session.accruedTimeCost > 0
                 ? ` (${t('dashboard.accrued')}: ${formatCurrency(session.accruedTimeCost)})`
@@ -1111,9 +1122,19 @@ export function DashboardPage() {
                 <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
                   <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
                   {invoiceResult.billingSegments.map((seg, idx) => (
-                    <div key={`${seg.startedAt}-${idx}`} className="flex justify-between gap-2 text-xs">
-                      <span className="min-w-0 truncate text-muted">{seg.label}</span>
-                      <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
+                    <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
+                      <div className="flex justify-between gap-2 text-xs">
+                        <span className="min-w-0 truncate font-medium">{seg.label}</span>
+                        <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
+                      </div>
+                      <p className="text-[11px] text-muted">
+                        {t('session.hourlyRate')}: {formatCurrency(seg.rate)}
+                        {seg.quantityUnit === 'match'
+                          ? ` · ${seg.quantity} ${t('dashboard.match')}`
+                          : seg.quantityUnit === 'hour'
+                            ? ` · ${seg.quantity} ${t('session.hoursShort')}`
+                            : ` · ${seg.quantity} ${seg.quantityUnit}`}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -1558,10 +1579,25 @@ export function DashboardPage() {
               {closeModal.timeUnit === TimeUnit.PerGame ? (
                 <p className="text-xs text-muted">{t('session.matchCloseHint')}</p>
               ) : (
-                <div className="flex justify-between text-sm text-muted">
-                  <span>{t('session.timeCost')}</span>
-                  <span>{formatCurrency(closeModal.currentTimeCost)}</span>
-                </div>
+                <>
+                  {(closeModal.appliedHourlyRate ?? 0) > 0 && (
+                    <div className="flex justify-between text-sm text-muted">
+                      <span>
+                        {closeModal.appliedRateTier === 'Couple'
+                          ? t('settings.couple')
+                          : t('settings.individual')}{' '}
+                        ({t('session.hourlyRate')})
+                      </span>
+                      <span>
+                        {formatCurrency(closeModal.appliedHourlyRate!)}/{t('session.hoursShort')}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm text-muted">
+                    <span>{t('session.timeCost')}</span>
+                    <span>{formatCurrency(closeModal.currentTimeCost)}</span>
+                  </div>
+                </>
               )}
               {closeModal.accruedTimeCost > 0 && (
                 <div className="flex justify-between text-sm text-muted">
