@@ -240,11 +240,12 @@ export function ReportsPage() {
           <p className="text-muted">{t('common.loading')}</p>
         ) : revenue ? (
           <div className="space-y-6">
+            <p className="text-sm text-muted">{t('reports.manualRevenueHint')}</p>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard label={t('reports.totalRevenue')} value={formatCurrency(revenue.totalRevenue)} accent="success" />
               <StatCard label={t('reports.sessionRevenue')} value={formatCurrency(revenue.sessionRevenue)} />
               <StatCard label={t('reports.cafeteriaRevenue')} value={formatCurrency(revenue.cafeteriaRevenue)} />
-              <StatCard label={t('reports.manualRevenue')} value={formatCurrency(revenue.manualRevenue ?? 0)} />
+              <StatCard label={t('reports.manualRevenue')} value={formatCurrency(revenue.manualRevenue ?? 0)} accent="success" />
             </div>
             {revenue.daily.length > 0 && (
               <DataTable
@@ -261,7 +262,7 @@ export function ReportsPage() {
                     <td className="px-4 py-3">{d.date}</td>
                     <td className="px-4 py-3">{formatCurrency(d.sessionRevenue)}</td>
                     <td className="px-4 py-3">{formatCurrency(d.cafeteriaRevenue)}</td>
-                    <td className="px-4 py-3">{formatCurrency(d.manualRevenue ?? 0)}</td>
+                    <td className="px-4 py-3 font-medium text-success">{formatCurrency(d.manualRevenue ?? 0)}</td>
                     <td className="px-4 py-3 font-medium text-success">{formatCurrency(d.total)}</td>
                   </tr>
                 ))}
