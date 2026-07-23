@@ -3,7 +3,8 @@ import { UserRole } from '@/types';
 
 export function isSuperAdmin(user: AuthUser | null | undefined): boolean {
   if (!user) return false;
-  return user.role === UserRole.SuperAdmin || (user.isMaster && user.role == null);
+  const role = Number(user.role);
+  return role === UserRole.SuperAdmin || (user.isMaster && (user.role == null || Number.isNaN(role)));
 }
 
 export function hasPermission(user: AuthUser | null, permission: string): boolean {

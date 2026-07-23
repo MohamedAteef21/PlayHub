@@ -116,13 +116,19 @@ function SuperAdminHome() {
 }
 
 export function HomeDashboardPage() {
-  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
-  const activeBranchId = useAuthStore((s) => s.activeBranchId);
 
   if (isSuperAdmin(user)) {
     return <SuperAdminHome />;
   }
+
+  return <VenueHomeDashboard />;
+}
+
+function VenueHomeDashboard() {
+  const { t } = useTranslation();
+  const user = useAuthStore((s) => s.user);
+  const activeBranchId = useAuthStore((s) => s.activeBranchId);
 
   const canReports = hasPermission(user, Permissions.ReportsView);
 
