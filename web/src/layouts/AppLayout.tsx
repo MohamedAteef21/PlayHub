@@ -7,6 +7,7 @@ import { authApi } from '@/api/client';
 import { Icon, type IconName } from '@/components/ui/Icons';
 import { GlobalBusyOverlay } from '@/components/ui/GlobalBusyOverlay';
 import { hasPermission, isSuperAdmin, Permissions } from '@/lib/permissions';
+import { formatNowEgypt } from '@/lib/dates';
 
 const navItems: {
   to: string;
@@ -51,7 +52,17 @@ export function AppLayout() {
   } = useUiStore();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [switchingBranch, setSwitchingBranch] = useState(false);
+  const [egyptNow, setEgyptNow] = useState(() =>
+    formatNowEgypt(language === 'ar' ? 'ar-EG' : 'en-EG')
+  );
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const tick = () => setEgyptNow(formatNowEgypt(language === 'ar' ? 'ar-EG' : 'en-EG'));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [language]);
 
   async function persistUiPreferences(next: { language?: 'en' | 'ar'; theme?: 'dark' | 'light' }) {
     const preferredLanguage = next.language ?? language;
@@ -285,6 +296,17 @@ export function AppLayout() {
             </button>
 
             <div className="ms-auto flex items-center gap-1 sm:gap-2">
+              <div
+                className="hidden items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted sm:flex md:text-sm"
+                title={t('dashboard.egyptClock')}
+                dir="ltr"
+              >
+                <Icon name="clock" className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                <span className="whitespace-nowrap font-medium tabular-nums text-text/90">
+                  {egyptNow}
+                </span>
+              </div>
+
               <button
                 type="button"
                 onClick={handleLanguageToggle}

@@ -18,6 +18,7 @@ using PlayHub.Application.Pricing;
 using PlayHub.Application.PurchaseOrders;
 using PlayHub.Application.Receivables;
 using PlayHub.Application.Reports;
+using PlayHub.Application.Reservations;
 using PlayHub.Application.Sessions;
 using PlayHub.Application.Users;
 using PlayHub.Application.WhatsApp;
@@ -66,6 +67,7 @@ public static class DependencyInjection
         services.AddScoped<IAlertSettingsService, AlertSettingsService>();
         services.AddScoped<IPlatformSettingsService, PlatformSettingsService>();
         services.AddScoped<IDeviceMaintenanceService, DeviceMaintenanceService>();
+        services.AddScoped<IDeviceReservationService, DeviceReservationService>();
         services.AddScoped<IInvoicePdfService, InvoicePdfService>();
         services.AddHttpClient("WhatsApp", client =>
         {
