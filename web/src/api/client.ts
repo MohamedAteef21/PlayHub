@@ -122,6 +122,10 @@ export async function apiFetch<T>(
       });
       if (parts.length) message = parts.join(' · ');
     }
+    if (res.status === 405) {
+      message =
+        'Reservation API is unavailable on the server (HTTP 405). Redeploy the API, then try again.';
+    }
     if (isSubscriptionExpiredPayload(body)) {
       useAuthStore.getState().logout();
     }

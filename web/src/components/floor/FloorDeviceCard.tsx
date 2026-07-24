@@ -318,12 +318,20 @@ export function FloorDeviceCard({
                     time: formatDateTimeEgypt(reservation.startsAt, dateLocale),
                   })}
                 </p>
+                {reservation.endsAt && (
+                  <p>
+                    {t('dashboard.reservationEnds', {
+                      time: formatDateTimeEgypt(reservation.endsAt, dateLocale),
+                    })}
+                  </p>
+                )}
                 {reservationGuestName && (
                   <p className="truncate">{t('dashboard.reservationGuest', { name: reservationGuestName })}</p>
                 )}
+                <p className="mt-1 text-[10px] opacity-90">{t('dashboard.startReservationHint')}</p>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <Button size="sm" className="col-span-2" onClick={onStartReservation}>
+                <Button size="sm" className="col-span-2 min-h-10" onClick={onStartReservation}>
                   <Icon name="play" className="h-3.5 w-3.5" />
                   {t('dashboard.startReservation')}
                 </Button>

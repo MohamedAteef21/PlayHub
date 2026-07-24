@@ -87,7 +87,8 @@ export function CustomersPage() {
   const { data: customersPage, isLoading: customersLoading } = useQuery({
     queryKey: ['customers', debouncedQ, page, pageSize, debtOnly],
     queryFn: () => customersApi.getAll(debouncedQ || undefined, page, pageSize, debtOnly),
-    enabled: canView && tab === 'customers',
+    // Debt list can load empty search; otherwise wait until the user types a name/phone/code.
+    enabled: canView && tab === 'customers' && (debtOnly || debouncedQ.trim().length >= 1),
   });
 
   const { data: customerDebts = [], isLoading: debtsLoading } = useQuery({
@@ -379,7 +380,11 @@ export function CustomersPage() {
                 {customers.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-4 py-8 text-center text-muted">
-                      {debtOnly ? t('customers.debtEmpty') : t('customers.empty')}
+                      {debtOnly
+                        ? t('customers.debtEmpty')
+                        : debouncedQ.trim().length < 1
+                          ? t('customers.typeToSearch')
+                          : t('customers.empty')}
                     </td>
                   </tr>
                 ) : (

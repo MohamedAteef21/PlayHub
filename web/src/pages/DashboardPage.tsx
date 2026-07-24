@@ -17,6 +17,7 @@ import {
 } from '@/components/floor/floorHelpers';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { EgyptDateTimePicker } from '@/components/ui/EgyptDateTimePicker';
 import { Icon } from '@/components/ui/Icons';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -132,6 +133,7 @@ export function DashboardPage() {
   const [openModal, setOpenModal] = useState<AssetDashboardDevice | null>(null);
   const [reserveModal, setReserveModal] = useState<AssetDashboardDevice | null>(null);
   const [reserveStartsAt, setReserveStartsAt] = useState(toEgyptDateTimeLocalInput());
+  const [reserveEndsAt, setReserveEndsAt] = useState('');
   const [reserveCustomerSearch, setReserveCustomerSearch] = useState('');
   const [reserveSelectedCustomer, setReserveSelectedCustomer] = useState<Customer | null>(null);
   const [debouncedReserveCustomerQ, setDebouncedReserveCustomerQ] = useState('');
@@ -311,14 +313,14 @@ export function DashboardPage() {
 
   const { data: customerSearchResults } = useQuery({
     queryKey: ['customers', 'open-session', debouncedCustomerQ],
-    queryFn: () => customersApi.getAll(debouncedCustomerQ || undefined, 1, 10),
-    enabled: !!openModal && guestType === 'registered',
+    queryFn: () => customersApi.getAll(debouncedCustomerQ, 1, 10),
+    enabled: !!openModal && guestType === 'registered' && debouncedCustomerQ.trim().length >= 1,
   });
 
   const { data: reserveCustomerResults } = useQuery({
     queryKey: ['customers', 'reserve', debouncedReserveCustomerQ],
-    queryFn: () => customersApi.getAll(debouncedReserveCustomerQ || undefined, 1, 10),
-    enabled: !!reserveModal,
+    queryFn: () => customersApi.getAll(debouncedReserveCustomerQ, 1, 10),
+    enabled: !!reserveModal && debouncedReserveCustomerQ.trim().length >= 1,
   });
 
   const { data: cafItems = [] } = useQuery({
@@ -624,6 +626,7 @@ export function DashboardPage() {
   function openReserveForDevice(device: AssetDashboardDevice) {
     setReserveModal(device);
     setReserveStartsAt(toEgyptDateTimeLocalInput());
+    setReserveEndsAt('');
     setReserveCustomerSearch('');
     setReserveSelectedCustomer(null);
     setDebouncedReserveCustomerQ('');
@@ -683,14 +686,21 @@ export function DashboardPage() {
     setReserveError('');
     try {
       const startsAt = egyptLocalInputToUtcIso(reserveStartsAt);
+      const endsAt = reserveEndsAt.trim() ? egyptLocalInputToUtcIso(reserveEndsAt) : undefined;
+      if (endsAt && new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
+        setReserveError(t('dashboard.reserveEndBeforeStart'));
+        return;
+      }
       await reservationsApi.create({
         deviceId: reserveModal.id,
         startsAt,
+        endsAt,
         customerId: reserveSelectedCustomer.id,
         notes: reserveNotes.trim() || undefined,
       });
       setReserveModal(null);
       setReserveStartsAt(toEgyptDateTimeLocalInput());
+      setReserveEndsAt('');
       setReserveCustomerSearch('');
       setReserveSelectedCustomer(null);
       setReserveNotes('');
@@ -1907,12 +1917,30 @@ export function DashboardPage() {
         }
       >
         <div className="space-y-4">
-          <Input
+          <EgyptDateTimePicker
             label={t('dashboard.reserveStartsAt')}
-            type="datetime-local"
             value={reserveStartsAt}
-            onChange={(e) => setReserveStartsAt(e.target.value)}
+            onChange={setReserveStartsAt}
+            hint={t('dashboard.reserveTimeHint')}
           />
+          {reserveEndsAt ? (
+            <EgyptDateTimePicker
+              label={t('dashboard.reserveEndsAt')}
+              value={reserveEndsAt}
+              onChange={setReserveEndsAt}
+              optional
+              onClear={() => setReserveEndsAt('')}
+              hint={t('dashboard.reserveEndsAtHint')}
+            />
+          ) : (
+            <button
+              type="button"
+              className="text-sm font-semibold text-primary hover:underline"
+              onClick={() => setReserveEndsAt(toEgyptDateTimeLocalInput(Date.now() + 2 * 60 * 60 * 1000))}
+            >
+              {t('dashboard.addEndTime')}
+            </button>
+          )}
           <div className="space-y-2">
             <Input
               label={t('dashboard.reserveCustomer')}
@@ -1943,6 +1971,10 @@ export function DashboardPage() {
                   {t('session.cancel')}
                 </Button>
               </div>
+            ) : reserveCustomerSearch.trim().length < 1 ? (
+              <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
+                {t('session.typeToSearchCustomer')}
+              </p>
             ) : (
               <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
                 {(reserveCustomerResults?.items ?? []).length === 0 ? (
@@ -1973,6 +2005,9 @@ export function DashboardPage() {
             value={reserveNotes}
             onChange={(e) => setReserveNotes(e.target.value)}
           />
+          <p className="rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary">
+            {t('dashboard.reserveStartLaterHint')}
+          </p>
           {reserveError && (
             <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{reserveError}</p>
           )}
@@ -2085,6 +2120,10 @@ export function DashboardPage() {
                   </span>
                   <span className="ms-2 font-mono text-xs text-muted">{selectedCustomer.code}</span>
                 </div>
+              ) : customerSearch.trim().length < 1 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
+                  {t('session.typeToSearchCustomer')}
+                </p>
               ) : (
                 <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
                   {(customerSearchResults?.items ?? []).length === 0 ? (
