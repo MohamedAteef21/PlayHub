@@ -209,7 +209,16 @@ public record SessionHistoryDto(
     Guid? CustomerId,
     string? CustomerName,
     bool IsQuickGuest,
-    string? QuickGuestName);
+    string? QuickGuestName,
+    int? ControllerCount,
+    int? WatcherCount,
+    int? PlannedDurationMinutes,
+    /// <summary>Billable play/watch hours (from segments or elapsed).</summary>
+    decimal? PlayHours,
+    /// <summary>Match count when billed per game.</summary>
+    int? MatchCount,
+    /// <summary>People count for watching sessions.</summary>
+    int? PeopleCount);
 
 public interface ISessionService
 {

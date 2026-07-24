@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Cafeteria;
 using PlayHub.Application.Common;
+using PlayHub.Application.Loyalty;
 using PlayHub.Application.Sessions;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
@@ -17,6 +18,7 @@ public class SessionService : ISessionService
     private readonly ISessionCostCalculator _costCalculator;
     private readonly ISessionNotifier _notifier;
     private readonly LowStockNotifier _lowStock;
+    private readonly ILoyaltyOfferService _loyalty;
 
     public SessionService(
         PlayHubDbContext db,
@@ -24,7 +26,8 @@ public class SessionService : ISessionService
         IAuditService audit,
         ISessionCostCalculator costCalculator,
         ISessionNotifier notifier,
-        LowStockNotifier lowStock)
+        LowStockNotifier lowStock,
+        ILoyaltyOfferService loyalty)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -32,6 +35,7 @@ public class SessionService : ISessionService
         _costCalculator = costCalculator;
         _notifier = notifier;
         _lowStock = lowStock;
+        _loyalty = loyalty;
     }
 
     public async Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default)
@@ -797,6 +801,15 @@ public class SessionService : ISessionService
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync(ct);
 
+        try
+        {
+            await _loyalty.EvaluateAfterSessionCloseAsync(session.Id, ct);
+        }
+        catch
+        {
+            // Loyalty evaluation must not block session close / invoice.
+        }
+
         await _audit.LogAsync("Session.Closed", "Session", session.Id, new
         {
             Subtotal = subtotal,
@@ -1245,6 +1258,34 @@ public class SessionService : ISessionService
             ? session.TotalCost
             : timeCost + cafeteriaCost;
 
+        decimal? playHours = null;
+        int? matchCount = null;
+        int? peopleCount = session.SessionMode == SessionMode.Watching ? session.WatcherCount : null;
+
+        var segments = SessionBillingSegments.Read(session);
+        if (segments.Count > 0)
+        {
+            var matchQty = segments.Where(s => s.Kind == "Match").Sum(s => s.Quantity);
+            if (matchQty > 0) matchCount = (int)Math.Round(matchQty);
+
+            var hourQty = segments
+                .Where(s => s.QuantityUnit is "hour" or "hours" or "h")
+                .Sum(s => s.Quantity);
+            if (hourQty > 0) playHours = decimal.Round(hourQty, 2);
+        }
+
+        if (playHours is null && session.ClosedAt.HasValue)
+        {
+            var elapsedSec = (decimal)(session.ClosedAt.Value - session.StartedAt).TotalSeconds
+                             - session.TotalPausedSeconds;
+            if (elapsedSec < 0) elapsedSec = 0;
+            playHours = decimal.Round(elapsedSec / 3600m, 2);
+        }
+        else if (playHours is null && session.PlannedDurationMinutes is > 0)
+        {
+            playHours = decimal.Round(session.PlannedDurationMinutes.Value / 60m, 2);
+        }
+
         return new SessionHistoryDto(
             session.Id,
             session.DeviceId,
@@ -1263,7 +1304,13 @@ public class SessionService : ISessionService
             session.CustomerId,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,
             session.IsQuickGuest,
-            session.QuickGuestName);
+            session.QuickGuestName,
+            session.ControllerCount,
+            session.WatcherCount,
+            session.PlannedDurationMinutes,
+            playHours,
+            matchCount,
+            peopleCount);
     }
 
     private static SessionDetailDto MapDetail(Session session)

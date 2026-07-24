@@ -83,6 +83,77 @@ public class CustomerOfferConfiguration : IEntityTypeConfiguration<CustomerOffer
     }
 }
 
+public class LoyaltyOfferConfiguration : IEntityTypeConfiguration<LoyaltyOffer>
+{
+    public void Configure(EntityTypeBuilder<LoyaltyOffer> builder)
+    {
+        builder.ToTable("loyalty_offers");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Title).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.Description).HasMaxLength(2000);
+        builder.HasIndex(x => new { x.TenantId, x.IsActive });
+        builder.HasOne(x => x.Tenant).WithMany(x => x.LoyaltyOffers).HasForeignKey(x => x.TenantId);
+        builder.HasOne(x => x.OwnerUser).WithMany().HasForeignKey(x => x.OwnerUserId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public class LoyaltyOfferConditionConfiguration : IEntityTypeConfiguration<LoyaltyOfferCondition>
+{
+    public void Configure(EntityTypeBuilder<LoyaltyOfferCondition> builder)
+    {
+        builder.ToTable("loyalty_offer_conditions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.RequiredQuantity).HasPrecision(18, 2);
+        builder.HasOne(x => x.Offer).WithMany(x => x.Conditions).HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(x => x.CafeteriaItem).WithMany().HasForeignKey(x => x.CafeteriaItemId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.Variant).WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public class LoyaltyOfferRewardConfiguration : IEntityTypeConfiguration<LoyaltyOfferReward>
+{
+    public void Configure(EntityTypeBuilder<LoyaltyOfferReward> builder)
+    {
+        builder.ToTable("loyalty_offer_rewards");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Quantity).HasPrecision(18, 2);
+        builder.HasOne(x => x.Offer).WithMany(x => x.Rewards).HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(x => x.CafeteriaItem).WithMany().HasForeignKey(x => x.CafeteriaItemId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.Variant).WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
+public class LoyaltyOfferDeviceConfiguration : IEntityTypeConfiguration<LoyaltyOfferDevice>
+{
+    public void Configure(EntityTypeBuilder<LoyaltyOfferDevice> builder)
+    {
+        builder.ToTable("loyalty_offer_devices");
+        builder.HasKey(x => new { x.OfferId, x.DeviceId });
+        builder.HasOne(x => x.Offer).WithMany(x => x.Devices).HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
+    }
+}
+
+public class LoyaltyCreditConfiguration : IEntityTypeConfiguration<LoyaltyCredit>
+{
+    public void Configure(EntityTypeBuilder<LoyaltyCredit> builder)
+    {
+        builder.ToTable("loyalty_credits");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.QuantityOriginal).HasPrecision(18, 2);
+        builder.Property(x => x.QuantityRemaining).HasPrecision(18, 2);
+        builder.HasIndex(x => new { x.CustomerId, x.Status });
+        builder.HasIndex(x => new { x.SourceSessionId, x.OfferId });
+        builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+        builder.HasOne(x => x.Customer).WithMany(x => x.LoyaltyCredits).HasForeignKey(x => x.CustomerId);
+        builder.HasOne(x => x.Offer).WithMany().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.SourceSession).WithMany().HasForeignKey(x => x.SourceSessionId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.CafeteriaItem).WithMany().HasForeignKey(x => x.CafeteriaItemId).OnDelete(DeleteBehavior.NoAction);
+        builder.HasOne(x => x.Variant).WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.NoAction);
+    }
+}
+
 public class BranchConfiguration : IEntityTypeConfiguration<Branch>
 {
     public void Configure(EntityTypeBuilder<Branch> builder)

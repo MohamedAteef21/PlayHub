@@ -2,20 +2,23 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { customersApi, offersApi, receivablesApi, whatsappApi } from '@/api/client';
+import { customersApi, loyaltyOffersApi, offersApi, receivablesApi, whatsappApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { formatDateTimeEgypt } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import {
+  LoyaltyRewardMetric,
   PaymentMethod,
   WalletTransactionType,
   SessionMode,
   SessionStatus,
   type Customer,
   type CustomerOffer,
+  type LoyaltyCredit,
   type Receivable,
 } from '@/types';
+import { LoyaltyOffersPanel } from '@/components/LoyaltyOffersPanel';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -25,7 +28,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'customers' | 'offers';
+type Tab = 'customers' | 'offers' | 'loyalty';
 
 export function CustomersPage() {
   const { t } = useTranslation();
@@ -68,6 +71,7 @@ export function CustomersPage() {
   const [settleCustomer, setSettleCustomer] = useState<Customer | null>(null);
   const [settleMethod, setSettleMethod] = useState<number>(PaymentMethod.Cash);
   const [collectingPaymentId, setCollectingPaymentId] = useState<string | null>(null);
+  const [creditsCustomer, setCreditsCustomer] = useState<Customer | null>(null);
   const [sessionsCustomer, setSessionsCustomer] = useState<Customer | null>(null);
   const [sessionsPage, setSessionsPage] = useState(1);
   const [sessionsPageSize, setSessionsPageSize] = useState(10);
@@ -90,6 +94,12 @@ export function CustomersPage() {
     queryKey: ['receivables', settleCustomer?.id],
     queryFn: () => receivablesApi.list(settleCustomer!.id),
     enabled: !!settleCustomer,
+  });
+
+  const { data: loyaltyCredits = [], isLoading: creditsLoading } = useQuery({
+    queryKey: ['loyalty-credits', creditsCustomer?.id],
+    queryFn: () => loyaltyOffersApi.getCustomerCredits(creditsCustomer!.id, false),
+    enabled: !!creditsCustomer,
   });
 
   const collectDebtMutation = useMutation({
@@ -311,6 +321,13 @@ export function CustomersPage() {
         >
           {t('customers.tabOffers')}
         </Button>
+        <Button
+          variant={tab === 'loyalty' ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => setTab('loyalty')}
+        >
+          {t('customers.tabLoyalty')}
+        </Button>
       </div>
 
       {msg && (
@@ -407,6 +424,18 @@ export function CustomersPage() {
                           {canManage && (
                             <Button size="sm" variant="secondary" onClick={() => openEditCustomer(c)}>
                               {t('customers.edit')}
+                            </Button>
+                          )}
+                          {canView && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setCreditsCustomer(c);
+                                setError('');
+                              }}
+                            >
+                              {t('customers.credits')}
                             </Button>
                           )}
                           {canView && (
@@ -545,6 +574,8 @@ export function CustomersPage() {
           )}
         </>
       )}
+
+      {tab === 'loyalty' && <LoyaltyOffersPanel canManage={canManageOffers} />}
 
       <Modal
         open={customerOpen}
@@ -923,9 +954,8 @@ export function CustomersPage() {
                 <DataTable
                   headers={[
                     t('session.device'),
-                    t('session.room'),
-                    t('session.branch'),
                     t('session.mode'),
+                    t('customers.usage'),
                     t('common.status'),
                     t('session.started'),
                     t('session.closedAt'),
@@ -934,16 +964,37 @@ export function CustomersPage() {
                     t('session.total'),
                   ]}
                 >
-                  {customerSessions.items.map((s) => (
+                  {customerSessions.items.map((s) => {
+                    const usageParts: string[] = [];
+                    if (s.playHours != null && s.playHours > 0) {
+                      usageParts.push(`${s.playHours}${t('session.hoursShort')}`);
+                    }
+                    if (s.matchCount != null && s.matchCount > 0) {
+                      usageParts.push(`${s.matchCount} ${t('session.matchesCount')}`);
+                    }
+                    if (s.peopleCount != null && s.peopleCount > 0) {
+                      usageParts.push(`${s.peopleCount} ${t('session.peopleCount')}`);
+                    }
+                    if (s.sessionMode === SessionMode.Gaming && s.controllerCount != null) {
+                      usageParts.push(
+                        s.controllerCount <= 2 ? t('settings.individual') : t('settings.couple')
+                      );
+                    }
+                    const usage = usageParts.length ? usageParts.join(' · ') : '—';
+                    return (
                     <tr key={s.id} className="hover:bg-surface-hover/50">
-                      <td className="px-3 py-2 font-medium">{s.deviceName}</td>
-                      <td className="px-3 py-2">{s.roomName ?? '—'}</td>
-                      <td className="px-3 py-2">{s.branchName ?? '—'}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {s.deviceName}
+                        {s.roomName ? (
+                          <span className="block text-xs text-muted">{s.roomName}</span>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2">
                         {s.sessionMode === SessionMode.Gaming
                           ? t('session.gaming')
                           : t('session.watching')}
                       </td>
+                      <td className="px-3 py-2 text-xs">{usage}</td>
                       <td className="px-3 py-2">
                         <Badge
                           status={
@@ -968,14 +1019,24 @@ export function CustomersPage() {
                         {formatDateTimeEgypt(s.closedAt)}
                       </td>
                       <td className="px-3 py-2">
-                        {s.status === SessionStatus.Closed ? formatCurrency(s.timeCost) : '—'}
+                        {s.status === SessionStatus.Closed ? (
+                          <span>
+                            {s.playHours != null && s.playHours > 0
+                              ? `${s.playHours}${t('session.hoursShort')} · `
+                              : ''}
+                            {formatCurrency(s.timeCost)}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className="px-3 py-2">{formatCurrency(s.cafeteriaCost)}</td>
                       <td className="px-3 py-2 font-medium">
                         {s.status === SessionStatus.Closed ? formatCurrency(s.totalCost) : '—'}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </DataTable>
                 <Pagination
                   page={sessionsPage}
@@ -988,6 +1049,62 @@ export function CustomersPage() {
                   }}
                 />
               </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!creditsCustomer}
+        onClose={() => setCreditsCustomer(null)}
+        title={
+          creditsCustomer
+            ? `${t('customers.credits')} — ${creditsCustomer.name}`
+            : t('customers.credits')
+        }
+        footer={
+          <Button variant="secondary" onClick={() => setCreditsCustomer(null)}>
+            {t('session.cancel')}
+          </Button>
+        }
+      >
+        {creditsCustomer && (
+          <div className="space-y-3">
+            {creditsLoading ? (
+              <PageLoader />
+            ) : loyaltyCredits.length === 0 ? (
+              <p className="text-sm text-muted">{t('customers.creditsEmpty')}</p>
+            ) : (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {loyaltyCredits.map((c: LoyaltyCredit) => {
+                  let rewardLabel = String(c.rewardMetric);
+                  if (c.rewardMetric === LoyaltyRewardMetric.FreeHours)
+                    rewardLabel = t('loyalty.rewardFreeHours');
+                  else if (c.rewardMetric === LoyaltyRewardMetric.FreeMatches)
+                    rewardLabel = t('loyalty.rewardFreeMatches');
+                  else if (c.rewardMetric === LoyaltyRewardMetric.CafeteriaItem)
+                    rewardLabel = c.cafeteriaItemName || t('loyalty.rewardCafeteria');
+                  return (
+                    <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
+                      <div>
+                        <p className="font-medium">{c.offerTitle}</p>
+                        <p className="text-xs text-muted">
+                          {rewardLabel} · {c.quantityRemaining}/{c.quantityOriginal}
+                        </p>
+                      </div>
+                      <Badge status={c.status === 1 ? 'gaming' : 'idle'}>
+                        {c.status === 1
+                          ? t('loyalty.creditAvailable')
+                          : c.status === 2
+                            ? t('loyalty.creditRedeemed')
+                            : c.status === 3
+                              ? t('loyalty.creditExpired')
+                              : t('loyalty.creditVoided')}
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         )}

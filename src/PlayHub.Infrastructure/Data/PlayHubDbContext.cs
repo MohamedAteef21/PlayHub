@@ -67,6 +67,11 @@ public class PlayHubDbContext : DbContext
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<CustomerOffer> CustomerOffers => Set<CustomerOffer>();
+    public DbSet<LoyaltyOffer> LoyaltyOffers => Set<LoyaltyOffer>();
+    public DbSet<LoyaltyOfferCondition> LoyaltyOfferConditions => Set<LoyaltyOfferCondition>();
+    public DbSet<LoyaltyOfferReward> LoyaltyOfferRewards => Set<LoyaltyOfferReward>();
+    public DbSet<LoyaltyOfferDevice> LoyaltyOfferDevices => Set<LoyaltyOfferDevice>();
+    public DbSet<LoyaltyCredit> LoyaltyCredits => Set<LoyaltyCredit>();
     public DbSet<CafeteriaItem> CafeteriaItems => Set<CafeteriaItem>();
     public DbSet<CafeteriaItemVariant> CafeteriaItemVariants => Set<CafeteriaItemVariant>();
     public DbSet<CafeteriaVariantRecipeLine> CafeteriaVariantRecipeLines => Set<CafeteriaVariantRecipeLine>();
@@ -252,6 +257,15 @@ public class PlayHubDbContext : DbContext
             !e.IsDeleted &&
             (_tenantContext.CatalogOwnerUserId == null
              || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<LoyaltyOffer>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId &&
+            !e.IsDeleted &&
+            (_tenantContext.CatalogOwnerUserId == null
+             || e.OwnerUserId == _tenantContext.CatalogOwnerUserId));
+
+        modelBuilder.Entity<LoyaltyCredit>().HasQueryFilter(e =>
+            e.TenantId == _tenantContext.TenantId);
 
         modelBuilder.Entity<PricingPlan>().HasQueryFilter(e =>
             e.TenantId == _tenantContext.TenantId &&

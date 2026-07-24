@@ -255,6 +255,150 @@ export interface SessionHistory {
   customerName?: string | null;
   isQuickGuest?: boolean;
   quickGuestName?: string | null;
+  controllerCount?: number | null;
+  watcherCount?: number | null;
+  plannedDurationMinutes?: number | null;
+  playHours?: number | null;
+  matchCount?: number | null;
+  peopleCount?: number | null;
+}
+
+/** Matches backend LoyaltyConditionMetric */
+export const LoyaltyConditionMetric = {
+  PlayHours: 1,
+  PlayHoursInDays: 2,
+  Matches: 3,
+  CafeteriaQuantity: 4,
+} as const;
+export type LoyaltyConditionMetric =
+  (typeof LoyaltyConditionMetric)[keyof typeof LoyaltyConditionMetric];
+
+/** Matches backend LoyaltyRewardMetric */
+export const LoyaltyRewardMetric = {
+  FreeHours: 1,
+  FreeMatches: 2,
+  CafeteriaItem: 3,
+} as const;
+export type LoyaltyRewardMetric =
+  (typeof LoyaltyRewardMetric)[keyof typeof LoyaltyRewardMetric];
+
+/** Matches backend LoyaltyPlayerScope */
+export const LoyaltyPlayerScope = {
+  Any: 0,
+  Individual: 1,
+  Couple: 2,
+} as const;
+export type LoyaltyPlayerScope =
+  (typeof LoyaltyPlayerScope)[keyof typeof LoyaltyPlayerScope];
+
+/** Matches backend LoyaltyFulfillment */
+export const LoyaltyFulfillment = {
+  ApplyNow: 1,
+  EarnCredit: 2,
+} as const;
+export type LoyaltyFulfillment =
+  (typeof LoyaltyFulfillment)[keyof typeof LoyaltyFulfillment];
+
+/** Matches backend LoyaltyConditionLogic */
+export const LoyaltyConditionLogic = {
+  All: 1,
+  Any: 2,
+} as const;
+export type LoyaltyConditionLogic =
+  (typeof LoyaltyConditionLogic)[keyof typeof LoyaltyConditionLogic];
+
+/** Matches backend LoyaltyCreditStatus */
+export const LoyaltyCreditStatus = {
+  Available: 1,
+  FullyRedeemed: 2,
+  Expired: 3,
+  Voided: 4,
+} as const;
+export type LoyaltyCreditStatus =
+  (typeof LoyaltyCreditStatus)[keyof typeof LoyaltyCreditStatus];
+
+export interface LoyaltyOfferCondition {
+  id: string;
+  metric: number;
+  requiredQuantity: number;
+  windowDays: number | null;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+}
+
+export interface LoyaltyOfferReward {
+  id: string;
+  metric: number;
+  quantity: number;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+}
+
+export interface LoyaltyOffer {
+  id: string;
+  title: string;
+  description: string | null;
+  isActive: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  playerScope: number;
+  fulfillment: number;
+  conditionLogic: number;
+  conditions: LoyaltyOfferCondition[];
+  rewards: LoyaltyOfferReward[];
+  deviceIds: string[];
+  deviceNames: string[];
+  createdAt: string;
+}
+
+export interface UpsertLoyaltyOfferConditionRequest {
+  metric: number;
+  requiredQuantity: number;
+  windowDays?: number | null;
+  cafeteriaItemId?: string | null;
+  variantId?: string | null;
+}
+
+export interface UpsertLoyaltyOfferRewardRequest {
+  metric: number;
+  quantity: number;
+  cafeteriaItemId?: string | null;
+  variantId?: string | null;
+}
+
+export interface UpsertLoyaltyOfferRequest {
+  title: string;
+  description?: string | null;
+  isActive: boolean;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  playerScope: number;
+  fulfillment: number;
+  conditionLogic: number;
+  conditions: UpsertLoyaltyOfferConditionRequest[];
+  rewards: UpsertLoyaltyOfferRewardRequest[];
+  deviceIds?: string[] | null;
+}
+
+export interface LoyaltyCredit {
+  id: string;
+  customerId: string;
+  offerId: string;
+  offerTitle: string;
+  rewardMetric: number;
+  quantityOriginal: number;
+  quantityRemaining: number;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+  status: number;
+  expiresAt: string | null;
+  createdAt: string;
 }
 
 export interface AssetDashboard {

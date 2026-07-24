@@ -1006,6 +1006,37 @@ export const offersApi = {
   delete: (id: string) => apiFetch<void>(`/offers/${id}`, { method: 'DELETE' }),
 };
 
+export const loyaltyOffersApi = {
+  getAll: (activeOnly?: boolean) => {
+    const params = new URLSearchParams();
+    if (activeOnly != null) params.set('activeOnly', String(activeOnly));
+    const q = params.toString();
+    return apiFetch<import('@/types').LoyaltyOffer[]>(`/loyalty-offers${q ? `?${q}` : ''}`);
+  },
+  getById: (id: string) =>
+    apiFetch<import('@/types').LoyaltyOffer>(`/loyalty-offers/${id}`),
+  create: (data: import('@/types').UpsertLoyaltyOfferRequest) =>
+    apiFetch<import('@/types').LoyaltyOffer>('/loyalty-offers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: import('@/types').UpsertLoyaltyOfferRequest) =>
+    apiFetch<import('@/types').LoyaltyOffer>(`/loyalty-offers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => apiFetch<void>(`/loyalty-offers/${id}`, { method: 'DELETE' }),
+  getCustomerCredits: (customerId: string, availableOnly = true) =>
+    apiFetch<import('@/types').LoyaltyCredit[]>(
+      `/customers/${customerId}/loyalty-credits?availableOnly=${availableOnly}`
+    ),
+  redeem: (data: { creditId: string; sessionId: string; quantity: number }) =>
+    apiFetch<{ message: string }>('/loyalty-credits/redeem', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
 export const whatsappApi = {
   status: () => apiFetch<import('@/types').WhatsAppStatus>('/whatsapp/status'),
   qr: () => apiFetch<import('@/types').WhatsAppQr>('/whatsapp/qr'),
