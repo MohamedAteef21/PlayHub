@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { accountingApi, assetsApi, cafeteriaApi, platformApi, sessionsApi } from '@/api/client';
+import { accountingApi, assetsApi, cafeteriaApi, platformApi, receivablesApi, sessionsApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
 import { today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
 import { hasPermission, isSuperAdmin, Permissions } from '@/lib/permissions';
@@ -131,6 +131,7 @@ function VenueHomeDashboard() {
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
 
   const canReports = hasPermission(user, Permissions.ReportsView);
+  const canCustomers = hasPermission(user, Permissions.CustomersView);
 
   const { data: sessions = [] } = useQuery({
     queryKey: ['sessions', 'active', user?.id, activeBranchId],
@@ -156,6 +157,14 @@ function VenueHomeDashboard() {
     enabled: canReports,
   });
 
+  const { data: debtSummary } = useQuery({
+    queryKey: ['receivables-summary', user?.id, activeBranchId],
+    queryFn: receivablesApi.summary,
+    enabled: canCustomers,
+    refetchInterval: 60000,
+    meta: { silent: true },
+  });
+
   const deviceCount = dashboard?.rooms.reduce((n, r) => n + r.devices.length, 0) ?? 0;
   const lowStock = items.filter((i) => i.isLowStock && i.isActive).length;
   const openSessions = sessions.length;
@@ -176,7 +185,7 @@ function VenueHomeDashboard() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label={t('home.openSessions')} value={String(openSessions)} accent="primary" />
         <StatCard label={t('home.devices')} value={String(deviceCount)} />
         <StatCard
@@ -188,6 +197,15 @@ function VenueHomeDashboard() {
           label={t('home.todayRevenue')}
           value={canReports && finance ? formatCurrency(finance.totalRevenue) : '—'}
           accent="success"
+        />
+        <StatCard
+          label={t('home.outstandingDeferred')}
+          value={
+            canCustomers && debtSummary
+              ? formatCurrency(debtSummary.outstandingTotal)
+              : '—'
+          }
+          accent={(debtSummary?.outstandingTotal ?? 0) > 0 ? 'danger' : undefined}
         />
       </div>
 

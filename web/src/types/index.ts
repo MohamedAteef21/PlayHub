@@ -76,6 +76,7 @@ export interface SessionLive {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   cafeteriaLines: SessionCafeteriaLine[];
+  billingSegments?: BillingSegment[];
 }
 
 export interface SessionCafeteriaLine {
@@ -122,6 +123,7 @@ export interface BillingSegment {
   startedAt: string;
   endedAt: string;
   controllerTier: number | null;
+  peopleCount?: number | null;
 }
 
 export interface SessionDetail {
@@ -176,6 +178,26 @@ export interface Customer {
   outstandingDebtCount: number;
 }
 
+export interface Receivable {
+  paymentId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  debtorName: string;
+  debtorPhone: string | null;
+  customerId: string | null;
+  createdAt: string;
+  daysOutstanding: number;
+  branchId: string;
+  branchName: string;
+  invoiceType: number;
+}
+
+export interface ReceivableSummary {
+  outstandingTotal: number;
+  outstandingCount: number;
+}
+
 export const WalletTransactionType = { TopUp: 1, Bonus: 2, Payment: 3, Adjustment: 4 } as const;
 
 export interface WalletTransaction {
@@ -219,6 +241,7 @@ export interface SessionHistory {
   deviceId: string;
   deviceName: string;
   roomName: string | null;
+  branchName?: string | null;
   sessionMode: number;
   status: number;
   startedAt: string;
@@ -228,6 +251,154 @@ export interface SessionHistory {
   timeCost: number;
   cafeteriaCost: number;
   totalCost: number;
+  customerId?: string | null;
+  customerName?: string | null;
+  isQuickGuest?: boolean;
+  quickGuestName?: string | null;
+  controllerCount?: number | null;
+  watcherCount?: number | null;
+  plannedDurationMinutes?: number | null;
+  playHours?: number | null;
+  matchCount?: number | null;
+  peopleCount?: number | null;
+}
+
+/** Matches backend LoyaltyConditionMetric */
+export const LoyaltyConditionMetric = {
+  PlayHours: 1,
+  PlayHoursInDays: 2,
+  Matches: 3,
+  CafeteriaQuantity: 4,
+} as const;
+export type LoyaltyConditionMetric =
+  (typeof LoyaltyConditionMetric)[keyof typeof LoyaltyConditionMetric];
+
+/** Matches backend LoyaltyRewardMetric */
+export const LoyaltyRewardMetric = {
+  FreeHours: 1,
+  FreeMatches: 2,
+  CafeteriaItem: 3,
+} as const;
+export type LoyaltyRewardMetric =
+  (typeof LoyaltyRewardMetric)[keyof typeof LoyaltyRewardMetric];
+
+/** Matches backend LoyaltyPlayerScope */
+export const LoyaltyPlayerScope = {
+  Any: 0,
+  Individual: 1,
+  Couple: 2,
+} as const;
+export type LoyaltyPlayerScope =
+  (typeof LoyaltyPlayerScope)[keyof typeof LoyaltyPlayerScope];
+
+/** Matches backend LoyaltyFulfillment */
+export const LoyaltyFulfillment = {
+  ApplyNow: 1,
+  EarnCredit: 2,
+} as const;
+export type LoyaltyFulfillment =
+  (typeof LoyaltyFulfillment)[keyof typeof LoyaltyFulfillment];
+
+/** Matches backend LoyaltyConditionLogic */
+export const LoyaltyConditionLogic = {
+  All: 1,
+  Any: 2,
+} as const;
+export type LoyaltyConditionLogic =
+  (typeof LoyaltyConditionLogic)[keyof typeof LoyaltyConditionLogic];
+
+/** Matches backend LoyaltyCreditStatus */
+export const LoyaltyCreditStatus = {
+  Available: 1,
+  FullyRedeemed: 2,
+  Expired: 3,
+  Voided: 4,
+} as const;
+export type LoyaltyCreditStatus =
+  (typeof LoyaltyCreditStatus)[keyof typeof LoyaltyCreditStatus];
+
+export interface LoyaltyOfferCondition {
+  id: string;
+  metric: number;
+  requiredQuantity: number;
+  windowDays: number | null;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+}
+
+export interface LoyaltyOfferReward {
+  id: string;
+  metric: number;
+  quantity: number;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+}
+
+export interface LoyaltyOffer {
+  id: string;
+  title: string;
+  description: string | null;
+  isActive: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+  playerScope: number;
+  fulfillment: number;
+  conditionLogic: number;
+  conditions: LoyaltyOfferCondition[];
+  rewards: LoyaltyOfferReward[];
+  deviceIds: string[];
+  deviceNames: string[];
+  createdAt: string;
+}
+
+export interface UpsertLoyaltyOfferConditionRequest {
+  metric: number;
+  requiredQuantity: number;
+  windowDays?: number | null;
+  cafeteriaItemId?: string | null;
+  variantId?: string | null;
+}
+
+export interface UpsertLoyaltyOfferRewardRequest {
+  metric: number;
+  quantity: number;
+  cafeteriaItemId?: string | null;
+  variantId?: string | null;
+}
+
+export interface UpsertLoyaltyOfferRequest {
+  title: string;
+  description?: string | null;
+  isActive: boolean;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  playerScope: number;
+  fulfillment: number;
+  conditionLogic: number;
+  conditions: UpsertLoyaltyOfferConditionRequest[];
+  rewards: UpsertLoyaltyOfferRewardRequest[];
+  deviceIds?: string[] | null;
+}
+
+export interface LoyaltyCredit {
+  id: string;
+  customerId: string;
+  offerId: string;
+  offerTitle: string;
+  rewardMetric: number;
+  quantityOriginal: number;
+  quantityRemaining: number;
+  cafeteriaItemId: string | null;
+  cafeteriaItemName: string | null;
+  variantId: string | null;
+  variantName: string | null;
+  status: number;
+  expiresAt: string | null;
+  createdAt: string;
 }
 
 export interface AssetDashboard {
@@ -309,6 +480,36 @@ export interface Notification {
 
 export const SessionMode = { Gaming: 1, Watching: 2 } as const;
 export const SessionStatus = { Open: 1, Paused: 2, Closed: 3 } as const;
+export const ReservationStatus = { Pending: 1, Started: 2, Cancelled: 3 } as const;
+
+export interface DeviceReservation {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  roomName: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  guestName: string | null;
+  notes: string | null;
+  status: number;
+  sessionId: string | null;
+  createdByName: string;
+  createdAt: string;
+  warnWithinOneHour: boolean;
+}
+
+export interface ReservationConflict {
+  hasConflict: boolean;
+  reservationId: string | null;
+  deviceName: string | null;
+  startsAt: string | null;
+  guestLabel: string | null;
+  messageEn: string;
+  messageAr: string;
+}
+
 export const UserRole = { Staff: 0, MasterAdmin: 1, SuperAdmin: 2 } as const;
 export const PaymentMethod = { Cash: 1, BankTransfer: 2, DigitalWallet: 3, Deferred: 4, CustomerWallet: 5 } as const;
 export const PurchaseOrderStatus = { Draft: 1, Ordered: 2, Received: 3, Cancelled: 4 } as const;
@@ -566,7 +767,14 @@ export interface RevenueReport {
   totalRevenue: number;
   sessionRevenue: number;
   cafeteriaRevenue: number;
-  daily: { date: string; sessionRevenue: number; cafeteriaRevenue: number; total: number }[];
+  manualRevenue: number;
+  daily: {
+    date: string;
+    sessionRevenue: number;
+    cafeteriaRevenue: number;
+    manualRevenue: number;
+    total: number;
+  }[];
 }
 
 export interface BestSeller {
