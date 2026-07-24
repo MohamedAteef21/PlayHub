@@ -57,13 +57,15 @@ public record OpenSessionRequest(
     bool IsQuickGuest = false);
 
 /// <summary>
-/// Change pricing mid-session (watching→gaming, hourly↔per-match, individual↔couple).
+/// Change pricing / mode mid-session (gaming↔watching, hourly↔per-match, individual↔couple).
 /// Accrues the current segment, then starts a new timer/segment with the selected plan.
 /// </summary>
 public record ConvertSessionRequest(
     Guid PricingPlanId,
-    /// <summary>1–2 = individual (فردي), 3–4 = couple (زوجي).</summary>
-    int ControllerCount,
+    /// <summary>Required for gaming targets: 1–2 = individual (فردي), 3–4 = couple (زوجي).</summary>
+    int? ControllerCount = null,
+    /// <summary>Required for watching targets: number of watchers.</summary>
+    int? WatcherCount = null,
     /// <summary>Required when leaving a per-match (PerGame) segment.</summary>
     int? MatchCount = null);
 
@@ -91,7 +93,9 @@ public record BillingSegmentDto(
     decimal Amount,
     DateTime StartedAt,
     DateTime EndedAt,
-    int? ControllerTier);
+    int? ControllerTier,
+    /// <summary>Watcher/guest headcount when this segment is watching (for invoice formulas).</summary>
+    int? PeopleCount = null);
 
 public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
@@ -236,4 +240,6 @@ public interface ISessionCostCalculator
         decimal? billableUnitsOverride = null);
     TimeUnit? GetTimeUnit(string rateSnapshotJson);
     decimal GetGamingRate(string rateSnapshotJson, int? controllerCount);
+    decimal GetWatchingRatePerPerson(string rateSnapshotJson);
+    WatchingBilling? GetWatchingBilling(string rateSnapshotJson);
 }

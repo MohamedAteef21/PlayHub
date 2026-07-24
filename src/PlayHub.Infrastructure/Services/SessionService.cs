@@ -328,17 +328,13 @@ public class SessionService : ISessionService
             if (session.Status != SessionStatus.Open)
                 throw new InvalidOperationException("Resume the session before changing the watcher count.");
 
-            // Bill what has already run at the old headcount, then restart the segment at the new one.
-            // Intermediate segments are billed at exact prorated time (no round-up) so frequent
-            // headcount changes don't each add a full minimum unit; the final segment still rounds up.
+            // Freeze the current headcount as a billing segment, then restart at the new count.
+            // Intermediate splits use billingRoundUp=false so frequent changes don't each add a full hour.
             var changeAt = DateTime.UtcNow;
             var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, changeAt);
-            var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
-            var segmentCost = _costCalculator.CalculateTimeCost(
-                session.RateSnapshot, SessionMode.Watching, billableSeconds,
-                session.ControllerCount, session.WatcherCount, billingRoundUp: false);
-
-            session.AccruedTimeCost += segmentCost;
+            var segment = SessionBillingSegments.Build(
+                _costCalculator, session, changeAt, billingRoundUp: false, matchCount: null, out _);
+            SessionBillingSegments.Append(session, segment);
             session.OriginalStartedAt ??= session.StartedAt;
 
             // Keep the booking end time: the new segment carries only the remaining minutes.
@@ -399,21 +395,54 @@ public class SessionService : ISessionService
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
-        if (request.ControllerCount is < 1 or > 4)
-            throw new InvalidOperationException("Controller count must be between 1 and 4.");
-
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
-            .FirstOrDefaultAsync(p => p.Id == request.PricingPlanId && p.IsActive && p.SessionMode == SessionMode.Gaming
+            .FirstOrDefaultAsync(p => p.Id == request.PricingPlanId && p.IsActive
                 && (p.BranchId == null || p.BranchId == branchId), ct)
-            ?? throw new KeyNotFoundException("Gaming pricing plan not found.");
+            ?? throw new KeyNotFoundException("Pricing plan not found.");
 
-        var rateTier = SessionCostCalculator.GamingRateTier(request.ControllerCount);
-        var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
-        var hasRate = plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0);
-        if (!hasRate && !hasPackage)
-            throw new InvalidOperationException($"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
+        int? nextControllers = null;
+        int? nextWatchers = null;
+
+        if (plan.SessionMode == SessionMode.Gaming)
+        {
+            var controllers = request.ControllerCount
+                ?? throw new InvalidOperationException("Controller count is required for gaming plans.");
+            if (controllers is < 1 or > 4)
+                throw new InvalidOperationException("Controller count must be between 1 and 4.");
+
+            var rateTier = SessionCostCalculator.GamingRateTier(controllers);
+            var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
+            var hasRate = plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0);
+            if (!hasRate && !hasPackage)
+                throw new InvalidOperationException(
+                    $"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
+
+            nextControllers = controllers;
+            nextWatchers = null;
+        }
+        else if (plan.SessionMode == SessionMode.Watching)
+        {
+            var watchers = request.WatcherCount
+                ?? throw new InvalidOperationException("Watcher count is required for watching plans.");
+            if (watchers < 1)
+                throw new InvalidOperationException("Watcher count must be at least 1.");
+
+            var maxCapacity = GetMaxWatchingCapacity(session.Device);
+            if (watchers > maxCapacity)
+                throw new InvalidOperationException($"This room supports at most {maxCapacity} watcher(s).");
+
+            if (!plan.WatchingRates.Any(r => r.RatePerPerson > 0))
+                throw new InvalidOperationException("No watching rate configured in this plan.");
+
+            nextWatchers = watchers;
+            nextControllers = null;
+        }
+        else
+        {
+            throw new InvalidOperationException("Unsupported pricing plan mode.");
+        }
 
         // End any active pause and finalize the current billing segment
         if (session.Status == SessionStatus.Paused)
@@ -448,9 +477,10 @@ public class SessionService : ISessionService
             WatchingRates = plan.WatchingRates.Select(r => new { r.RatePerPerson })
         });
 
-        session.SessionMode = SessionMode.Gaming;
+        session.SessionMode = plan.SessionMode;
         session.PricingPlanId = plan.Id;
-        session.ControllerCount = request.ControllerCount;
+        session.ControllerCount = nextControllers;
+        session.WatcherCount = nextWatchers;
         session.RoomSurchargePerHour = 0;
         session.RateSnapshot = snapshot;
         session.StartedAt = convertAt;
@@ -463,7 +493,9 @@ public class SessionService : ISessionService
         {
             SegmentCost = segmentCost,
             session.AccruedTimeCost,
+            TargetMode = plan.SessionMode.ToString(),
             request.ControllerCount,
+            request.WatcherCount,
             PlanName = plan.Name,
             plan.TimeUnit,
             request.MatchCount
@@ -1036,15 +1068,20 @@ public class SessionService : ISessionService
             session.PlannedDurationMinutes,
             remaining,
             timeExpired,
+            // Watching can convert to gaming; gaming can also switch to watching / match / other plans.
             session.SessionMode == SessionMode.Watching && session.Status != SessionStatus.Closed,
             session.Status != SessionStatus.Closed,
             timeUnit,
             session.SessionMode == SessionMode.Gaming
                 ? _costCalculator.GetGamingRate(session.RateSnapshot, session.ControllerCount)
-                : null,
+                : session.SessionMode == SessionMode.Watching
+                    ? _costCalculator.GetWatchingRatePerPerson(session.RateSnapshot)
+                    : null,
             session.SessionMode == SessionMode.Gaming && session.ControllerCount is > 0
                 ? (SessionCostCalculator.GamingRateTier(session.ControllerCount.Value) == 2 ? "Couple" : "Individual")
-                : null,
+                : session.SessionMode == SessionMode.Watching
+                    ? $"Watching×{session.WatcherCount ?? 0}"
+                    : null,
             session.CustomerId,
             session.Customer?.Code,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,
