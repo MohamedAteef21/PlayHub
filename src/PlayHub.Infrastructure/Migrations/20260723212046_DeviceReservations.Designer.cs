@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PlayHub.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using PlayHub.Infrastructure.Data;
 namespace PlayHub.Infrastructure.Migrations
 {
     [DbContext(typeof(PlayHubDbContext))]
-    partial class PlayHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723212046_DeviceReservations")]
+    partial class DeviceReservations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1596,221 +1599,6 @@ namespace PlayHub.Infrastructure.Migrations
                     b.HasIndex("BranchId", "CafeteriaItemId", "CreatedAt");
 
                     b.ToTable("item_unit_conversion_logs", (string)null);
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyCredit", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("CafeteriaItemId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CustomerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("OfferId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("QuantityOriginal")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("QuantityRemaining")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid?>("RedeemedOnSessionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<short>("RewardMetric")
-                        .HasColumnType("smallint");
-
-                    b.Property<Guid?>("SourceSessionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<short>("Status")
-                        .HasColumnType("smallint");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("VariantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CafeteriaItemId");
-
-                    b.HasIndex("OfferId");
-
-                    b.HasIndex("TenantId");
-
-                    b.HasIndex("VariantId");
-
-                    b.HasIndex("CustomerId", "Status");
-
-                    b.HasIndex("SourceSessionId", "OfferId");
-
-                    b.ToTable("loyalty_credits", (string)null);
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOffer", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("BranchId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<short>("ConditionLogic")
-                        .HasColumnType("smallint");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("DeletedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<DateTime?>("EndsAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<short>("Fulfillment")
-                        .HasColumnType("smallint");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("OwnerUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<short>("PlayerScope")
-                        .HasColumnType("smallint");
-
-                    b.Property<DateTime?>("StartsAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BranchId");
-
-                    b.HasIndex("OwnerUserId");
-
-                    b.HasIndex("TenantId", "IsActive");
-
-                    b.ToTable("loyalty_offers", (string)null);
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferCondition", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("CafeteriaItemId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<short>("Metric")
-                        .HasColumnType("smallint");
-
-                    b.Property<Guid>("OfferId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("RequiredQuantity")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid?>("VariantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("WindowDays")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CafeteriaItemId");
-
-                    b.HasIndex("OfferId");
-
-                    b.HasIndex("VariantId");
-
-                    b.ToTable("loyalty_offer_conditions", (string)null);
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferDevice", b =>
-                {
-                    b.Property<Guid>("OfferId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("DeviceId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("OfferId", "DeviceId");
-
-                    b.HasIndex("DeviceId");
-
-                    b.ToTable("loyalty_offer_devices", (string)null);
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferReward", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("CafeteriaItemId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<short>("Metric")
-                        .HasColumnType("smallint");
-
-                    b.Property<Guid>("OfferId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Quantity")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid?>("VariantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CafeteriaItemId");
-
-                    b.HasIndex("OfferId");
-
-                    b.HasIndex("VariantId");
-
-                    b.ToTable("loyalty_offer_rewards", (string)null);
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.MasterAlertSettings", b =>
@@ -4082,148 +3870,6 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("ChangedByUser");
                 });
 
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyCredit", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItem", "CafeteriaItem")
-                        .WithMany()
-                        .HasForeignKey("CafeteriaItemId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.Customer", "Customer")
-                        .WithMany("LoyaltyCredits")
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.LoyaltyOffer", "Offer")
-                        .WithMany()
-                        .HasForeignKey("OfferId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.Session", "SourceSession")
-                        .WithMany()
-                        .HasForeignKey("SourceSessionId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItemVariant", "Variant")
-                        .WithMany()
-                        .HasForeignKey("VariantId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("CafeteriaItem");
-
-                    b.Navigation("Customer");
-
-                    b.Navigation("Offer");
-
-                    b.Navigation("SourceSession");
-
-                    b.Navigation("Tenant");
-
-                    b.Navigation("Variant");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOffer", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.Branch", "Branch")
-                        .WithMany()
-                        .HasForeignKey("BranchId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.User", "OwnerUser")
-                        .WithMany()
-                        .HasForeignKey("OwnerUserId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.Tenant", "Tenant")
-                        .WithMany("LoyaltyOffers")
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Branch");
-
-                    b.Navigation("OwnerUser");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferCondition", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItem", "CafeteriaItem")
-                        .WithMany()
-                        .HasForeignKey("CafeteriaItemId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.LoyaltyOffer", "Offer")
-                        .WithMany("Conditions")
-                        .HasForeignKey("OfferId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItemVariant", "Variant")
-                        .WithMany()
-                        .HasForeignKey("VariantId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("CafeteriaItem");
-
-                    b.Navigation("Offer");
-
-                    b.Navigation("Variant");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferDevice", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.Device", "Device")
-                        .WithMany()
-                        .HasForeignKey("DeviceId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.LoyaltyOffer", "Offer")
-                        .WithMany("Devices")
-                        .HasForeignKey("OfferId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Device");
-
-                    b.Navigation("Offer");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOfferReward", b =>
-                {
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItem", "CafeteriaItem")
-                        .WithMany()
-                        .HasForeignKey("CafeteriaItemId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("PlayHub.Domain.Entities.LoyaltyOffer", "Offer")
-                        .WithMany("Rewards")
-                        .HasForeignKey("OfferId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItemVariant", "Variant")
-                        .WithMany()
-                        .HasForeignKey("VariantId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("CafeteriaItem");
-
-                    b.Navigation("Offer");
-
-                    b.Navigation("Variant");
-                });
-
             modelBuilder.Entity("PlayHub.Domain.Entities.MasterAlertSettings", b =>
                 {
                     b.HasOne("PlayHub.Domain.Entities.Tenant", "Tenant")
@@ -4825,8 +4471,6 @@ namespace PlayHub.Infrastructure.Migrations
 
             modelBuilder.Entity("PlayHub.Domain.Entities.Customer", b =>
                 {
-                    b.Navigation("LoyaltyCredits");
-
                     b.Navigation("Sessions");
 
                     b.Navigation("WalletTransactions");
@@ -4858,15 +4502,6 @@ namespace PlayHub.Infrastructure.Migrations
             modelBuilder.Entity("PlayHub.Domain.Entities.InvoicePayment", b =>
                 {
                     b.Navigation("Proof");
-                });
-
-            modelBuilder.Entity("PlayHub.Domain.Entities.LoyaltyOffer", b =>
-                {
-                    b.Navigation("Conditions");
-
-                    b.Navigation("Devices");
-
-                    b.Navigation("Rewards");
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.Permission", b =>
@@ -4925,8 +4560,6 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("CustomerOffers");
 
                     b.Navigation("Customers");
-
-                    b.Navigation("LoyaltyOffers");
 
                     b.Navigation("Users");
                 });

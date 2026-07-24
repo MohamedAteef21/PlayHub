@@ -1,25 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, sessionsApi, uploadsApi } from '@/api/client';
-import { Badge } from '@/components/ui/Badge';
+import { alertsApi, assetsApi, branchesApi, ApiError, cafeteriaApi, customersApi, pricingApi, reservationsApi, sessionsApi, uploadsApi } from '@/api/client';
+import { FloorActiveStrip } from '@/components/floor/FloorActiveStrip';
+import { FloorDeviceCard } from '@/components/floor/FloorDeviceCard';
+import {
+  FLOOR_ROOM_STORAGE_KEY,
+  FLOOR_STATUS_STORAGE_KEY,
+  bucketPriority,
+  deviceBucket,
+  matchesDeviceQuery,
+  matchesStatusFilter,
+  type FloorRoomFilter,
+  type FloorStatusFilter,
+} from '@/components/floor/floorHelpers';
 import { Button } from '@/components/ui/Button';
-import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Icon } from '@/components/ui/Icons';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import { formatCurrency, formatDuration, parseServerUtc, useLiveTimer, useSessionHub } from '@/hooks/useSessions';
-import { playTimeUpSound } from '@/lib/timeUpSound';
+import { formatCurrency, formatDuration, parseServerUtc, useSessionHub } from '@/hooks/useSessions';
+import { toEgyptDateTimeLocalInput, egyptLocalInputToUtcIso } from '@/lib/dates';
+import { playEndingSoonSound, playTimeUpSound } from '@/lib/timeUpSound';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { printSessionInvoice } from '@/lib/printSessionInvoice';
 import { useAuthStore, useUiStore } from '@/store';
 import type {
   AssetDashboardDevice,
+  BillingSegment,
   CafeteriaAddOn,
   CafeteriaItem,
   CafeteriaItemVariant,
   Customer,
+  DeviceReservation,
   MissingIngredient,
   PricingPlan,
   SessionDetail,
@@ -59,210 +73,56 @@ function parseMissingIngredients(err: unknown): MissingIngredient[] | null {
 
 type GuestType = 'none' | 'registered' | 'quick';
 
-function statusKey(status: string) {
-  return status.toLowerCase() as 'idle' | 'gaming' | 'watching' | 'paused' | 'inactive';
-}
-
-function DeviceCard({
-  device,
-  roomName,
-  session,
-  onOpen,
-  onPause,
-  onResume,
-  onClose,
-  onConvert,
-  onExtend,
-  onWatchersChange,
-  onAddCafeteria,
-  canAddCafeteria,
-}: {
-  device: AssetDashboardDevice;
-  roomName: string;
-  session?: SessionLive;
-  onOpen: () => void;
-  onPause: () => void;
-  onResume: () => void;
-  onClose: () => void;
-  onConvert: () => void;
-  onExtend: (additionalMinutes: number | null) => void;
-  onWatchersChange: (watcherCount: number) => void;
-  onAddCafeteria: () => void;
-  canAddCafeteria: boolean;
-}) {
-  const { t } = useTranslation();
-  const elapsed = useLiveTimer(session ?? null);
-  const isActive = !!session && session.status !== SessionStatus.Closed;
-  const deviceOffline = !device.isActive;
-  const liveStatus = deviceOffline
-    ? 'Inactive'
-    : session?.status === SessionStatus.Paused
-      ? 'Paused'
-      : device.liveStatus;
-
-  return (
-    <Card
-      className={`relative overflow-hidden transition-all ${
-        deviceOffline
-          ? 'border-danger/60 bg-danger/5 opacity-95'
-          : isActive
-            ? 'border-primary/50 shadow-lg shadow-primary/10'
-            : ''
-      }`}
-    >
-      {isActive && !deviceOffline && (
-        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-primary to-accent" />
-      )}
-      {deviceOffline && (
-        <div className="absolute inset-x-0 top-0 h-0.5 bg-danger" />
-      )}
-      <CardHeader>
-        <div>
-          <CardTitle className={`text-base ${deviceOffline ? 'text-danger' : ''}`}>{device.name}</CardTitle>
-          <p className="text-xs text-muted">{roomName}</p>
-        </div>
-        <Badge status={statusKey(liveStatus)} pulse={liveStatus === 'Gaming' || liveStatus === 'Watching'}>
-          {deviceOffline
-            ? t('common.inactive')
-            : t(`dashboard.${statusKey(liveStatus)}`, { defaultValue: liveStatus })}
-        </Badge>
-      </CardHeader>
-
-      {deviceOffline ? (
-        <div className="space-y-2 pt-1">
-          <p className="text-sm text-danger">{t('dashboard.deviceInactiveHint')}</p>
-        </div>
-      ) : isActive && session ? (
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <span className="font-mono text-3xl font-bold tracking-tight text-accent">
-              {formatDuration(elapsed)}
-            </span>
-            <span className="text-lg font-semibold text-success">
-              {formatCurrency(session.totalCost)}
-            </span>
-          </div>
-          {session.plannedDurationMinutes != null && (
-            <div className={`rounded-lg px-2 py-1.5 text-xs ${session.timeExpired || (session.plannedDurationMinutes * 60 - elapsed) <= 0 ? 'animate-pulse bg-danger/15 font-semibold text-danger' : 'bg-primary/10 text-primary'}`}>
-              {session.timeExpired || elapsed >= session.plannedDurationMinutes * 60
-                ? t('dashboard.timeUp')
-                : t('dashboard.remaining', {
-                    time: formatDuration(Math.max(0, session.plannedDurationMinutes * 60 - elapsed)),
-                  })}
-              {' · '}
-              {t('dashboard.bookedFor', { hours: (session.plannedDurationMinutes / 60).toFixed(session.plannedDurationMinutes % 60 === 0 ? 0 : 1) })}
-            </div>
-          )}
-          {session.plannedDurationMinutes != null && session.status === SessionStatus.Open && (
-            <div className="flex gap-1">
-              <Button variant="secondary" size="sm" className="flex-1" onClick={() => onExtend(30)}>
-                {t('dashboard.extendHalfHour')}
-              </Button>
-              <Button variant="secondary" size="sm" className="flex-1" onClick={() => onExtend(60)}>
-                {t('dashboard.extendHour')}
-              </Button>
-              <Button variant="secondary" size="sm" className="flex-1" onClick={() => onExtend(null)}>
-                {t('dashboard.makeOpenTime')}
-              </Button>
-            </div>
-          )}
-          {session.sessionMode === SessionMode.Gaming ? (
-            <p className="text-xs text-muted">
-              {session.controllerCount} {t('dashboard.controllers')}
-              {' · '}{session.pricingPlanName}
-              {session.plannedDurationMinutes == null ? ` · ${t('dashboard.openTimer')}` : ''}
-            </p>
-          ) : (
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-              <span>{t('dashboard.watchers')}:</span>
-              <button
-                type="button"
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-surface font-bold hover:bg-surface-hover disabled:opacity-40"
-                disabled={(session.watcherCount ?? 1) <= 1}
-                onClick={() => onWatchersChange((session.watcherCount ?? 2) - 1)}
-              >
-                −
-              </button>
-              <span className="min-w-5 text-center text-sm font-semibold text-text">{session.watcherCount}</span>
-              <button
-                type="button"
-                className="flex h-6 w-6 items-center justify-center rounded-md border border-border bg-surface font-bold hover:bg-surface-hover disabled:opacity-40"
-                disabled={(session.watcherCount ?? 0) >= device.maxWatchingCapacity}
-                onClick={() => onWatchersChange((session.watcherCount ?? 0) + 1)}
-              >
-                +
-              </button>
-              <span>
-                · {session.pricingPlanName}
-                {session.plannedDurationMinutes == null ? ` · ${t('dashboard.openTimer')}` : ''}
-              </span>
-            </div>
-          )}
-          {(session.cafeteriaCost > 0 || session.currentTimeCost > 0 || (session.appliedHourlyRate ?? 0) > 0) && (
-            <p className="text-xs text-muted">
-              {session.appliedHourlyRate != null && session.appliedHourlyRate > 0 && (
-                <>
-                  {session.appliedRateTier === 'Couple'
-                    ? t('settings.couple')
-                    : t('settings.individual')}
-                  {': '}
-                  {formatCurrency(session.appliedHourlyRate)}
-                  {session.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}
-                  {' · '}
-                </>
-              )}
-              {t('dashboard.timeCost')}: {formatCurrency(session.currentTimeCost)}
-              {session.accruedTimeCost > 0
-                ? ` (${t('dashboard.accrued')}: ${formatCurrency(session.accruedTimeCost)})`
-                : ''}
-              {' · '}
-              {t('dashboard.cafeteriaCost')}: {formatCurrency(session.cafeteriaCost)}
-            </p>
-          )}
-          <div className="flex gap-2">
-            {session.status === SessionStatus.Open ? (
-              <Button variant="secondary" size="sm" className="flex-1" onClick={onPause}>{t('session.pause')}</Button>
-            ) : (
-              <Button variant="secondary" size="sm" className="flex-1" onClick={onResume}>{t('session.resume')}</Button>
-            )}
-            <Button variant="danger" size="sm" className="flex-1" onClick={onClose}>{t('session.close')}</Button>
-          </div>
-          {session.canConvertToGaming && (
-            <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
-              <Icon name="play" className="h-3.5 w-3.5" />
-              {t('dashboard.convertToGaming')}
-            </Button>
-          )}
-          {!session.canConvertToGaming && session.canChangePricing && (
-            <Button variant="secondary" size="sm" className="w-full" onClick={onConvert}>
-              <Icon name="settings" className="h-3.5 w-3.5" />
-              {t('dashboard.changePricing')}
-            </Button>
-          )}
-          {session.timeUnit === TimeUnit.PerGame && (
-            <p className="text-xs text-muted">{t('dashboard.perMatchHint')}</p>
-          )}
-          {canAddCafeteria && (
-            <Button variant="primary" size="sm" className="w-full" onClick={onAddCafeteria}>
-              <Icon name="cafeteria" className="h-3.5 w-3.5" />
-              {t('dashboard.addCafeteria')}
-              {session.cafeteriaCost > 0 ? ` · ${formatCurrency(session.cafeteriaCost)}` : ''}
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-sm text-muted">
-            {device.workingControllers} ctrl · {device.maxWatchingCapacity} watch
-          </span>
-          <Button size="sm" onClick={onOpen}>
-            <Icon name="play" className="h-3.5 w-3.5" />
-            {t('dashboard.openSession')}
-          </Button>
-        </div>
-      )}
-    </Card>
-  );
+function billingSegmentFormula(
+  seg: BillingSegment,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+  const money = (n: number) => formatCurrency(n);
+  if (seg.quantityUnit === 'match') {
+    return t('session.formulaMatch', {
+      rate: money(seg.rate),
+      count: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'guest') {
+    return t('session.formulaWatching', {
+      rate: money(seg.rate),
+      count: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0) {
+    return t('session.formulaWatchingTime', {
+      rate: money(seg.rate),
+      people: seg.peopleCount,
+      hours: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'min' && (seg.peopleCount ?? 0) > 0) {
+    return t('session.formulaWatchingMin', {
+      rate: money(seg.rate),
+      people: seg.peopleCount,
+      mins: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'hour') {
+    return t('session.formulaHourly', {
+      rate: money(seg.rate),
+      hours: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  if (seg.quantityUnit === 'min') {
+    return t('session.formulaMinute', {
+      rate: money(seg.rate),
+      mins: seg.quantity,
+      amount: money(seg.amount),
+    });
+  }
+  return `${money(seg.rate)} × ${seg.quantity} = ${money(seg.amount)}`;
 }
 
 export function DashboardPage() {
@@ -270,14 +130,29 @@ export function DashboardPage() {
   const queryClient = useQueryClient();
   const [sessions, setSessions] = useState<SessionLive[]>([]);
   const [openModal, setOpenModal] = useState<AssetDashboardDevice | null>(null);
+  const [reserveModal, setReserveModal] = useState<AssetDashboardDevice | null>(null);
+  const [reserveStartsAt, setReserveStartsAt] = useState(toEgyptDateTimeLocalInput());
+  const [reserveCustomerSearch, setReserveCustomerSearch] = useState('');
+  const [reserveSelectedCustomer, setReserveSelectedCustomer] = useState<Customer | null>(null);
+  const [debouncedReserveCustomerQ, setDebouncedReserveCustomerQ] = useState('');
+  const [reserveNotes, setReserveNotes] = useState('');
+  const [reserveError, setReserveError] = useState('');
+  const [reserveLoading, setReserveLoading] = useState(false);
+  const [openingReservationId, setOpeningReservationId] = useState<string | null>(null);
   const [closeModal, setCloseModal] = useState<SessionLive | null>(null);
   const [convertModal, setConvertModal] = useState<SessionLive | null>(null);
   const [convertPlanId, setConvertPlanId] = useState('');
   const [convertControllers, setConvertControllers] = useState(2);
+  const [convertWatchers, setConvertWatchers] = useState(2);
   const [convertMatchCount, setConvertMatchCount] = useState('1');
   const [convertError, setConvertError] = useState('');
   const [closeMatchCount, setCloseMatchCount] = useState('1');
   const [invoiceResult, setInvoiceResult] = useState<SessionDetail | null>(null);
+  const [billPreview, setBillPreview] = useState<SessionLive | null>(null);
+  const [transferModal, setTransferModal] = useState<SessionLive | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState('');
+  const [transferError, setTransferError] = useState('');
+  const [transferLoading, setTransferLoading] = useState(false);
   const [cafSession, setCafSession] = useState<SessionLive | null>(null);
   const [cafCart, setCafCart] = useState<CafCartLine[]>([]);
   const [cafPickItem, setCafPickItem] = useState<CafeteriaItem | null>(null);
@@ -299,6 +174,7 @@ export function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const language = useUiStore((s) => s.language);
+  const dateLocale = language === 'ar' ? 'ar-EG' : 'en-EG';
   const canReturn = hasPermission(user, Permissions.CafeteriaReturn);
   const canSellCafeteria = hasPermission(user, Permissions.CafeteriaSell) || !!user?.isMaster;
   const [mode, setMode] = useState<number>(SessionMode.Gaming);
@@ -321,11 +197,47 @@ export function DashboardPage() {
   const [quickGuestName, setQuickGuestName] = useState('');
   const [invoiceActionError, setInvoiceActionError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [roomFilter, setRoomFilter] = useState<FloorRoomFilter>(() => {
+    try {
+      return (sessionStorage.getItem(FLOOR_ROOM_STORAGE_KEY) as FloorRoomFilter) || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+  const [statusFilter, setStatusFilter] = useState<FloorStatusFilter>(() => {
+    try {
+      return (sessionStorage.getItem(FLOOR_STATUS_STORAGE_KEY) as FloorStatusFilter) || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+  const [deviceQuery, setDeviceQuery] = useState('');
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FLOOR_ROOM_STORAGE_KEY, roomFilter);
+    } catch {
+      /* ignore */
+    }
+  }, [roomFilter]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FLOOR_STATUS_STORAGE_KEY, statusFilter);
+    } catch {
+      /* ignore */
+    }
+  }, [statusFilter]);
 
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedCustomerQ(customerSearch.trim()), 300);
     return () => window.clearTimeout(id);
   }, [customerSearch]);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedReserveCustomerQ(reserveCustomerSearch.trim()), 300);
+    return () => window.clearTimeout(id);
+  }, [reserveCustomerSearch]);
 
   const { data: dashboard, isLoading } = useQuery({
     queryKey: ['dashboard', user?.id, activeBranchId],
@@ -364,22 +276,49 @@ export function DashboardPage() {
     meta: { silent: true },
   });
 
+  const { data: reservations = [] } = useQuery({
+    queryKey: ['reservations', user?.id, activeBranchId],
+    queryFn: reservationsApi.list,
+    enabled: !!activeBranchId,
+    refetchInterval: 30000,
+  });
+
   const { data: gamingPlans } = useQuery({
     queryKey: ['plans', SessionMode.Gaming],
     queryFn: () => pricingApi.getPlans(SessionMode.Gaming),
-    enabled: !!openModal,
+    enabled: !!openModal || !!convertModal,
   });
 
   const { data: watchingPlans } = useQuery({
     queryKey: ['plans', SessionMode.Watching],
     queryFn: () => pricingApi.getPlans(SessionMode.Watching),
-    enabled: !!openModal,
+    enabled: !!openModal || !!convertModal,
   });
+
+  const convertPlans = useMemo(
+    () => [...(gamingPlans ?? []), ...(watchingPlans ?? [])],
+    [gamingPlans, watchingPlans]
+  );
+  const convertSelectedPlan = convertPlans.find((p) => p.id === convertPlanId);
+  const convertDevice = useMemo(() => {
+    if (!convertModal || !dashboard) return null;
+    for (const room of dashboard.rooms ?? []) {
+      const d = room.devices.find((x) => x.id === convertModal.deviceId);
+      if (d) return d;
+    }
+    return (dashboard.unassignedDevices ?? []).find((x) => x.id === convertModal.deviceId) ?? null;
+  }, [convertModal, dashboard]);
 
   const { data: customerSearchResults } = useQuery({
     queryKey: ['customers', 'open-session', debouncedCustomerQ],
     queryFn: () => customersApi.getAll(debouncedCustomerQ || undefined, 1, 10),
     enabled: !!openModal && guestType === 'registered',
+  });
+
+  const { data: reserveCustomerResults } = useQuery({
+    queryKey: ['customers', 'reserve', debouncedReserveCustomerQ],
+    queryFn: () => customersApi.getAll(debouncedReserveCustomerQ || undefined, 1, 10),
+    enabled: !!reserveModal,
   });
 
   const { data: cafItems = [] } = useQuery({
@@ -422,13 +361,30 @@ export function DashboardPage() {
   }, [queryClient]);
 
   // Sound the alarm once when a booked session's time runs out (re-arms if time is extended).
+  // Also warn once when remaining time enters the last 5 minutes.
   const timeUpAlertedRef = useRef<Set<string>>(new Set());
+  const endingSoonAlertedRef = useRef<Set<string>>(new Set());
+  const [endingSoonToast, setEndingSoonToast] = useState<string | null>(null);
   useEffect(() => {
     const check = () => {
       for (const s of sessions) {
         if (s.status !== SessionStatus.Open || s.plannedDurationMinutes == null) continue;
         const elapsed = Math.floor((Date.now() - parseServerUtc(s.startedAt)) / 1000) - s.totalPausedSeconds;
-        const expired = elapsed >= s.plannedDurationMinutes * 60;
+        const remaining = s.plannedDurationMinutes * 60 - elapsed;
+        const expired = remaining <= 0;
+        const endingSoon = !expired && remaining > 0 && remaining <= 300;
+
+        if (endingSoon && !endingSoonAlertedRef.current.has(s.id)) {
+          endingSoonAlertedRef.current.add(s.id);
+          playEndingSoonSound();
+          setEndingSoonToast(
+            t('dashboard.endingSoonToast', { device: s.deviceName || s.deviceIdentifier })
+          );
+        } else if ((!endingSoon || expired) && endingSoonAlertedRef.current.has(s.id) && remaining > 300) {
+          // Re-arm only after an extend pushes remaining back above 5 minutes.
+          endingSoonAlertedRef.current.delete(s.id);
+        }
+
         if (expired && !timeUpAlertedRef.current.has(s.id)) {
           timeUpAlertedRef.current.add(s.id);
           playTimeUpSound();
@@ -440,7 +396,13 @@ export function DashboardPage() {
     check();
     const id = setInterval(check, 1000);
     return () => clearInterval(id);
-  }, [sessions]);
+  }, [sessions, t]);
+
+  useEffect(() => {
+    if (!endingSoonToast) return;
+    const id = window.setTimeout(() => setEndingSoonToast(null), 12000);
+    return () => window.clearTimeout(id);
+  }, [endingSoonToast]);
 
   const onClosed = useCallback((sessionId: string) => {
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
@@ -451,6 +413,151 @@ export function DashboardPage() {
   useSessionHub(onUpdate, onClosed);
 
   const sessionMap = new Map(sessions.map((s) => [s.deviceId, s]));
+  const idleTransferTargets = useMemo(() => {
+    if (!dashboard || !transferModal) return [] as { id: string; label: string }[];
+    const occupied = new Set(sessions.map((s) => s.deviceId));
+    const rows: { id: string; label: string }[] = [];
+    for (const room of dashboard.rooms ?? []) {
+      for (const d of room.devices) {
+        if (!d.isActive) continue;
+        if (d.id === transferModal.deviceId) continue;
+        if (occupied.has(d.id)) continue;
+        rows.push({ id: d.id, label: `${d.name} · ${room.name}` });
+      }
+    }
+    for (const d of dashboard.unassignedDevices ?? []) {
+      if (!d.isActive) continue;
+      if (d.id === transferModal.deviceId) continue;
+      if (occupied.has(d.id)) continue;
+      rows.push({ id: d.id, label: `${d.name} · ${t('dashboard.unassignedDevices')}` });
+    }
+    return rows;
+  }, [dashboard, transferModal, sessions, t]);
+
+  const reservationMap = useMemo(() => {
+    const map = new Map<string, DeviceReservation>();
+    for (const reservation of reservations) {
+      if (!map.has(reservation.deviceId)) map.set(reservation.deviceId, reservation);
+    }
+    return map;
+  }, [reservations]);
+
+  const floorSections = useMemo(() => {
+    if (!dashboard) return [] as {
+      id: string;
+      title: string;
+      subtitle?: string;
+      devices: AssetDashboardDevice[];
+    }[];
+
+    const sections: {
+      id: string;
+      title: string;
+      subtitle?: string;
+      devices: AssetDashboardDevice[];
+    }[] = [];
+
+    const pushSection = (
+      id: string,
+      title: string,
+      subtitle: string | undefined,
+      devices: AssetDashboardDevice[]
+    ) => {
+      if (roomFilter !== 'all' && roomFilter !== id) return;
+      const filtered = devices
+        .map((device) => {
+          const session = sessionMap.get(device.id);
+          const reservation = reservationMap.get(device.id);
+          const bucket = deviceBucket(device, session, reservation);
+          return { device, bucket };
+        })
+        .filter(
+          ({ device, bucket }) =>
+            matchesDeviceQuery(device, deviceQuery) && matchesStatusFilter(bucket, statusFilter)
+        )
+        .sort(
+          (a, b) =>
+            bucketPriority(a.bucket) - bucketPriority(b.bucket) ||
+            a.device.name.localeCompare(b.device.name)
+        )
+        .map(({ device }) => device);
+
+      if (filtered.length === 0) {
+        if (roomFilter === id) sections.push({ id, title, subtitle, devices: [] });
+        return;
+      }
+      sections.push({ id, title, subtitle, devices: filtered });
+    };
+
+    for (const room of dashboard.rooms ?? []) {
+      const subtitle =
+        (room.assets?.length ?? 0) > 0
+          ? room.assets.map((a) => `${a.assetTypeName}: ${a.workingCount}/${a.quantity}`).join(' · ')
+          : undefined;
+      pushSection(
+        room.id,
+        room.roomNumber ? `${room.name} · ${room.roomNumber}` : room.name,
+        subtitle,
+        room.devices
+      );
+    }
+    if ((dashboard.unassignedDevices?.length ?? 0) > 0 || roomFilter === 'unassigned') {
+      pushSection('unassigned', t('dashboard.unassignedDevices'), undefined, dashboard.unassignedDevices ?? []);
+    }
+
+    return sections;
+  }, [dashboard, deviceQuery, reservationMap, roomFilter, sessionMap, statusFilter, t]);
+
+  const floorCounts = useMemo(() => {
+    const counts = { all: 0, attention: 0, idle: 0, active: 0, reserved: 0, paused: 0 };
+    if (!dashboard) return counts;
+    const allDevices = [
+      ...(dashboard.rooms ?? []).flatMap((r) => r.devices),
+      ...(dashboard.unassignedDevices ?? []),
+    ];
+    for (const device of allDevices) {
+      if (roomFilter !== 'all') {
+        const inRoom =
+          roomFilter === 'unassigned'
+            ? (dashboard.unassignedDevices ?? []).some((d) => d.id === device.id)
+            : (dashboard.rooms ?? []).some((r) => r.id === roomFilter && r.devices.some((d) => d.id === device.id));
+        if (!inRoom) continue;
+      }
+      if (!matchesDeviceQuery(device, deviceQuery)) continue;
+      const bucket = deviceBucket(device, sessionMap.get(device.id), reservationMap.get(device.id));
+      counts.all += 1;
+      if (bucket === 'timeup' || bucket === 'ending' || bucket === 'paused') counts.attention += 1;
+      if (bucket === 'idle') counts.idle += 1;
+      if (bucket === 'active' || bucket === 'ending' || bucket === 'timeup' || bucket === 'paused') counts.active += 1;
+      if (bucket === 'reserved') counts.reserved += 1;
+      if (bucket === 'paused') counts.paused += 1;
+    }
+    return counts;
+  }, [dashboard, deviceQuery, reservationMap, roomFilter, sessionMap]);
+
+  const sortedActiveSessions = useMemo(() => {
+    const findDevice = (deviceId: string) =>
+      (dashboard?.rooms ?? []).flatMap((r) => r.devices).find((d) => d.id === deviceId) ??
+      (dashboard?.unassignedDevices ?? []).find((d) => d.id === deviceId);
+
+    return [...sessions].sort((a, b) => {
+      const fallback = (s: SessionLive): AssetDashboardDevice => ({
+        id: s.deviceId,
+        identifier: s.deviceIdentifier,
+        name: s.deviceName,
+        liveStatus: s.status === SessionStatus.Paused ? 'Paused' : 'Gaming',
+        maxGamingPlayers: 4,
+        maxWatchingCapacity: 10,
+        totalControllers: 0,
+        workingControllers: 0,
+        isActive: true,
+      });
+      const ba = deviceBucket(findDevice(a.deviceId) ?? fallback(a), a, undefined);
+      const bb = deviceBucket(findDevice(b.deviceId) ?? fallback(b), b, undefined);
+      return bucketPriority(ba) - bucketPriority(bb);
+    });
+  }, [sessions, dashboard]);
+
   const plans = mode === SessionMode.Gaming ? gamingPlans : watchingPlans;
   const selectedPlan = plans?.find((p) => p.id === planId);
   const isPerGamePlan = selectedPlan?.timeUnit === TimeUnit.PerGame;
@@ -458,6 +565,9 @@ export function DashboardPage() {
     selectedPlan?.sessionMode === SessionMode.Watching &&
     selectedPlan.watchingBilling === WatchingBilling.PerPerson;
   const hideTimerOptions = isPerGamePlan || isFlatWatchingPlan;
+  const openModalReservation = openModal ? reservationMap.get(openModal.id) : undefined;
+  const showReservationConflictBanner =
+    openingReservationId === null && !!openModalReservation?.warnWithinOneHour;
 
   function planOptionLabel(p: PricingPlan) {
     const unit =
@@ -483,38 +593,183 @@ export function DashboardPage() {
     return `${p.name} (${unit}${watching}${rate != null ? ` · ${formatCurrency(rate)}` : ''}${pkg})`;
   }
 
+  async function handleTransfer() {
+    if (!transferModal || !transferTargetId) return;
+    setTransferLoading(true);
+    setTransferError('');
+    try {
+      const live = await sessionsApi.transfer(transferModal.id, transferTargetId);
+      setTransferModal(null);
+      setTransferTargetId('');
+      onUpdate(live);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    } catch (e) {
+      setTransferError(e instanceof Error ? e.message : t('common.error'));
+    } finally {
+      setTransferLoading(false);
+    }
+  }
+
+  function openSessionForDevice(device: AssetDashboardDevice) {
+    setOpeningReservationId(null);
+    setOpenModal(device);
+    setPlanId('');
+    setBookingMode('open');
+    setDurationHours(2);
+    setControllerCount(2);
+    setOpenError('');
+  }
+
+  function openReserveForDevice(device: AssetDashboardDevice) {
+    setReserveModal(device);
+    setReserveStartsAt(toEgyptDateTimeLocalInput());
+    setReserveCustomerSearch('');
+    setReserveSelectedCustomer(null);
+    setDebouncedReserveCustomerQ('');
+    setReserveNotes('');
+    setReserveError('');
+  }
+
+  async function handleCancelReservation(reservation: DeviceReservation) {
+    if (!window.confirm(t('dashboard.cancelReservation'))) return;
+    try {
+      await reservationsApi.cancel(reservation.id);
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : t('common.error'));
+    }
+  }
+
+  function startReservationForDevice(device: AssetDashboardDevice, reservation: DeviceReservation) {
+    setOpeningReservationId(reservation.id);
+    setOpenModal(device);
+    setPlanId('');
+    setBookingMode('open');
+    setDurationHours(2);
+    setControllerCount(2);
+    setOpenError('');
+    if (reservation.customerId) {
+      setGuestType('registered');
+      setCustomerSearch(reservation.customerName ?? '');
+      setSelectedCustomer({
+        id: reservation.customerId,
+        code: '',
+        name: reservation.customerName ?? '',
+        phone: '',
+        notes: null,
+        walletBalance: 0,
+        isActive: true,
+        createdAt: '',
+        outstandingDebtAmount: 0,
+        outstandingDebtCount: 0,
+      });
+      setQuickGuestName('');
+    } else {
+      setGuestType('quick');
+      setCustomerSearch('');
+      setSelectedCustomer(null);
+      setQuickGuestName(reservation.guestName ?? '');
+    }
+  }
+
+  async function handleReserveSubmit() {
+    if (!reserveModal) return;
+    if (!reserveSelectedCustomer) {
+      setReserveError(t('dashboard.reserveCustomerRequired'));
+      return;
+    }
+    setReserveLoading(true);
+    setReserveError('');
+    try {
+      const startsAt = egyptLocalInputToUtcIso(reserveStartsAt);
+      await reservationsApi.create({
+        deviceId: reserveModal.id,
+        startsAt,
+        customerId: reserveSelectedCustomer.id,
+        notes: reserveNotes.trim() || undefined,
+      });
+      setReserveModal(null);
+      setReserveStartsAt(toEgyptDateTimeLocalInput());
+      setReserveCustomerSearch('');
+      setReserveSelectedCustomer(null);
+      setReserveNotes('');
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
+    } catch (e) {
+      setReserveError(e instanceof Error ? e.message : t('common.error'));
+    } finally {
+      setReserveLoading(false);
+    }
+  }
+
   async function handleOpen() {
-    if (!openModal || !planId) return;
+    if (!openModal) return;
+    if (!planId) {
+      setOpenError(t('session.planRequired'));
+      return;
+    }
+    if (guestType === 'registered' && !selectedCustomer) {
+      setOpenError(t('session.noCustomersFound'));
+      return;
+    }
     setLoading(true);
     setOpenError('');
     try {
       const plan = plans?.find((p) => p.id === planId);
+      if (!plan) {
+        setOpenError(t('session.planRequired'));
+        return;
+      }
       const useFixed =
         bookingMode === 'fixed' &&
-        plan?.timeUnit !== TimeUnit.PerGame &&
-        !(plan?.sessionMode === SessionMode.Watching && plan.watchingBilling === WatchingBilling.PerPerson);
-      await sessionsApi.open({
+        plan.timeUnit !== TimeUnit.PerGame &&
+        !(plan.sessionMode === SessionMode.Watching && plan.watchingBilling === WatchingBilling.PerPerson);
+      if (!openingReservationId) {
+        const conflict = await reservationsApi.checkConflict(openModal.id);
+        if (conflict.hasConflict) {
+          const message = language === 'ar' ? conflict.messageAr : conflict.messageEn;
+          if (!window.confirm(message || t('dashboard.reservationConflictWarn'))) return;
+        }
+      }
+
+      const payload: Parameters<typeof sessionsApi.open>[0] = {
         deviceId: openModal.id,
         pricingPlanId: planId,
         sessionMode: mode,
-        controllerCount: mode === SessionMode.Gaming ? controllerCount : undefined,
-        watcherCount: mode === SessionMode.Watching ? watcherCount : undefined,
-        plannedDurationMinutes:
-          useFixed ? Math.round(durationHours * 60) : undefined,
-        customerId: guestType === 'registered' ? selectedCustomer?.id : undefined,
         isQuickGuest: guestType === 'quick',
-        quickGuestName:
-          guestType === 'quick' ? quickGuestName.trim() || undefined : undefined,
-      });
+      };
+      if (mode === SessionMode.Gaming) {
+        payload.controllerCount = controllerCount;
+      } else {
+        payload.watcherCount = watcherCount;
+      }
+      if (useFixed) {
+        payload.plannedDurationMinutes = Math.round(durationHours * 60);
+      }
+      if (guestType === 'registered' && selectedCustomer) {
+        payload.customerId = selectedCustomer.id;
+      }
+      if (guestType === 'quick') {
+        const name = quickGuestName.trim();
+        if (name) payload.quickGuestName = name;
+      }
+      if (openingReservationId) {
+        payload.reservationId = openingReservationId;
+      }
+
+      await sessionsApi.open(payload);
       setOpenModal(null);
+      setOpeningReservationId(null);
       setBookingMode('open');
       setDurationHours(2);
       setGuestType('none');
       setCustomerSearch('');
       setSelectedCustomer(null);
       setQuickGuestName('');
+      setPlanId('');
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reservations'] });
     } catch (err) {
       setOpenError(err instanceof Error ? err.message : t('common.error'));
       // Refresh floor state — the device may actually be occupied already.
@@ -813,55 +1068,201 @@ export function DashboardPage() {
     }
   }
 
+
+  function openCafeteriaForSession(session: SessionLive) {
+    setCafSession(session);
+    setCafCart([]);
+    setCafCustomerName('');
+    setCafSearch('');
+    setReturnLineId('');
+    setReturnQty('1');
+    setReturnReason('');
+    setCafError('');
+  }
+
+  function openCloseForSession(session: SessionLive) {
+    setCloseModal(session);
+    setDiscountAmount('');
+    setDiscountReason('');
+    setDebtorName('');
+    setPaymentMethod(PaymentMethod.Cash);
+    setWalletPayAmount('');
+    setProofFile(null);
+    setCafError('');
+  }
+
+  function jumpToDevice(deviceId: string) {
+    const el = document.getElementById(`floor-device-${deviceId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function renderFloorCard(device: AssetDashboardDevice, roomName: string, hideRoomName?: boolean) {
+    const session = sessionMap.get(device.id);
+    const reservation = reservationMap.get(device.id);
+    return (
+      <FloorDeviceCard
+        key={device.id}
+        device={device}
+        roomName={roomName}
+        hideRoomName={hideRoomName}
+        session={session}
+        reservation={reservation}
+        onOpen={() => openSessionForDevice(device)}
+        onReserve={() => openReserveForDevice(device)}
+        onCancelReservation={() => reservation && handleCancelReservation(reservation)}
+        onStartReservation={() => reservation && startReservationForDevice(device, reservation)}
+        onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
+        onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
+        onExtend={(mins) => session && sessionsApi.extend(session.id, mins).then(onUpdate)}
+        onWatchersChange={(count) =>
+          session &&
+          sessionsApi
+            .updateWatchers(session.id, count)
+            .then(onUpdate)
+            .catch((e: Error) => window.alert(e.message))
+        }
+        onConvert={() => {
+          if (!session) return;
+          setConvertModal(session);
+          setConvertPlanId('');
+          setConvertControllers(session.controllerCount && session.controllerCount > 0 ? session.controllerCount : 2);
+          setConvertWatchers(session.watcherCount && session.watcherCount > 0 ? session.watcherCount : 2);
+          setConvertMatchCount('1');
+          setConvertError('');
+        }}
+        onClose={() => session && openCloseForSession(session)}
+        onAddCafeteria={() => session && openCafeteriaForSession(session)}
+        onPreviewBill={() => {
+          if (!session) return;
+          setBillPreview(session);
+        }}
+        onTransfer={() => {
+          if (!session) return;
+          setTransferModal(session);
+          setTransferTargetId('');
+          setTransferError('');
+        }}
+        canAddCafeteria={canSellCafeteria}
+        dateLocale={dateLocale}
+      />
+    );
+  }
+
   if (isLoading) {
     return <div className="flex h-64 items-center justify-center text-muted">{t('common.loading')}</div>;
   }
 
+  const roomChips: { id: FloorRoomFilter; label: string; count: number }[] = [
+    {
+      id: 'all',
+      label: t('dashboard.filterAllRooms'),
+      count: (dashboard?.rooms ?? []).reduce((n, r) => n + r.devices.length, 0) + (dashboard?.unassignedDevices?.length ?? 0),
+    },
+    ...((dashboard?.rooms ?? []).map((room) => ({
+      id: room.id as FloorRoomFilter,
+      label: room.roomNumber ? `${room.name} · ${room.roomNumber}` : room.name,
+      count: room.devices.length,
+    }))),
+    ...((dashboard?.unassignedDevices?.length ?? 0) > 0
+      ? [{ id: 'unassigned' as FloorRoomFilter, label: t('dashboard.unassignedDevices'), count: dashboard!.unassignedDevices.length }]
+      : []),
+  ];
+
+  const statusChips: { id: FloorStatusFilter; label: string; count: number }[] = [
+    { id: 'all', label: t('dashboard.filterAll'), count: floorCounts.all },
+    { id: 'attention', label: t('dashboard.filterAttention'), count: floorCounts.attention },
+    { id: 'active', label: t('dashboard.filterActive'), count: floorCounts.active },
+    { id: 'idle', label: t('dashboard.idle'), count: floorCounts.idle },
+    { id: 'reserved', label: t('dashboard.reserved'), count: floorCounts.reserved },
+    { id: 'paused', label: t('dashboard.paused'), count: floorCounts.paused },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
-          {dashboard && <p className="text-muted">{dashboard.branchName}</p>}
+          {dashboard && <p className="text-sm text-muted">{dashboard.branchName}</p>}
         </div>
-        <div className="flex gap-2">
-          {['idle', 'gaming', 'watching', 'paused'].map((s) => (
-            <Badge key={s} status={s}>{t(`dashboard.${s}`)}</Badge>
-          ))}
-        </div>
+        <p className="max-w-md text-xs text-muted">{t('dashboard.floorHint')}</p>
       </div>
 
-      {canSellCafeteria && sessions.length > 0 && (
-        <Card className="space-y-3">
-          <div>
-            <p className="text-sm font-semibold">{t('dashboard.pickOpenSession')}</p>
-            <p className="text-xs text-muted">{t('dashboard.addCafeteriaHint')}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {sessions.map((s) => (
-              <Button
-                key={s.id}
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setCafSession(s);
-                  setCafCart([]);
-                  setCafCustomerName('');
-                  setCafSearch('');
-                  setReturnLineId('');
-                  setReturnQty('1');
-                  setReturnReason('');
-                  setCafError('');
-                }}
+      {endingSoonToast && (
+        <div
+          className="flex items-start justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning"
+          role="status"
+        >
+          <p className="font-medium">{endingSoonToast}</p>
+          <button
+            type="button"
+            className="shrink-0 text-xs font-semibold underline"
+            onClick={() => setEndingSoonToast(null)}
+          >
+            {t('session.done')}
+          </button>
+        </div>
+      )}
+
+      <div className="sticky top-14 z-20 -mx-1 space-y-2 rounded-xl border border-border/80 bg-surface/95 p-2 shadow-lg shadow-black/10 backdrop-blur md:p-3">
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {roomChips.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => setRoomFilter(chip.id)}
+              className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                roomFilter === chip.id
+                  ? 'border-primary bg-primary/15 text-primary'
+                  : 'border-border bg-surface-elevated text-muted hover:border-primary/40 hover:text-text'
+              }`}
+            >
+              {chip.label}
+              <span className="ms-1.5 tabular-nums opacity-70">{chip.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {statusChips.map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => setStatusFilter(chip.id)}
+                className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  statusFilter === chip.id
+                    ? chip.id === 'attention'
+                      ? 'border-warning bg-warning/15 text-warning'
+                      : 'border-primary bg-primary/15 text-primary'
+                    : 'border-border bg-surface-elevated text-muted hover:border-primary/40 hover:text-text'
+                }`}
               >
-                <Icon name="cafeteria" className="h-3.5 w-3.5" />
-                {s.deviceName}
-                {s.cafeteriaCost > 0 ? ` · ${formatCurrency(s.cafeteriaCost)}` : ''}
-              </Button>
+                {chip.label}
+                <span className="ms-1 tabular-nums opacity-70">{chip.count}</span>
+              </button>
             ))}
           </div>
-        </Card>
-      )}
+          <div className="w-full sm:w-52">
+            <Input
+              value={deviceQuery}
+              onChange={(e) => setDeviceQuery(e.target.value)}
+              placeholder={t('dashboard.searchDevices')}
+              className="!py-1.5 text-sm"
+            />
+          </div>
+        </div>
+
+        <FloorActiveStrip
+          sessions={sortedActiveSessions}
+          canAddCafeteria={canSellCafeteria}
+          onJump={(s) => {
+            if (s.roomId) setRoomFilter(s.roomId);
+            else setRoomFilter('unassigned');
+            window.setTimeout(() => jumpToDevice(s.deviceId), 50);
+          }}
+          onCafeteria={openCafeteriaForSession}
+          onClose={openCloseForSession}
+        />
+      </div>
 
       {!dashboard?.rooms.length && !(dashboard?.unassignedDevices?.length) ? (
         <Card className="space-y-4 py-12 text-center">
@@ -877,149 +1278,235 @@ export function DashboardPage() {
             </Button>
           </Link>
         </Card>
+      ) : floorSections.length === 0 || floorSections.every((s) => s.devices.length === 0) ? (
+        <Card className="py-10 text-center">
+          <p className="text-muted">{t('dashboard.noDevicesMatch')}</p>
+          <div className="mt-3 flex justify-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setStatusFilter('all');
+                setDeviceQuery('');
+                setRoomFilter('all');
+              }}
+            >
+              {t('dashboard.clearFilters')}
+            </Button>
+          </div>
+        </Card>
       ) : (
-        <>
-        {dashboard.rooms.map((room) => (
-          <section key={room.id}>
-            <h2 className="mb-3 text-lg font-semibold text-muted">
-              {room.name}{room.roomNumber ? ` · ${room.roomNumber}` : ''}
-            </h2>
-            {(room.assets?.length ?? 0) > 0 && (
-              <p className="mb-3 text-xs text-muted">
-                {room.assets.map((a) => `${a.assetTypeName}: ${a.workingCount}/${a.quantity}`).join(' · ')}
-              </p>
-            )}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {room.devices.map((device) => {
-                const session = sessionMap.get(device.id);
-                return (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    roomName={room.name}
-                    session={session}
-                    onOpen={() => {
-                      setOpenModal(device);
-                      setPlanId('');
-                      setBookingMode('open');
-                      setDurationHours(2);
-                      setControllerCount(2);
-                      setOpenError('');
-                    }}
-                    onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
-                    onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
-                    onExtend={(mins) => session && sessionsApi.extend(session.id, mins).then(onUpdate)}
-                    onWatchersChange={(count) =>
-                      session &&
-                      sessionsApi
-                        .updateWatchers(session.id, count)
-                        .then(onUpdate)
-                        .catch((e: Error) => window.alert(e.message))
-                    }
-                    onConvert={() => {
-                      if (!session) return;
-                      setConvertModal(session);
-                      setConvertPlanId('');
-                      setConvertControllers(2);
-                      setConvertError('');
-                    }}
-                    onClose={() => {
-                      if (!session) return;
-                      setCloseModal(session);
-                      setDiscountAmount('');
-                      setDiscountReason('');
-                      setDebtorName('');
-                      setPaymentMethod(PaymentMethod.Cash);
-                      setWalletPayAmount('');
-                      setProofFile(null);
-                      setCafError('');
-                    }}
-                    onAddCafeteria={() => {
-                      if (!session) return;
-                      setCafSession(session);
-                      setCafCart([]);
-                      setCafCustomerName('');
-                      setCafSearch('');
-                      setReturnLineId('');
-                      setReturnQty('1');
-                      setReturnReason('');
-                      setCafError('');
-                    }}
-                    canAddCafeteria={canSellCafeteria}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        ))}
-        {(dashboard.unassignedDevices?.length ?? 0) > 0 && (
-          <section>
-            <h2 className="mb-3 text-lg font-semibold text-muted">{t('dashboard.unassignedDevices')}</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {dashboard.unassignedDevices.map((device) => {
-                const session = sessionMap.get(device.id);
-                return (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    roomName={t('settings.noRoom')}
-                    session={session}
-                    onOpen={() => {
-                      setOpenModal(device);
-                      setPlanId('');
-                      setBookingMode('open');
-                      setDurationHours(2);
-                      setControllerCount(2);
-                      setOpenError('');
-                    }}
-                    onPause={() => session && sessionsApi.pause(session.id).then(onUpdate)}
-                    onResume={() => session && sessionsApi.resume(session.id).then(onUpdate)}
-                    onExtend={(mins) => session && sessionsApi.extend(session.id, mins).then(onUpdate)}
-                    onWatchersChange={(count) =>
-                      session &&
-                      sessionsApi
-                        .updateWatchers(session.id, count)
-                        .then(onUpdate)
-                        .catch((e: Error) => window.alert(e.message))
-                    }
-                    onConvert={() => {
-                      if (!session) return;
-                      setConvertModal(session);
-                      setConvertPlanId('');
-                      setConvertControllers(2);
-                      setConvertError('');
-                    }}
-                    onClose={() => {
-                      if (!session) return;
-                      setCloseModal(session);
-                      setDiscountAmount('');
-                      setDiscountReason('');
-                      setDebtorName('');
-                      setPaymentMethod(PaymentMethod.Cash);
-                      setWalletPayAmount('');
-                      setProofFile(null);
-                      setCafError('');
-                    }}
-                    onAddCafeteria={() => {
-                      if (!session) return;
-                      setCafSession(session);
-                      setCafCart([]);
-                      setCafCustomerName('');
-                      setCafSearch('');
-                      setReturnLineId('');
-                      setReturnQty('1');
-                      setReturnReason('');
-                      setCafError('');
-                    }}
-                    canAddCafeteria={canSellCafeteria}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        )}
-        </>
+        <div className="space-y-5">
+          {floorSections.map((section) => (
+            <section key={section.id}>
+              {roomFilter === 'all' && (
+                <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <h2 className="text-base font-semibold text-text">{section.title}</h2>
+                    {section.subtitle && <p className="text-[11px] text-muted">{section.subtitle}</p>}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-[11px] font-semibold text-primary hover:underline"
+                    onClick={() => setRoomFilter(section.id)}
+                  >
+                    {t('dashboard.focusRoom')}
+                  </button>
+                </div>
+              )}
+              {roomFilter !== 'all' && section.subtitle && (
+                <p className="mb-2 text-[11px] text-muted">{section.subtitle}</p>
+              )}
+              {section.devices.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted">
+                  {t('dashboard.noDevicesMatch')}
+                </p>
+              ) : (
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {section.devices.map((device) =>
+                    renderFloorCard(
+                      device,
+                      section.id === 'unassigned' ? t('settings.noRoom') : section.title,
+                      roomFilter !== 'all'
+                    )
+                  )}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
       )}
+
+      <Modal
+        open={!!transferModal}
+        onClose={() => {
+          setTransferModal(null);
+          setTransferTargetId('');
+          setTransferError('');
+        }}
+        title={t('dashboard.transferTitle')}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setTransferModal(null);
+                setTransferTargetId('');
+                setTransferError('');
+              }}
+            >
+              {t('session.cancel')}
+            </Button>
+            <Button
+              loading={transferLoading}
+              disabled={!transferTargetId || idleTransferTargets.length === 0}
+              onClick={() => void handleTransfer()}
+            >
+              {t('dashboard.transferConfirm')}
+            </Button>
+          </>
+        }
+      >
+        {transferModal && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted">{t('dashboard.transferHint')}</p>
+            <p className="text-sm">
+              <span className="text-muted">{t('session.device')}: </span>
+              <span className="font-medium">
+                {transferModal.deviceName}
+                {transferModal.roomName ? ` · ${transferModal.roomName}` : ''}
+              </span>
+            </p>
+            {idleTransferTargets.length === 0 ? (
+              <p className="text-sm text-danger">{t('dashboard.transferNoTargets')}</p>
+            ) : (
+              <label className="block space-y-1">
+                <span className="text-sm text-muted">{t('dashboard.transferTarget')}</span>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={transferTargetId}
+                  onChange={(e) => setTransferTargetId(e.target.value)}
+                >
+                  <option value="">—</option>
+                  {idleTransferTargets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {transferError && <p className="text-sm text-danger">{transferError}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!billPreview}
+        onClose={() => setBillPreview(null)}
+        title={t('dashboard.previewBillTitle')}
+        footer={
+          <Button variant="secondary" onClick={() => setBillPreview(null)}>
+            {t('session.done')}
+          </Button>
+        }
+      >
+        {billPreview && (() => {
+          const live = sessions.find((s) => s.id === billPreview.id) ?? billPreview;
+          const segments = live.billingSegments ?? [];
+          const cafLines = (live.cafeteriaLines ?? []).filter((l) => l.quantity - l.returnedQuantity > 0);
+          return (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">{t('dashboard.previewBillHint')}</p>
+              <div className="rounded-xl border border-border bg-surface p-3 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.device')}</span>
+                  <span>{live.deviceName}{live.roomName ? ` · ${live.roomName}` : ''}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.pricingPlan', { defaultValue: 'Pricing plan' })}</span>
+                  <span>{live.pricingPlanName}</span>
+                </div>
+                {(live.customerName || live.quickGuestName) && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">{t('session.guest')}</span>
+                    <span>{live.customerName || live.quickGuestName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('dashboard.elapsed')}</span>
+                  <span dir="ltr">{formatDuration(live.elapsedSeconds)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.timeCost')}</span>
+                  <span>{formatCurrency(live.currentTimeCost)}</span>
+                </div>
+                {segments.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
+                    <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
+                    {segments.map((seg, idx) => {
+                      const formula = billingSegmentFormula(seg, t);
+                      return (
+                        <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
+                          <div className="flex justify-between gap-2 text-xs">
+                            <span className="min-w-0 font-medium leading-snug">{formula}</span>
+                            <span className="shrink-0 font-semibold">{formatCurrency(seg.amount)}</span>
+                          </div>
+                          {seg.label && (
+                            <p className="text-[11px] text-muted leading-snug">{seg.label}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {live.timeUnit === TimeUnit.PerGame && (
+                  <p className="text-xs text-muted">{t('dashboard.perMatchHint')}</p>
+                )}
+                {live.roomSurchargeCost > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted">{t('session.roomSurcharge')}</span>
+                    <span>{formatCurrency(live.roomSurchargeCost)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">{t('session.cafeteria')}</span>
+                  <span>{formatCurrency(live.cafeteriaCost)}</span>
+                </div>
+                {cafLines.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
+                    <p className="text-xs font-medium text-muted">{t('dashboard.cafeteriaLines')}</p>
+                    {cafLines.map((line) => {
+                      const qty = line.quantity - line.returnedQuantity;
+                      return (
+                        <div key={line.id} className="flex justify-between gap-2 text-xs">
+                          <span className="min-w-0 leading-snug">
+                            {line.itemName} × {qty}
+                            {(line.addOns?.length ?? 0) > 0
+                              ? ` (+${line.addOns!.map((a) => a.name).join(', ')})`
+                              : ''}
+                          </span>
+                          <span className="shrink-0 font-semibold">
+                            {formatCurrency(
+                              line.quantity > 0
+                                ? (line.lineTotal * qty) / line.quantity
+                                : 0
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-border pt-2 text-lg font-bold text-success">
+                  <span>{t('session.total')}</span>
+                  <span>{formatCurrency(live.totalCost)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal
         open={!!invoiceResult}
@@ -1085,22 +1572,79 @@ export function DashboardPage() {
               {(invoiceResult.billingSegments?.length ?? 0) > 0 && (
                 <div className="space-y-1 rounded-lg border border-border/60 bg-bg/40 px-2 py-2">
                   <p className="text-xs font-medium text-muted">{t('session.billingSegments')}</p>
-                  {invoiceResult.billingSegments.map((seg, idx) => (
-                    <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
-                      <div className="flex justify-between gap-2 text-xs">
-                        <span className="min-w-0 truncate font-medium">{seg.label}</span>
-                        <span className="shrink-0 font-medium">{formatCurrency(seg.amount)}</span>
+                  {invoiceResult.billingSegments.map((seg, idx) => {
+                    const money = (n: number) => formatCurrency(n);
+                    let formula: string;
+                    if (seg.quantityUnit === 'match') {
+                      formula = t('session.formulaMatch', {
+                        rate: money(seg.rate),
+                        count: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'guest') {
+                      formula = t('session.formulaWatching', {
+                        rate: money(seg.rate),
+                        count: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0) {
+                      formula = t('session.formulaWatchingTime', {
+                        rate: money(seg.rate),
+                        people: seg.peopleCount,
+                        hours: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'min' && (seg.peopleCount ?? 0) > 0) {
+                      formula = t('session.formulaWatchingMin', {
+                        rate: money(seg.rate),
+                        people: seg.peopleCount,
+                        mins: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'hour') {
+                      formula = t('session.formulaHourly', {
+                        rate: money(seg.rate),
+                        hours: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else if (seg.quantityUnit === 'min') {
+                      formula = t('session.formulaMinute', {
+                        rate: money(seg.rate),
+                        mins: seg.quantity,
+                        amount: money(seg.amount),
+                      });
+                    } else {
+                      formula = `${money(seg.rate)} × ${seg.quantity} = ${money(seg.amount)}`;
+                    }
+                    return (
+                      <div key={`${seg.startedAt}-${idx}`} className="space-y-0.5 border-b border-border/40 py-1.5 last:border-0">
+                        <div className="flex justify-between gap-2 text-xs">
+                          <span className="min-w-0 font-medium leading-snug">{formula}</span>
+                          <span className="shrink-0 font-semibold">{money(seg.amount)}</span>
+                        </div>
+                        {seg.quantityUnit === 'match' && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerMatch')}: {money(seg.rate)} · {t('session.matchesCount')}: {seg.quantity}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'guest' && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerPerson')}: {money(seg.rate)} · {t('session.peopleCount')}: {seg.quantity}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'hour' && (seg.peopleCount ?? 0) > 0 && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.pricePerPerson')}: {money(seg.rate)} · {t('session.peopleCount')}: {seg.peopleCount} · {t('dashboard.consumedTime')}: {seg.quantity} {t('session.hoursShort')}
+                          </p>
+                        )}
+                        {seg.quantityUnit === 'hour' && !(seg.peopleCount ?? 0) && (
+                          <p className="text-[11px] text-muted">
+                            {t('session.hourlyRate')}: {money(seg.rate)} · {t('dashboard.consumedTime')}: {seg.quantity} {t('session.hoursShort')}
+                          </p>
+                        )}
                       </div>
-                      <p className="text-[11px] text-muted">
-                        {t('session.hourlyRate')}: {formatCurrency(seg.rate)}
-                        {seg.quantityUnit === 'match'
-                          ? ` · ${seg.quantity} ${t('dashboard.match')}`
-                          : seg.quantityUnit === 'hour'
-                            ? ` · ${seg.quantity} ${t('session.hoursShort')}`
-                            : ` · ${seg.quantity} ${seg.quantityUnit}`}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               {invoiceResult.roomSurchargeCost > 0 && (
@@ -1132,31 +1676,45 @@ export function DashboardPage() {
       <Modal
         open={!!convertModal}
         onClose={() => setConvertModal(null)}
-        title={
-          convertModal?.canConvertToGaming
-            ? t('dashboard.convertToGaming')
-            : t('dashboard.changePricing')
-        }
+        title={t('dashboard.changePricing')}
         footer={
           <>
             <Button variant="secondary" onClick={() => setConvertModal(null)}>{t('session.cancel')}</Button>
             <Button
               loading={loading}
-              disabled={!convertPlanId}
+              disabled={
+                !convertPlanId ||
+                (convertSelectedPlan?.sessionMode === SessionMode.Gaming && !convertControllers) ||
+                (convertSelectedPlan?.sessionMode === SessionMode.Watching && !convertWatchers)
+              }
               onClick={async () => {
-                if (!convertModal || !convertPlanId) return;
+                if (!convertModal || !convertPlanId || !convertSelectedPlan) return;
                 const leavingMatch = convertModal.timeUnit === TimeUnit.PerGame;
                 const matchCount = Number(convertMatchCount) || 0;
                 if (leavingMatch && matchCount < 1) {
                   setConvertError(t('session.matchCountRequired'));
                   return;
                 }
+                if (convertSelectedPlan.sessionMode === SessionMode.Watching) {
+                  const max = convertDevice?.maxWatchingCapacity ?? 20;
+                  if (convertWatchers < 1 || convertWatchers > max) {
+                    setConvertError(t('session.watchers'));
+                    return;
+                  }
+                }
                 setLoading(true);
                 setConvertError('');
                 try {
                   const updated = await sessionsApi.convert(convertModal.id, {
                     pricingPlanId: convertPlanId,
-                    controllerCount: convertControllers,
+                    controllerCount:
+                      convertSelectedPlan.sessionMode === SessionMode.Gaming
+                        ? convertControllers
+                        : undefined,
+                    watcherCount:
+                      convertSelectedPlan.sessionMode === SessionMode.Watching
+                        ? convertWatchers
+                        : undefined,
                     matchCount: leavingMatch ? matchCount : undefined,
                   });
                   onUpdate(updated);
@@ -1184,6 +1742,13 @@ export function DashboardPage() {
               })}
             </p>
           )}
+          {convertModal && convertModal.sessionMode === SessionMode.Gaming && (
+            <p className="text-xs text-muted">
+              {t('dashboard.convertGamingNote', {
+                cost: formatCurrency(convertModal.currentTimeCost),
+              })}
+            </p>
+          )}
           {convertModal && convertModal.timeUnit === TimeUnit.PerGame && (
             <Input
               label={t('session.matchCount')}
@@ -1198,64 +1763,219 @@ export function DashboardPage() {
             <select
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
               value={convertPlanId}
-              onChange={(e) => setConvertPlanId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                setConvertPlanId(id);
+                const plan = convertPlans.find((p) => p.id === id);
+                if (plan?.sessionMode === SessionMode.Watching && convertModal?.watcherCount) {
+                  setConvertWatchers(convertModal.watcherCount);
+                }
+              }}
             >
               <option value="">{t('session.pricingPlan')}</option>
-              {(gamingPlans ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.timeUnit === TimeUnit.PerGame
-                    ? ` · ${t('settings.perGame')}`
-                    : p.gamingRates[0]
-                      ? ` · ${formatCurrency(p.gamingRates[0].rate)}`
-                      : ''}
-                </option>
-              ))}
+              {convertPlans.map((p) => {
+                const modeLabel =
+                  p.sessionMode === SessionMode.Watching
+                    ? t('session.watching')
+                    : p.timeUnit === TimeUnit.PerGame
+                      ? t('settings.perGame')
+                      : t('session.gaming');
+                const rateHint =
+                  p.sessionMode === SessionMode.Watching
+                    ? p.watchingRates[0]
+                      ? ` · ${formatCurrency(p.watchingRates[0].ratePerPerson)}`
+                      : ''
+                    : p.timeUnit === TimeUnit.PerGame
+                      ? p.gamingRates[0]
+                        ? ` · ${formatCurrency(p.gamingRates[0].rate)}/${t('dashboard.match')}`
+                        : ''
+                      : p.gamingRates[0]
+                        ? ` · ${formatCurrency(p.gamingRates[0].rate)}/${t('session.hoursShort')}`
+                        : '';
+                return (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {modeLabel}
+                    {rateHint}
+                  </option>
+                );
+              })}
             </select>
           </div>
-          <div>
-            <p className="mb-2 text-sm text-muted">{t('dashboard.playMode')}</p>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant={convertControllers <= 2 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(2)}
-              >
-                {t('settings.individual')}
-                {(() => {
-                  const plan = (gamingPlans ?? []).find((p) => p.id === convertPlanId);
-                  const rate = plan?.gamingRates.find((r) => r.controllerCount === 1)?.rate;
-                  return rate != null ? ` · ${formatCurrency(rate)}` : '';
-                })()}
-              </Button>
-              <Button
-                size="sm"
-                variant={convertControllers >= 3 ? 'primary' : 'secondary'}
-                onClick={() => setConvertControllers(4)}
-              >
-                {t('settings.couple')}
-                {(() => {
-                  const plan = (gamingPlans ?? []).find((p) => p.id === convertPlanId);
-                  const rate = plan?.gamingRates.find((r) => r.controllerCount === 2)?.rate;
-                  return rate != null ? ` · ${formatCurrency(rate)}` : '';
-                })()}
-              </Button>
-            </div>
-            <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
-            <div className="flex gap-2">
-              {(convertControllers <= 2 ? [1, 2] : [3, 4]).map((n) => (
+
+          {convertSelectedPlan?.sessionMode === SessionMode.Gaming && (
+            <div>
+              <p className="mb-2 text-sm text-muted">{t('dashboard.playMode')}</p>
+              <div className="flex gap-2">
                 <Button
-                  key={n}
                   size="sm"
-                  variant={convertControllers === n ? 'primary' : 'secondary'}
-                  onClick={() => setConvertControllers(n)}
+                  variant={convertControllers <= 2 ? 'primary' : 'secondary'}
+                  onClick={() => setConvertControllers(2)}
                 >
-                  {n}
+                  {t('settings.individual')}
+                  {(() => {
+                    const rate = convertSelectedPlan.gamingRates.find((r) => r.controllerCount === 1)?.rate;
+                    return rate != null
+                      ? ` · ${formatCurrency(rate)}${convertSelectedPlan.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}`
+                      : '';
+                  })()}
                 </Button>
-              ))}
+                <Button
+                  size="sm"
+                  variant={convertControllers >= 3 ? 'primary' : 'secondary'}
+                  onClick={() => setConvertControllers(4)}
+                >
+                  {t('settings.couple')}
+                  {(() => {
+                    const rate = convertSelectedPlan.gamingRates.find((r) => r.controllerCount === 2)?.rate;
+                    return rate != null
+                      ? ` · ${formatCurrency(rate)}${convertSelectedPlan.timeUnit === TimeUnit.PerGame ? `/${t('dashboard.match')}` : `/${t('session.hoursShort')}`}`
+                      : '';
+                  })()}
+                </Button>
+              </div>
+              <p className="mt-2 mb-1 text-xs text-muted">{t('dashboard.controllers')}</p>
+              <div className="flex gap-2">
+                {(convertControllers <= 2 ? [1, 2] : [3, 4]).map((n) => (
+                  <Button
+                    key={n}
+                    size="sm"
+                    variant={convertControllers === n ? 'primary' : 'secondary'}
+                    onClick={() => setConvertControllers(n)}
+                  >
+                    {n}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {convertSelectedPlan?.sessionMode === SessionMode.Watching && (
+            <div>
+              <p className="mb-2 text-sm text-muted">{t('dashboard.watchMode')}</p>
+              {convertSelectedPlan.watchingRates[0] && (
+                <p className="mb-2 text-xs text-muted">
+                  {t('dashboard.ratePerHour', {
+                    rate: formatCurrency(convertSelectedPlan.watchingRates[0].ratePerPerson),
+                  })}
+                  {convertSelectedPlan.watchingBilling === WatchingBilling.PerPerson
+                    ? ` · ${t('settings.perPerson')}`
+                    : ` · ${t('settings.perScreen')}`}
+                </p>
+              )}
+              <Input
+                label={t('dashboard.watchers')}
+                type="number"
+                min={1}
+                max={convertDevice?.maxWatchingCapacity ?? 20}
+                value={convertWatchers}
+                onChange={(e) => setConvertWatchers(Math.max(1, Number(e.target.value) || 1))}
+              />
+            </div>
+          )}
           {convertError && <p className="text-sm text-danger">{convertError}</p>}
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!reserveModal}
+        onClose={() => {
+          setReserveModal(null);
+          setReserveError('');
+        }}
+        title={t('dashboard.reserveTitle')}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReserveModal(null);
+                setReserveSelectedCustomer(null);
+                setReserveCustomerSearch('');
+                setReserveError('');
+              }}
+            >
+              {t('session.cancel')}
+            </Button>
+            <Button
+              loading={reserveLoading}
+              disabled={!reserveSelectedCustomer}
+              onClick={handleReserveSubmit}
+            >
+              {t('dashboard.reserveSave')}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input
+            label={t('dashboard.reserveStartsAt')}
+            type="datetime-local"
+            value={reserveStartsAt}
+            onChange={(e) => setReserveStartsAt(e.target.value)}
+          />
+          <div className="space-y-2">
+            <Input
+              label={t('dashboard.reserveCustomer')}
+              value={reserveCustomerSearch}
+              onChange={(e) => {
+                setReserveCustomerSearch(e.target.value);
+                setReserveSelectedCustomer(null);
+              }}
+              placeholder={t('dashboard.reserveSearchCustomer')}
+              required
+            />
+            {reserveSelectedCustomer ? (
+              <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm">
+                <span className="font-medium">{reserveSelectedCustomer.name}</span>
+                <span className="ms-2 text-muted" dir="ltr">
+                  {reserveSelectedCustomer.phone}
+                </span>
+                <span className="ms-2 font-mono text-xs text-muted">{reserveSelectedCustomer.code}</span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ms-2"
+                  onClick={() => {
+                    setReserveSelectedCustomer(null);
+                    setReserveCustomerSearch('');
+                  }}
+                >
+                  {t('session.cancel')}
+                </Button>
+              </div>
+            ) : (
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                {(reserveCustomerResults?.items ?? []).length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-muted">{t('session.noCustomersFound')}</p>
+                ) : (
+                  (reserveCustomerResults?.items ?? []).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 border-b border-border px-3 py-2 text-start text-sm last:border-0 hover:bg-surface-hover"
+                      onClick={() => {
+                        setReserveSelectedCustomer(c);
+                        setReserveCustomerSearch(c.name);
+                      }}
+                    >
+                      <span className="font-medium">{c.name}</span>
+                      <span className="text-muted" dir="ltr">
+                        {c.phone}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <Input
+            label={t('dashboard.reserveNotes')}
+            value={reserveNotes}
+            onChange={(e) => setReserveNotes(e.target.value)}
+          />
+          {reserveError && (
+            <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{reserveError}</p>
+          )}
         </div>
       </Modal>
 
@@ -1263,6 +1983,7 @@ export function DashboardPage() {
         open={!!openModal}
         onClose={() => {
           setOpenModal(null);
+          setOpeningReservationId(null);
           setGuestType('none');
           setCustomerSearch('');
           setSelectedCustomer(null);
@@ -1276,6 +1997,7 @@ export function DashboardPage() {
               variant="secondary"
               onClick={() => {
                 setOpenModal(null);
+                setOpeningReservationId(null);
                 setGuestType('none');
                 setCustomerSearch('');
                 setSelectedCustomer(null);
@@ -1287,7 +2009,7 @@ export function DashboardPage() {
             <Button
               loading={loading}
               onClick={handleOpen}
-              disabled={guestType === 'registered' && !selectedCustomer}
+              disabled={!planId || (guestType === 'registered' && !selectedCustomer)}
             >
               {t('session.confirm')}
             </Button>
@@ -1295,6 +2017,11 @@ export function DashboardPage() {
         }
       >
         <div className="space-y-4">
+          {showReservationConflictBanner && (
+            <p className="rounded-lg border border-warning/40 bg-warning/15 px-3 py-2 text-sm text-warning">
+              {t('dashboard.reservationConflictBanner')}
+            </p>
+          )}
           <div className="flex gap-2">
             {[SessionMode.Gaming, SessionMode.Watching].map((m) => (
               <Button key={m} variant={mode === m ? 'primary' : 'secondary'} size="sm"

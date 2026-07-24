@@ -19,38 +19,40 @@ public class ReceivableService : IReceivableService
         _audit = audit;
     }
 
-    public async Task<IReadOnlyList<ReceivableDto>> GetAllAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<ReceivableDto>> GetAllAsync(Guid? customerId = null, CancellationToken ct = default)
     {
-        if (!_tenantContext.IsMaster)
-            throw new UnauthorizedAccessException("Receivables are visible to the master user only.");
+        EnsureCanView();
 
-        var query = _db.InvoicePayments
-            .Include(p => p.Invoice).ThenInclude(i => i.Branch)
-            .Where(p => p.Status == PaymentStatus.Deferred && p.PaymentMethod == PaymentMethod.Deferred);
+        var query = BaseDeferredQuery();
+        if (customerId.HasValue)
+        {
+            var customer = await _db.Customers.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == customerId.Value, ct);
+            if (customer is null)
+                return [];
 
-        if (_tenantContext.BranchId.HasValue)
-            query = query.Where(p => p.Invoice.BranchId == _tenantContext.BranchId.Value);
+            query = query.Where(p =>
+                p.CustomerId == customer.Id
+                || (p.DebtorPhone != null && p.DebtorPhone == customer.Phone));
+        }
 
         var payments = await query.OrderBy(p => p.CreatedAt).ToListAsync(ct);
+        return payments.Select(Map).ToList();
+    }
 
-        return payments.Select(p => new ReceivableDto(
-            p.Id,
-            p.InvoiceId,
-            p.Invoice.InvoiceNumber,
-            p.Amount,
-            p.DebtorName ?? "Unknown",
-            p.DebtorPhone,
-            p.CreatedAt,
-            (int)(DateTime.UtcNow - p.CreatedAt).TotalDays,
-            p.Invoice.BranchId,
-            p.Invoice.Branch.Name,
-            p.Invoice.InvoiceType)).ToList();
+    public async Task<ReceivableSummaryDto> GetSummaryAsync(CancellationToken ct = default)
+    {
+        EnsureCanView();
+
+        var query = BaseDeferredQuery();
+        var total = await query.SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+        var count = await query.CountAsync(ct);
+        return new ReceivableSummaryDto(total, count);
     }
 
     public async Task<ReceivableDto> CollectAsync(Guid paymentId, CollectReceivableRequest request, CancellationToken ct = default)
     {
-        if (!_tenantContext.IsMaster)
-            throw new UnauthorizedAccessException("Only the master user can collect receivables.");
+        EnsureCanCollect();
 
         if (request.CollectionMethod is PaymentMethod.BankTransfer or PaymentMethod.DigitalWallet)
         {
@@ -61,6 +63,10 @@ public class ReceivableService : IReceivableService
             .Include(p => p.Invoice).ThenInclude(i => i.Branch)
             .FirstOrDefaultAsync(p => p.Id == paymentId && p.Status == PaymentStatus.Deferred, ct)
             ?? throw new KeyNotFoundException("Deferred payment not found.");
+
+        if (!_tenantContext.IsMaster && _tenantContext.BranchId.HasValue
+            && payment.Invoice.BranchId != _tenantContext.BranchId.Value)
+            throw new UnauthorizedAccessException("Cannot collect receivables from another branch.");
 
         payment.Status = PaymentStatus.Collected;
         payment.CollectionMethod = request.CollectionMethod;
@@ -87,17 +93,53 @@ public class ReceivableService : IReceivableService
             request.CollectionMethod
         }, ct: ct);
 
-        return new ReceivableDto(
-            payment.Id,
-            payment.InvoiceId,
-            payment.Invoice.InvoiceNumber,
-            payment.Amount,
-            payment.DebtorName ?? "Unknown",
-            payment.DebtorPhone,
-            payment.CreatedAt,
-            0,
-            payment.Invoice.BranchId,
-            payment.Invoice.Branch.Name,
-            payment.Invoice.InvoiceType);
+        return Map(payment);
     }
+
+    private IQueryable<Domain.Entities.InvoicePayment> BaseDeferredQuery()
+    {
+        var query = _db.InvoicePayments
+            .Include(p => p.Invoice).ThenInclude(i => i.Branch)
+            .Where(p => p.Status == PaymentStatus.Deferred && p.PaymentMethod == PaymentMethod.Deferred);
+
+        if (!_tenantContext.IsMaster && _tenantContext.BranchId.HasValue)
+            query = query.Where(p => p.Invoice.BranchId == _tenantContext.BranchId.Value);
+
+        return query;
+    }
+
+    private void EnsureCanView()
+    {
+        if (_tenantContext.IsMaster || _tenantContext.IsSuperAdmin)
+            return;
+        if (_tenantContext.Permissions.Contains("Customers.View")
+            || _tenantContext.Permissions.Contains("Customers.Manage")
+            || _tenantContext.Permissions.Contains("Reports.View"))
+            return;
+        throw new UnauthorizedAccessException("Receivables require customers or reports access.");
+    }
+
+    private void EnsureCanCollect()
+    {
+        if (_tenantContext.IsMaster || _tenantContext.IsSuperAdmin)
+            return;
+        if (_tenantContext.Permissions.Contains("Customers.Manage"))
+            return;
+        throw new UnauthorizedAccessException("Only users who can manage customers can collect receivables.");
+    }
+
+    private static ReceivableDto Map(Domain.Entities.InvoicePayment p) =>
+        new(
+            p.Id,
+            p.InvoiceId,
+            p.Invoice.InvoiceNumber,
+            p.Amount,
+            p.DebtorName ?? "Unknown",
+            p.DebtorPhone,
+            p.CustomerId,
+            p.CreatedAt,
+            (int)(DateTime.UtcNow - p.CreatedAt).TotalDays,
+            p.Invoice.BranchId,
+            p.Invoice.Branch.Name,
+            p.Invoice.InvoiceType);
 }
