@@ -12,6 +12,7 @@ using PlayHub.Application.Common;
 using PlayHub.Application.Customers;
 using PlayHub.Application.Inventory;
 using PlayHub.Application.Notifications;
+using PlayHub.Application.Loyalty;
 using PlayHub.Application.Offers;
 using PlayHub.Application.Platform;
 using PlayHub.Application.Pricing;
@@ -62,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IOfferService, OfferService>();
+        services.AddScoped<ILoyaltyOfferService, LoyaltyOfferService>();
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IAlertDispatcher, AlertDispatcher>();
         services.AddScoped<IAlertSettingsService, AlertSettingsService>();
