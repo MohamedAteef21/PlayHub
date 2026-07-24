@@ -160,6 +160,13 @@ public enum ExpenseCategoryKind : short
     Revenue = 1
 }
 
+public enum ReservationStatus : short
+{
+    Pending = 1,
+    Started = 2,
+    Cancelled = 3
+}
+
 public enum NotificationType : short
 {
     LowStock = 1,
@@ -179,4 +186,54 @@ public enum NotificationChannel : short
     None = 0,
     Email = 1,
     WhatsApp = 2
+}
+
+/// <summary>What the customer must achieve to unlock a loyalty offer.</summary>
+public enum LoyaltyConditionMetric : short
+{
+    /// <summary>Accumulate play/watch hours (this session or lifetime depending on window).</summary>
+    PlayHours = 1,
+    /// <summary>Accumulate play hours within a rolling WindowDays period.</summary>
+    PlayHoursInDays = 2,
+    /// <summary>Accumulate match/game count.</summary>
+    Matches = 3,
+    /// <summary>Buy a quantity of a cafeteria item.</summary>
+    CafeteriaQuantity = 4
+}
+
+/// <summary>What the customer receives when the offer is earned.</summary>
+public enum LoyaltyRewardMetric : short
+{
+    FreeHours = 1,
+    FreeMatches = 2,
+    CafeteriaItem = 3
+}
+
+/// <summary>Restrict gaming offers to individual (1–2 controllers) or couple (3–4).</summary>
+public enum LoyaltyPlayerScope : short
+{
+    Any = 0,
+    Individual = 1,
+    Couple = 2
+}
+
+/// <summary>Apply reward on the qualifying session, or bank it as credit for later.</summary>
+public enum LoyaltyFulfillment : short
+{
+    ApplyNow = 1,
+    EarnCredit = 2
+}
+
+public enum LoyaltyConditionLogic : short
+{
+    All = 1,
+    Any = 2
+}
+
+public enum LoyaltyCreditStatus : short
+{
+    Available = 1,
+    FullyRedeemed = 2,
+    Expired = 3,
+    Voided = 4
 }

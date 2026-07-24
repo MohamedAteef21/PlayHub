@@ -17,9 +17,15 @@ public record RevenueReportDto(
     decimal TotalRevenue,
     decimal SessionRevenue,
     decimal CafeteriaRevenue,
+    decimal ManualRevenue,
     IReadOnlyList<DailyRevenueDto> Daily);
 
-public record DailyRevenueDto(DateOnly Date, decimal SessionRevenue, decimal CafeteriaRevenue, decimal Total);
+public record DailyRevenueDto(
+    DateOnly Date,
+    decimal SessionRevenue,
+    decimal CafeteriaRevenue,
+    decimal ManualRevenue,
+    decimal Total);
 
 /// <summary>Cash-drawer snapshot for one business day: what physically entered/left the till.</summary>
 public record CashDrawerDto(

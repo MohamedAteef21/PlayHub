@@ -25,6 +25,7 @@ public class Tenant : BaseEntity
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Customer> Customers { get; set; } = [];
     public ICollection<CustomerOffer> CustomerOffers { get; set; } = [];
+    public ICollection<LoyaltyOffer> LoyaltyOffers { get; set; } = [];
 }
 
 public class Branch : BaseEntity, ITenantEntity, ISoftDelete

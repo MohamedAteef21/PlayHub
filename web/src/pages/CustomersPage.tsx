@@ -2,11 +2,23 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { customersApi, offersApi, whatsappApi } from '@/api/client';
+import { customersApi, loyaltyOffersApi, offersApi, receivablesApi, whatsappApi } from '@/api/client';
 import { formatCurrency } from '@/hooks/useSessions';
+import { formatDateTimeEgypt } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
-import { WalletTransactionType, type Customer, type CustomerOffer } from '@/types';
+import {
+  LoyaltyRewardMetric,
+  PaymentMethod,
+  WalletTransactionType,
+  SessionMode,
+  SessionStatus,
+  type Customer,
+  type CustomerOffer,
+  type LoyaltyCredit,
+  type Receivable,
+} from '@/types';
+import { LoyaltyOffersPanel } from '@/components/LoyaltyOffersPanel';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -16,7 +28,7 @@ import { DataTable, PageHeader } from '@/components/ui/PageHelpers';
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 
-type Tab = 'customers' | 'offers';
+type Tab = 'customers' | 'offers' | 'loyalty';
 
 export function CustomersPage() {
   const { t } = useTranslation();
@@ -55,6 +67,14 @@ export function CustomersPage() {
   const [walletAmount, setWalletAmount] = useState('');
   const [walletBonus, setWalletBonus] = useState('');
   const [walletNote, setWalletNote] = useState('');
+  const [debtOnly, setDebtOnly] = useState(true);
+  const [settleCustomer, setSettleCustomer] = useState<Customer | null>(null);
+  const [settleMethod, setSettleMethod] = useState<number>(PaymentMethod.Cash);
+  const [collectingPaymentId, setCollectingPaymentId] = useState<string | null>(null);
+  const [creditsCustomer, setCreditsCustomer] = useState<Customer | null>(null);
+  const [sessionsCustomer, setSessionsCustomer] = useState<Customer | null>(null);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsPageSize, setSessionsPageSize] = useState(10);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -65,9 +85,38 @@ export function CustomersPage() {
   }, [search]);
 
   const { data: customersPage, isLoading: customersLoading } = useQuery({
-    queryKey: ['customers', debouncedQ, page, pageSize],
-    queryFn: () => customersApi.getAll(debouncedQ || undefined, page, pageSize),
-    enabled: canView && tab === 'customers',
+    queryKey: ['customers', debouncedQ, page, pageSize, debtOnly],
+    queryFn: () => customersApi.getAll(debouncedQ || undefined, page, pageSize, debtOnly),
+    // Debt list can load empty search; otherwise wait until the user types a name/phone/code.
+    enabled: canView && tab === 'customers' && (debtOnly || debouncedQ.trim().length >= 1),
+  });
+
+  const { data: customerDebts = [], isLoading: debtsLoading } = useQuery({
+    queryKey: ['receivables', settleCustomer?.id],
+    queryFn: () => receivablesApi.list(settleCustomer!.id),
+    enabled: !!settleCustomer,
+  });
+
+  const { data: loyaltyCredits = [], isLoading: creditsLoading } = useQuery({
+    queryKey: ['loyalty-credits', creditsCustomer?.id],
+    queryFn: () => loyaltyOffersApi.getCustomerCredits(creditsCustomer!.id, false),
+    enabled: !!creditsCustomer,
+  });
+
+  const collectDebtMutation = useMutation({
+    mutationFn: (paymentId: string) =>
+      receivablesApi.collect(paymentId, { collectionMethod: settleMethod }),
+    onSuccess: () => {
+      setMsg(t('customers.settleDebtDone'));
+      setCollectingPaymentId(null);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['receivables'] });
+      queryClient.invalidateQueries({ queryKey: ['receivables-summary'] });
+    },
+    onError: (e: Error) => {
+      setCollectingPaymentId(null);
+      setError(e.message || t('common.error'));
+    },
   });
 
   const { data: offers = [], isLoading: offersLoading } = useQuery({
@@ -184,6 +233,12 @@ export function CustomersPage() {
     enabled: !!walletCustomer,
   });
 
+  const { data: customerSessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['customer-sessions', sessionsCustomer?.id, sessionsPage, sessionsPageSize],
+    queryFn: () => customersApi.getSessions(sessionsCustomer!.id, sessionsPage, sessionsPageSize),
+    enabled: !!sessionsCustomer,
+  });
+
   const topUpMutation = useMutation({
     mutationFn: () =>
       customersApi.topUpWallet(walletCustomer!.id, {
@@ -267,24 +322,43 @@ export function CustomersPage() {
         >
           {t('customers.tabOffers')}
         </Button>
+        <Button
+          variant={tab === 'loyalty' ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => setTab('loyalty')}
+        >
+          {t('customers.tabLoyalty')}
+        </Button>
       </div>
 
       {msg && (
         <p className="mb-4 rounded-lg bg-success/10 px-3 py-2 text-sm text-success">{msg}</p>
       )}
-      {error && !customerOpen && !offerOpen && !sendOfferCustomer && !walletCustomer && (
+      {error && !customerOpen && !offerOpen && !sendOfferCustomer && !walletCustomer && !settleCustomer && (
         <p className="mb-4 text-sm text-danger">{error}</p>
       )}
 
       {tab === 'customers' && (
         <>
-          <div className="mb-4 max-w-md">
-            <Input
-              label={t('customers.search')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t('customers.searchPlaceholder')}
-            />
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <div className="min-w-[14rem] flex-1 max-w-md">
+              <Input
+                label={t('customers.search')}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('customers.searchPlaceholder')}
+              />
+            </div>
+            <Button
+              size="sm"
+              variant={debtOnly ? 'primary' : 'secondary'}
+              onClick={() => {
+                setDebtOnly((v) => !v);
+                setPage(1);
+              }}
+            >
+              {t('customers.debtOnly')}
+            </Button>
           </div>
 
           {customersLoading ? (
@@ -297,6 +371,7 @@ export function CustomersPage() {
                   t('customers.name'),
                   t('customers.phone'),
                   t('customers.walletBalance'),
+                  t('customers.debtAmount'),
                   t('customers.notes'),
                   t('common.status'),
                   t('customers.actions'),
@@ -304,8 +379,12 @@ export function CustomersPage() {
               >
                 {customers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                      {t('customers.empty')}
+                    <td colSpan={8} className="px-4 py-8 text-center text-muted">
+                      {debtOnly
+                        ? t('customers.debtEmpty')
+                        : debouncedQ.trim().length < 1
+                          ? t('customers.typeToSearch')
+                          : t('customers.empty')}
                     </td>
                   </tr>
                 ) : (
@@ -319,6 +398,11 @@ export function CustomersPage() {
                       <td className="px-4 py-3 font-medium text-accent">
                         {formatCurrency(c.walletBalance)}
                       </td>
+                      <td className="px-4 py-3 font-medium text-warning">
+                        {(c.outstandingDebtAmount ?? 0) > 0
+                          ? formatCurrency(c.outstandingDebtAmount)
+                          : '—'}
+                      </td>
                       <td className="max-w-[14rem] truncate px-4 py-3 text-muted">
                         {c.notes || '—'}
                       </td>
@@ -329,9 +413,46 @@ export function CustomersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
+                          {canManage && (c.outstandingDebtAmount ?? 0) > 0 && (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setMsg('');
+                                setError('');
+                                setSettleMethod(PaymentMethod.Cash);
+                                setSettleCustomer(c);
+                              }}
+                            >
+                              {t('customers.settleDebt')}
+                            </Button>
+                          )}
                           {canManage && (
                             <Button size="sm" variant="secondary" onClick={() => openEditCustomer(c)}>
                               {t('customers.edit')}
+                            </Button>
+                          )}
+                          {canView && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setCreditsCustomer(c);
+                                setError('');
+                              }}
+                            >
+                              {t('customers.credits')}
+                            </Button>
+                          )}
+                          {canView && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setSessionsPage(1);
+                                setSessionsCustomer(c);
+                              }}
+                            >
+                              {t('customers.sessionHistory')}
                             </Button>
                           )}
                           {canManage && (
@@ -458,6 +579,8 @@ export function CustomersPage() {
           )}
         </>
       )}
+
+      {tab === 'loyalty' && <LoyaltyOffersPanel canManage={canManageOffers} />}
 
       <Modal
         open={customerOpen}
@@ -637,6 +760,92 @@ export function CustomersPage() {
       </Modal>
 
       <Modal
+        open={!!settleCustomer}
+        onClose={() => {
+          setSettleCustomer(null);
+          setError('');
+          setCollectingPaymentId(null);
+        }}
+        title={
+          settleCustomer
+            ? t('customers.settleDebtFor', { name: settleCustomer.name })
+            : t('customers.settleDebt')
+        }
+        footer={
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setSettleCustomer(null);
+              setError('');
+            }}
+          >
+            {t('session.cancel')}
+          </Button>
+        }
+      >
+        {settleCustomer && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">
+              {t('customers.debtAmount')}:{' '}
+              <span className="font-semibold text-warning">
+                {formatCurrency(settleCustomer.outstandingDebtAmount ?? 0)}
+              </span>
+            </p>
+            <div>
+              <label className="mb-1 block text-sm text-muted">{t('customers.settleMethod')}</label>
+              <select
+                className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                value={settleMethod}
+                onChange={(e) => setSettleMethod(Number(e.target.value))}
+              >
+                <option value={PaymentMethod.Cash}>{t('payment.cash')}</option>
+                <option value={PaymentMethod.BankTransfer}>{t('payment.transfer')}</option>
+                <option value={PaymentMethod.DigitalWallet}>{t('payment.wallet')}</option>
+              </select>
+            </div>
+            {debtsLoading ? (
+              <PageLoader />
+            ) : customerDebts.length === 0 ? (
+              <p className="text-sm text-muted">{t('customers.settleNoDebts')}</p>
+            ) : (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {customerDebts.map((d: Receivable) => (
+                  <li
+                    key={d.paymentId}
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium">
+                        {t('customers.invoiceNumber')} {d.invoiceNumber}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {formatDateTimeEgypt(d.createdAt)} ·{' '}
+                        {t('customers.daysOutstanding', { count: d.daysOutstanding })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-warning">{formatCurrency(d.amount)}</span>
+                      <Button
+                        size="sm"
+                        loading={collectingPaymentId === d.paymentId && collectDebtMutation.isPending}
+                        onClick={() => {
+                          setCollectingPaymentId(d.paymentId);
+                          collectDebtMutation.mutate(d.paymentId);
+                        }}
+                      >
+                        {t('customers.settleCollect')}
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {error && <p className="text-sm text-danger">{error}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
         open={!!walletCustomer}
         onClose={() => {
           setWalletCustomer(null);
@@ -720,6 +929,188 @@ export function CustomersPage() {
               )}
             </div>
             {error && <p className="text-sm text-danger">{error}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!sessionsCustomer}
+        onClose={() => setSessionsCustomer(null)}
+        size="xl"
+        title={
+          sessionsCustomer
+            ? t('customers.sessionHistoryFor', { name: sessionsCustomer.name })
+            : t('customers.sessionHistory')
+        }
+        footer={
+          <Button variant="secondary" onClick={() => setSessionsCustomer(null)}>
+            {t('session.cancel')}
+          </Button>
+        }
+      >
+        {sessionsCustomer && (
+          <div className="space-y-3">
+            {sessionsLoading ? (
+              <PageLoader />
+            ) : !customerSessions || customerSessions.items.length === 0 ? (
+              <p className="text-sm text-muted">{t('customers.sessionHistoryEmpty')}</p>
+            ) : (
+              <>
+                <DataTable
+                  headers={[
+                    t('session.device'),
+                    t('session.mode'),
+                    t('customers.usage'),
+                    t('common.status'),
+                    t('session.started'),
+                    t('session.closedAt'),
+                    t('session.timeCost'),
+                    t('session.cafeteria'),
+                    t('session.total'),
+                  ]}
+                >
+                  {customerSessions.items.map((s) => {
+                    const usageParts: string[] = [];
+                    if (s.playHours != null && s.playHours > 0) {
+                      usageParts.push(`${s.playHours}${t('session.hoursShort')}`);
+                    }
+                    if (s.matchCount != null && s.matchCount > 0) {
+                      usageParts.push(`${s.matchCount} ${t('session.matchesCount')}`);
+                    }
+                    if (s.peopleCount != null && s.peopleCount > 0) {
+                      usageParts.push(`${s.peopleCount} ${t('session.peopleCount')}`);
+                    }
+                    if (s.sessionMode === SessionMode.Gaming && s.controllerCount != null) {
+                      usageParts.push(
+                        s.controllerCount <= 2 ? t('settings.individual') : t('settings.couple')
+                      );
+                    }
+                    const usage = usageParts.length ? usageParts.join(' · ') : '—';
+                    return (
+                    <tr key={s.id} className="hover:bg-surface-hover/50">
+                      <td className="px-3 py-2 font-medium">
+                        {s.deviceName}
+                        {s.roomName ? (
+                          <span className="block text-xs text-muted">{s.roomName}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2">
+                        {s.sessionMode === SessionMode.Gaming
+                          ? t('session.gaming')
+                          : t('session.watching')}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{usage}</td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          status={
+                            s.status === SessionStatus.Open
+                              ? 'gaming'
+                              : s.status === SessionStatus.Paused
+                                ? 'watching'
+                                : 'idle'
+                          }
+                        >
+                          {s.status === SessionStatus.Open
+                            ? t('dashboard.gaming')
+                            : s.status === SessionStatus.Paused
+                              ? t('dashboard.paused')
+                              : t('sessionHistory.closed')}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
+                        {formatDateTimeEgypt(s.startedAt)}
+                      </td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap" dir="ltr">
+                        {formatDateTimeEgypt(s.closedAt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {s.status === SessionStatus.Closed ? (
+                          <span>
+                            {s.playHours != null && s.playHours > 0
+                              ? `${s.playHours}${t('session.hoursShort')} · `
+                              : ''}
+                            {formatCurrency(s.timeCost)}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="px-3 py-2">{formatCurrency(s.cafeteriaCost)}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {s.status === SessionStatus.Closed ? formatCurrency(s.totalCost) : '—'}
+                      </td>
+                    </tr>
+                    );
+                  })}
+                </DataTable>
+                <Pagination
+                  page={sessionsPage}
+                  pageSize={sessionsPageSize}
+                  totalCount={customerSessions.totalCount}
+                  onPageChange={setSessionsPage}
+                  onPageSizeChange={(size) => {
+                    setSessionsPageSize(size);
+                    setSessionsPage(1);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!creditsCustomer}
+        onClose={() => setCreditsCustomer(null)}
+        title={
+          creditsCustomer
+            ? `${t('customers.credits')} — ${creditsCustomer.name}`
+            : t('customers.credits')
+        }
+        footer={
+          <Button variant="secondary" onClick={() => setCreditsCustomer(null)}>
+            {t('session.cancel')}
+          </Button>
+        }
+      >
+        {creditsCustomer && (
+          <div className="space-y-3">
+            {creditsLoading ? (
+              <PageLoader />
+            ) : loyaltyCredits.length === 0 ? (
+              <p className="text-sm text-muted">{t('customers.creditsEmpty')}</p>
+            ) : (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {loyaltyCredits.map((c: LoyaltyCredit) => {
+                  let rewardLabel = String(c.rewardMetric);
+                  if (c.rewardMetric === LoyaltyRewardMetric.FreeHours)
+                    rewardLabel = t('loyalty.rewardFreeHours');
+                  else if (c.rewardMetric === LoyaltyRewardMetric.FreeMatches)
+                    rewardLabel = t('loyalty.rewardFreeMatches');
+                  else if (c.rewardMetric === LoyaltyRewardMetric.CafeteriaItem)
+                    rewardLabel = c.cafeteriaItemName || t('loyalty.rewardCafeteria');
+                  return (
+                    <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
+                      <div>
+                        <p className="font-medium">{c.offerTitle}</p>
+                        <p className="text-xs text-muted">
+                          {rewardLabel} · {c.quantityRemaining}/{c.quantityOriginal}
+                        </p>
+                      </div>
+                      <Badge status={c.status === 1 ? 'gaming' : 'idle'}>
+                        {c.status === 1
+                          ? t('loyalty.creditAvailable')
+                          : c.status === 2
+                            ? t('loyalty.creditRedeemed')
+                            : c.status === 3
+                              ? t('loyalty.creditExpired')
+                              : t('loyalty.creditVoided')}
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         )}
       </Modal>

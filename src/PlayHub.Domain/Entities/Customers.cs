@@ -27,6 +27,7 @@ public class Customer : BaseEntity, ITenantEntity, ISoftDelete
     public User? CreatedByUser { get; set; }
     public ICollection<Session> Sessions { get; set; } = [];
     public ICollection<WalletTransaction> WalletTransactions { get; set; } = [];
+    public ICollection<LoyaltyCredit> LoyaltyCredits { get; set; } = [];
 }
 
 public enum WalletTransactionType : short

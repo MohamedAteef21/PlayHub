@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PlayHub.Api.Authorization;
 using PlayHub.Application.Receivables;
 
 namespace PlayHub.Api.Controllers;
@@ -14,11 +15,26 @@ public class ReceivablesController : ControllerBase
     public ReceivablesController(IReceivableService receivableService) => _receivableService = receivableService;
 
     [HttpGet]
-    public async Task<IActionResult> GetAll(CancellationToken ct)
+    [Authorize(Policy = PermissionPolicies.CustomersView)]
+    public async Task<IActionResult> GetAll([FromQuery] Guid? customerId, CancellationToken ct)
     {
         try
         {
-            return Ok(await _receivableService.GetAllAsync(ct));
+            return Ok(await _receivableService.GetAllAsync(customerId, ct));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpGet("summary")]
+    [Authorize(Policy = PermissionPolicies.CustomersView)]
+    public async Task<IActionResult> GetSummary(CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _receivableService.GetSummaryAsync(ct));
         }
         catch (UnauthorizedAccessException)
         {
@@ -27,6 +43,7 @@ public class ReceivablesController : ControllerBase
     }
 
     [HttpPost("{paymentId:guid}/collect")]
+    [Authorize(Policy = PermissionPolicies.CustomersManage)]
     public async Task<IActionResult> Collect(Guid paymentId, [FromBody] CollectReceivableRequest request, CancellationToken ct)
     {
         try
