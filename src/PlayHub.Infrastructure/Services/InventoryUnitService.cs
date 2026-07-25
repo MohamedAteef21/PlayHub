@@ -43,6 +43,26 @@ public class InventoryUnitService : IInventoryUnitService
             throw new InvalidOperationException("Unit name is required.");
 
         var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+
+        // Reactivate a soft-deleted unit with the same name instead of failing on the unique index.
+        var deleted = await _db.InventoryUnits
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                u => u.TenantId == _tenantContext.TenantId
+                     && u.OwnerUserId == ownerId
+                     && u.Name == name
+                     && u.IsDeleted, ct);
+        if (deleted is not null)
+        {
+            deleted.RestoreFromDeleted();
+            deleted.IsActive = true;
+            deleted.NameAr = nameAr;
+            await _db.SaveChangesAsync(ct);
+            await _audit.LogAsync("InventoryUnit.Restored", "InventoryUnit", deleted.Id, new { deleted.Name }, ct: ct);
+            return new InventoryUnitDto(deleted.Id, deleted.Name, deleted.NameAr, deleted.IsActive, deleted.CreatedAt);
+        }
+
         var exists = await _db.InventoryUnits.AnyAsync(
             u => u.TenantId == _tenantContext.TenantId
                  && u.OwnerUserId == ownerId
@@ -55,7 +75,7 @@ public class InventoryUnitService : IInventoryUnitService
             TenantId = _tenantContext.TenantId,
             OwnerUserId = ownerId,
             Name = name,
-            NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
+            NameAr = nameAr,
             IsActive = true
         };
         _db.InventoryUnits.Add(unit);
