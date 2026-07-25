@@ -1285,7 +1285,12 @@ export function InventoryPage() {
                 checked={itemKind === CafeteriaItemKind.SellAsIs}
                 onChange={(e) => {
                   if (editingItem) return;
-                  setItemKind(e.target.checked ? CafeteriaItemKind.SellAsIs : CafeteriaItemKind.Menu);
+                  const sellAsIs = e.target.checked;
+                  setItemKind(sellAsIs ? CafeteriaItemKind.SellAsIs : CafeteriaItemKind.Menu);
+                  setLinkedWarehouseItemId('');
+                  setBaseSellPrice('');
+                  setLargeSellPrice('');
+                  setVariantRows(sellAsIs ? [] : [newVariantRow()]);
                   setError('');
                 }}
                 disabled={!!editingItem}
@@ -1378,14 +1383,84 @@ export function InventoryPage() {
             </>
           )}
 
+          {formContext === 'menu' && itemKind === CafeteriaItemKind.SellAsIs && (
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+              <div>
+                <label className="mb-1 block text-sm text-muted">{t('inventory.linkWarehouseItem')}</label>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                  value={linkedWarehouseItemId}
+                  onChange={(e) => {
+                    setLinkedWarehouseItemId(e.target.value);
+                    setLargeSellPrice('');
+                  }}
+                >
+                  <option value="">{t('inventory.selectWarehouseItem')}</option>
+                  {warehouseItems
+                    .filter((w) => w.isActive || w.id === linkedWarehouseItemId)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {itemLabel(w)} ({w.baseUnitName}
+                        {w.largeUnitName ? ` / ${w.largeUnitName}` : ''}) — {w.currentQuantity}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <Input
+                label={
+                  selectedLinkedWarehouseItem?.baseUnitName
+                    ? t('inventory.baseSellPriceWithUnit', {
+                        unit: selectedLinkedWarehouseItem.baseUnitName,
+                      })
+                    : t('inventory.baseSellPrice')
+                }
+                type="number"
+                min={0}
+                step="0.01"
+                value={baseSellPrice}
+                onChange={(e) => setBaseSellPrice(e.target.value)}
+              />
+              {selectedLinkedWarehouseItem?.largeUnitName ? (
+                <>
+                  <Input
+                    label={t('inventory.largeSellPriceWithUnit', {
+                      unit: selectedLinkedWarehouseItem.largeUnitName,
+                    })}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={largeSellPrice}
+                    onChange={(e) => setLargeSellPrice(e.target.value)}
+                  />
+                  <p className="text-xs text-muted">{t('inventory.largeUnitPriceNeeded')}</p>
+                </>
+              ) : linkedWarehouseItemId ? (
+                <p className="text-xs text-muted">{t('inventory.noLargeUnitOnItem')}</p>
+              ) : (
+                <Input
+                  label={t('inventory.largeSellPrice')}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={largeSellPrice}
+                  onChange={(e) => setLargeSellPrice(e.target.value)}
+                  disabled
+                />
+              )}
+            </div>
+          )}
+
           {formContext === 'menu' && (
             <>
-              <Input
-                label={t('inventory.threshold')}
-                type="number"
-                value={itemThreshold}
-                onChange={(e) => setItemThreshold(e.target.value)}
-              />
+              {itemKind === CafeteriaItemKind.Menu && (
+                <Input
+                  label={t('inventory.threshold')}
+                  type="number"
+                  value={itemThreshold}
+                  onChange={(e) => setItemThreshold(e.target.value)}
+                />
+              )}
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -1394,50 +1469,6 @@ export function InventoryPage() {
                 />
                 {t('common.active')}
               </label>
-              {itemKind === CafeteriaItemKind.SellAsIs && (
-                <div className="space-y-3 rounded-lg border border-border p-3">
-                  <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
-                  <div>
-                    <label className="mb-1 block text-sm text-muted">{t('inventory.linkWarehouseItem')}</label>
-                    <select
-                      className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
-                      value={linkedWarehouseItemId}
-                      onChange={(e) => {
-                        setLinkedWarehouseItemId(e.target.value);
-                        setLargeSellPrice('');
-                      }}
-                    >
-                      <option value="">{t('inventory.selectWarehouseItem')}</option>
-                      {warehouseItems
-                        .filter((w) => w.isActive || w.id === linkedWarehouseItemId)
-                        .map((w) => (
-                          <option key={w.id} value={w.id}>
-                            {itemLabel(w)} ({w.baseUnitName}
-                            {w.largeUnitName ? ` / ${w.largeUnitName}` : ''})
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <Input
-                    label={t('inventory.baseSellPrice')}
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={baseSellPrice}
-                    onChange={(e) => setBaseSellPrice(e.target.value)}
-                  />
-                  {selectedLinkedWarehouseItem?.largeUnitName && (
-                    <Input
-                      label={t('inventory.largeSellPrice', { unit: selectedLinkedWarehouseItem.largeUnitName })}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={largeSellPrice}
-                      onChange={(e) => setLargeSellPrice(e.target.value)}
-                    />
-                  )}
-                </div>
-              )}
             </>
           )}
 
