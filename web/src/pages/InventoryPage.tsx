@@ -95,9 +95,6 @@ export function InventoryPage() {
   const user = useAuthStore((s) => s.user);
   const activeBranchId = useAuthStore((s) => s.activeBranchId);
   const [tab, setTab] = useState<Tab>('warehouse');
-  const [adjustItem, setAdjustItem] = useState<CafeteriaItem | null>(null);
-  const [newQty, setNewQty] = useState('');
-  const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [voucherType, setVoucherType] = useState<number>(StockVoucherType.StockIn);
   const [voucherOpen, setVoucherOpen] = useState(false);
@@ -190,19 +187,6 @@ export function InventoryPage() {
   });
   const vouchers = vouchersPage?.items ?? [];
 
-  const adjustMutation = useMutation({
-    mutationFn: () => inventoryApi.adjust(adjustItem!.id, Number(newQty), reason),
-    onSuccess: () => {
-      setAdjustItem(null);
-      setNewQty('');
-      setReason('');
-      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
-      queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
   function buildVariantsPayload(includeRecipes: boolean) {
     return variantRows
       .filter((row) => row.name.trim())
@@ -227,6 +211,16 @@ export function InventoryPage() {
 
   const saveItemMutation = useMutation({
     mutationFn: () => {
+      if (nameHasDigits(itemName) || (itemNameAr.trim() && nameHasDigits(itemNameAr))) {
+        throw new Error(t('inventory.nameNoDigits'));
+      }
+      if (
+        (itemKind === CafeteriaItemKind.SellAsIs || itemKind === CafeteriaItemKind.Menu) &&
+        variantRows.some((row) => row.name.trim() && nameHasDigits(row.name))
+      ) {
+        throw new Error(t('inventory.nameNoDigits'));
+      }
+
       const includeRecipes = formContext === 'menu' && itemKind === CafeteriaItemKind.Menu;
       const needsVariants =
         itemKind === CafeteriaItemKind.SellAsIs ||
@@ -624,9 +618,17 @@ export function InventoryPage() {
     );
   }
 
+  function nameHasDigits(value: string) {
+    return /\d/.test(value) || /[٠-٩]/.test(value);
+  }
+
   function validVariantRows() {
     return variantRows.filter(
-      (row) => row.name.trim() && row.sellPrice !== '' && !Number.isNaN(Number(row.sellPrice))
+      (row) =>
+        row.name.trim() &&
+        !nameHasDigits(row.name) &&
+        row.sellPrice !== '' &&
+        !Number.isNaN(Number(row.sellPrice))
     );
   }
 
@@ -635,7 +637,8 @@ export function InventoryPage() {
   }
 
   function canSaveItem() {
-    if (!itemName.trim()) return false;
+    if (!itemName.trim() || nameHasDigits(itemName)) return false;
+    if (itemNameAr.trim() && nameHasDigits(itemNameAr)) return false;
     if (formContext === 'warehouse' && isStockKind(itemKind) && !baseUnitId) return false;
     if (needsVariants() && validVariantRows().length === 0) return false;
     return true;
@@ -794,20 +797,6 @@ export function InventoryPage() {
                 <td className="px-4 py-3">{formatCurrency(itemStockValue(item))}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
-                    {canAdjust && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setAdjustItem(item);
-                          setNewQty(String(item.currentQuantity));
-                          setReason('');
-                          setError('');
-                        }}
-                      >
-                        {t('inventory.adjust')}
-                      </Button>
-                    )}
                     {canManageItems && (
                       <>
                         <Button variant="ghost" size="sm" onClick={() => openEditItem(item, 'warehouse')}>
@@ -1086,30 +1075,6 @@ export function InventoryPage() {
           </>
         ))}
 
-      <Modal open={!!adjustItem} onClose={() => setAdjustItem(null)} title={t('inventory.adjustStock')}>
-        {adjustItem && (
-          <div className="space-y-4">
-            <p className="font-medium">{itemLabel(adjustItem)}</p>
-            <Input
-              label={t('inventory.newQty')}
-              type="number"
-              value={newQty}
-              onChange={(e) => setNewQty(e.target.value)}
-            />
-            <Input label={t('inventory.reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
-            {error && <p className="text-sm text-danger">{error}</p>}
-            <Button
-              className="w-full"
-              loading={adjustMutation.isPending}
-              disabled={!reason.trim()}
-              onClick={() => adjustMutation.mutate()}
-            >
-              {t('common.save')}
-            </Button>
-          </div>
-        )}
-      </Modal>
-
       <Modal
         open={voucherOpen}
         onClose={() => setVoucherOpen(false)}
@@ -1208,8 +1173,16 @@ export function InventoryPage() {
             label={t('inventory.itemNameAr')}
             value={itemNameAr}
             onChange={(e) => setItemNameAr(e.target.value)}
+            error={
+              itemNameAr.trim() && nameHasDigits(itemNameAr) ? t('inventory.nameNoDigits') : undefined
+            }
           />
-          <Input label={t('inventory.itemName')} value={itemName} onChange={(e) => setItemName(e.target.value)} />
+          <Input
+            label={t('inventory.itemName')}
+            value={itemName}
+            onChange={(e) => setItemName(e.target.value)}
+            error={itemName.trim() && nameHasDigits(itemName) ? t('inventory.nameNoDigits') : undefined}
+          />
 
           {formContext === 'warehouse' && isStockKind(itemKind) && (
             <>
@@ -1311,6 +1284,7 @@ export function InventoryPage() {
                   {t('inventory.addVariant')}
                 </Button>
               </div>
+              <p className="text-xs text-muted">{t('inventory.productNameHint')}</p>
               {variantRows.map((row, index) => (
                 <div key={row.key} className="space-y-2 rounded-lg border border-border p-3">
                   <div className="flex flex-wrap items-end gap-2">
@@ -1323,6 +1297,11 @@ export function InventoryPage() {
                         }
                         value={row.name}
                         onChange={(e) => updateVariantRow(row.key, { name: e.target.value })}
+                        error={
+                          row.name.trim() && nameHasDigits(row.name)
+                            ? t('inventory.nameNoDigits')
+                            : undefined
+                        }
                       />
                     </div>
                     <div className="w-28">

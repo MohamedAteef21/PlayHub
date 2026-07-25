@@ -8,7 +8,7 @@ import { DataTable, DateRangeBar, PageHeader } from '@/components/ui/PageHelpers
 import { PageLoader } from '@/components/ui/PageLoader';
 import { Pagination } from '@/components/ui/Pagination';
 import { formatCurrency } from '@/hooks/useSessions';
-import { startOfMonth, today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
+import { formatDateTimeEgypt, startOfMonth, today, toIsoDate, toIsoDateEnd } from '@/lib/dates';
 import { hasPermission, Permissions } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import { SessionMode, SessionStatus } from '@/types';
@@ -40,8 +40,7 @@ export function SessionHistoryPage() {
   const rows = data?.items ?? [];
 
   function fmt(iso: string | null | undefined) {
-    if (!iso) return '—';
-    return new Date(iso).toLocaleString(locale);
+    return formatDateTimeEgypt(iso, locale ?? 'ar-EG');
   }
 
   function changeRange(nextFrom: string, nextTo: string) {

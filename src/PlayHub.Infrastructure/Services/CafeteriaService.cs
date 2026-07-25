@@ -63,6 +63,8 @@ public class CafeteriaService : ICafeteriaService
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var kind = request.Kind;
         var tracksStock = kind is CafeteriaItemKind.Warehouse or CafeteriaItemKind.SellAsIs;
+        var name = RequireTextName(request.Name, "Item name");
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : RequireTextName(request.NameAr, "Arabic item name");
 
         var (baseUnit, largeUnit, unitsPerLarge) = tracksStock
             ? await ResolveUnitsAsync(request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct)
@@ -72,12 +74,48 @@ public class CafeteriaService : ICafeteriaService
             ? []
             : NormalizeVariants(request.Variants);
 
+        // Soft-deleted item with same name → restore instead of "already exists" / duplicate feel.
+        var deleted = await _db.CafeteriaItems
+            .IgnoreQueryFilters()
+            .Include(i => i.Variants).ThenInclude(v => v.RecipeLines)
+            .FirstOrDefaultAsync(
+                i => i.BranchId == branchId
+                     && i.IsDeleted
+                     && i.Name == name
+                     && i.Kind == kind, ct);
+        if (deleted is not null)
+        {
+            deleted.RestoreFromDeleted();
+            deleted.IsActive = true;
+            deleted.NameAr = nameAr;
+            deleted.MinThreshold = Math.Max(0, request.MinThreshold);
+            deleted.Kind = kind;
+            deleted.BaseUnitName = baseUnit;
+            deleted.LargeUnitName = largeUnit;
+            deleted.UnitsPerLarge = unitsPerLarge;
+            deleted.SellPrice = variants.Count > 0 ? variants.Min(v => v.SellPrice) : Math.Max(0, request.SellPrice);
+            if (kind != CafeteriaItemKind.Warehouse)
+                await ReplaceVariantsAsync(branchId, deleted, variants, ct);
+            await _db.SaveChangesAsync(ct);
+            await _audit.LogAsync("CafeteriaItem.Restored", "CafeteriaItem", deleted.Id,
+                new { deleted.Name, deleted.Kind }, ct: ct);
+            if (tracksStock)
+                await _lowStock.CheckAndNotifyAsync(deleted, ct);
+            await _db.SaveChangesAsync(ct);
+            return await GetItemByIdAsync(deleted.Id, ct) ?? MapItem(deleted);
+        }
+
+        var activeExists = await _db.CafeteriaItems.AnyAsync(
+            i => i.BranchId == branchId && i.Name == name && i.Kind == kind, ct);
+        if (activeExists)
+            throw new InvalidOperationException("An item with this name already exists.");
+
         var stock = 0;
         if (tracksStock && request.CurrentQuantity > 0)
         {
             var temp = new CafeteriaItem
             {
-                Name = request.Name.Trim(),
+                Name = name,
                 LargeUnitName = largeUnit,
                 UnitsPerLarge = unitsPerLarge
             };
@@ -90,8 +128,8 @@ public class CafeteriaService : ICafeteriaService
         {
             TenantId = _tenantContext.TenantId,
             BranchId = branchId,
-            Name = request.Name.Trim(),
-            NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
+            Name = name,
+            NameAr = nameAr,
             SellPrice = minPrice,
             CurrentQuantity = stock,
             MinThreshold = Math.Max(0, request.MinThreshold),
@@ -157,6 +195,8 @@ public class CafeteriaService : ICafeteriaService
         var oldBase = item.BaseUnitName;
         var oldLarge = item.LargeUnitName;
         var oldFactor = item.UnitsPerLarge;
+        var name = RequireTextName(request.Name, "Item name");
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : RequireTextName(request.NameAr, "Arabic item name");
 
         var (baseUnit, largeUnit, unitsPerLarge) = tracksStock
             ? await ResolveUnitsAsync(request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct)
@@ -166,8 +206,13 @@ public class CafeteriaService : ICafeteriaService
             ? []
             : NormalizeVariants(request.Variants);
 
-        item.Name = request.Name.Trim();
-        item.NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+        var nameTaken = await _db.CafeteriaItems.AnyAsync(
+            i => i.BranchId == branchId && i.Id != id && i.Name == name && i.Kind == kind, ct);
+        if (nameTaken)
+            throw new InvalidOperationException("An item with this name already exists.");
+
+        item.Name = name;
+        item.NameAr = nameAr;
         item.MinThreshold = Math.Max(0, request.MinThreshold);
         item.IsActive = request.IsActive;
         item.Kind = kind;
@@ -849,23 +894,32 @@ public class CafeteriaService : ICafeteriaService
     private static List<UpsertCafeteriaItemVariantRequest> NormalizeVariants(IReadOnlyList<UpsertCafeteriaItemVariantRequest>? variants)
     {
         if (variants is null || variants.Count == 0)
-            throw new InvalidOperationException("At least one variant (name + price) is required for sellable products.");
+            throw new InvalidOperationException("At least one product name + price is required for sellable products.");
 
         var list = new List<UpsertCafeteriaItemVariantRequest>();
         var order = 0;
         foreach (var v in variants)
         {
-            var name = v.Name?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(name))
-                throw new InvalidOperationException("Variant name is required.");
+            var name = RequireTextName(v.Name, "Product name");
             if (v.SellPrice < 0)
-                throw new InvalidOperationException("Variant price cannot be negative.");
+                throw new InvalidOperationException("Product price cannot be negative.");
 
             list.Add(new UpsertCafeteriaItemVariantRequest(
                 v.Id, name, v.SellPrice, v.IsActive, order++, v.RecipeLines));
         }
 
         return list;
+    }
+
+    /// <summary>Names must be non-empty text without digits (Latin or Arabic-Indic).</summary>
+    private static string RequireTextName(string? value, string fieldLabel)
+    {
+        var name = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+            throw new InvalidOperationException($"{fieldLabel} is required.");
+        if (name.Any(char.IsDigit))
+            throw new InvalidOperationException($"{fieldLabel} cannot contain numbers.");
+        return name;
     }
 
     private async Task ReplaceVariantsAsync(

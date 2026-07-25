@@ -43,7 +43,7 @@ public record UpdateCustomerRequest(
 public interface ICustomerService
 {
     Task<PagedResult<CustomerDto>> SearchAsync(
-        string? q = null, int page = 1, int pageSize = 20, CancellationToken ct = default);
+        string? q = null, int page = 1, int pageSize = 20, bool withOutstandingDebt = false, CancellationToken ct = default);
     Task<CustomerDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct = default);
     Task<CustomerDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken ct = default);

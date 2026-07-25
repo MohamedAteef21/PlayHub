@@ -43,6 +43,22 @@ public class SessionCostCalculator : ISessionCostCalculator
             .FirstOrDefault();
     }
 
+    public decimal GetWatchingRatePerPerson(string rateSnapshotJson)
+    {
+        var snapshot = Deserialize(rateSnapshotJson);
+        return snapshot?.WatchingRates.FirstOrDefault()?.RatePerPerson ?? 0;
+    }
+
+    public WatchingBilling? GetWatchingBilling(string rateSnapshotJson)
+    {
+        var snapshot = Deserialize(rateSnapshotJson);
+        if (snapshot is null)
+            return null;
+        return snapshot.WatchingBilling == 0
+            ? WatchingBilling.PerPerson
+            : snapshot.WatchingBilling;
+    }
+
     public decimal CalculateTimeCost(
         string rateSnapshotJson,
         SessionMode mode,

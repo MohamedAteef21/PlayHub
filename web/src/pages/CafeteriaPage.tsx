@@ -513,7 +513,9 @@ export function CafeteriaPage() {
         <Card className="h-fit">
           <p className="mb-3 font-medium">{t('cafeteria.cart')}</p>
           {cart.length === 0 ? (
-            <p className="text-sm text-muted">{t('cafeteria.emptyCart')}</p>
+            <p className="text-sm text-muted">
+              {saleMode === 'waiting' ? t('cafeteria.waitingEmptyCart') : t('cafeteria.emptyCart')}
+            </p>
           ) : (
             <div className="space-y-3">
               {cart.map((l) => (
@@ -553,7 +555,7 @@ export function CafeteriaPage() {
                 </div>
               ))}
               <div className="flex items-center justify-between border-t border-border pt-3">
-                <span className="font-medium">{t('common.total')}</span>
+                <span className="font-medium">{t('cafeteria.total')}</span>
                 <span className="font-semibold">{formatCurrency(cartTotal)}</span>
               </div>
               <Button className="w-full" disabled={!canSell} onClick={() => setCheckoutOpen(true)}>
@@ -639,9 +641,9 @@ export function CafeteriaPage() {
             {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setPickItem(null)}>
-                {t('common.cancel')}
+                {t('cafeteria.cancel')}
               </Button>
-              <Button onClick={confirmPick}>{t('common.add')}</Button>
+              <Button onClick={confirmPick}>{t('cafeteria.addToCart')}</Button>
             </div>
           </div>
         )}
@@ -682,7 +684,7 @@ export function CafeteriaPage() {
           )}
           {saleMode === 'walkin' && (
             <>
-              <label className="mb-1 block text-sm text-muted">{t('common.paymentMethod')}</label>
+              <label className="mb-1 block text-sm text-muted">{t('session.paymentMethod')}</label>
               <select
                 className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                 value={paymentMethod}
@@ -706,10 +708,10 @@ export function CafeteriaPage() {
           {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setCheckoutOpen(false)}>
-              {t('common.cancel')}
+              {t('cafeteria.cancel')}
             </Button>
             <Button loading={saleMutation.isPending} onClick={() => saleMutation.mutate()}>
-              {saleMode === 'waiting' ? t('cafeteria.createHold') : t('common.confirm')}
+              {saleMode === 'waiting' ? t('cafeteria.createHold') : t('cafeteria.confirm')}
             </Button>
           </div>
         </div>
@@ -726,7 +728,7 @@ export function CafeteriaPage() {
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
           />
-          <label className="mb-1 block text-sm text-muted">{t('common.paymentMethod')}</label>
+          <label className="mb-1 block text-sm text-muted">{t('session.paymentMethod')}</label>
           <select
             className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
             value={paymentMethod}
@@ -747,13 +749,13 @@ export function CafeteriaPage() {
           {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setHoldConvertId(null)}>
-              {t('common.cancel')}
+              {t('cafeteria.cancel')}
             </Button>
             <Button
               loading={convertHoldMutation.isPending}
               onClick={() => holdConvertId && convertHoldMutation.mutate(holdConvertId)}
             >
-              {t('common.confirm')}
+              {t('cafeteria.confirm')}
             </Button>
           </div>
         </div>
@@ -781,7 +783,7 @@ export function CafeteriaPage() {
           {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setHoldAttachId(null)}>
-              {t('common.cancel')}
+              {t('cafeteria.cancel')}
             </Button>
             <Button
               loading={attachHoldMutation.isPending}
@@ -791,7 +793,7 @@ export function CafeteriaPage() {
                 attachHoldMutation.mutate({ holdId: holdAttachId, sessionId: holdAttachSessionId })
               }
             >
-              {t('common.confirm')}
+              {t('cafeteria.confirm')}
             </Button>
           </div>
         </div>
@@ -818,7 +820,7 @@ export function CafeteriaPage() {
             </ul>
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setMissingDialog(null)}>
-                {t('common.cancel')}
+                {t('cafeteria.cancel')}
               </Button>
               <Button
                 loading={saleMutation.isPending}

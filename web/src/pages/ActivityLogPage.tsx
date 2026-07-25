@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi, usersApi } from '@/api/client';
-import { parseServerUtc } from '@/hooks/useSessions';
+import { formatDateTimeEgypt } from '@/lib/dates';
 import { useAuthStore } from '@/store';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -182,15 +182,11 @@ export function ActivityLogPage() {
             ]}
           >
             {logs.map((log) => {
-              const ts = parseServerUtc(log.timestamp);
               const details = formatDetails(log.details);
               return (
                 <tr key={log.id} className="hover:bg-surface-hover">
-                  <td className="whitespace-nowrap px-4 py-3 text-sm text-muted">
-                    {new Date(ts).toLocaleDateString()}{' '}
-                    <span className="text-text">
-                      {new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                  <td className="whitespace-nowrap px-4 py-3 text-sm text-muted" dir="ltr">
+                    {formatDateTimeEgypt(log.timestamp)}
                   </td>
                   <td className="px-4 py-3 font-medium">{log.userName}</td>
                   <td className="px-4 py-3">
