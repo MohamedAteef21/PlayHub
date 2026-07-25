@@ -19,11 +19,18 @@ public class CafeteriaItem : BaseEntity, IBranchEntity, ISoftDelete
     public string BaseUnitName { get; set; } = "قطعة";
     public string? LargeUnitName { get; set; }
     public int UnitsPerLarge { get; set; } = 1;
+    /// <summary>Sell-as-is composition: warehouse SKU that stock is deducted from.</summary>
+    public Guid? LinkedWarehouseItemId { get; set; }
+    /// <summary>Sell-as-is: price when selling one base unit.</summary>
+    public decimal? BaseSellPrice { get; set; }
+    /// <summary>Sell-as-is: price when selling one large unit (optional).</summary>
+    public decimal? LargeSellPrice { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }
     public Guid? DeletedByUserId { get; set; }
 
     public Branch Branch { get; set; } = null!;
+    public CafeteriaItem? LinkedWarehouseItem { get; set; }
     public ICollection<CafeteriaItemVariant> Variants { get; set; } = [];
 }
 
@@ -40,12 +47,13 @@ public class CafeteriaItemVariant : BaseEntity
     public ICollection<CafeteriaVariantRecipeLine> RecipeLines { get; set; } = [];
 }
 
-/// <summary>Ingredient line on a variant recipe. Quantity is per one sold portion, in warehouse base units.</summary>
+/// <summary>Ingredient line on a variant recipe. Quantity is per one sold portion in <see cref="Unit"/>.</summary>
 public class CafeteriaVariantRecipeLine : BaseEntity
 {
     public Guid VariantId { get; set; }
     public Guid WarehouseItemId { get; set; }
     public int Quantity { get; set; }
+    public InventoryUnitKind Unit { get; set; } = InventoryUnitKind.Base;
 
     public CafeteriaItemVariant Variant { get; set; } = null!;
     public CafeteriaItem WarehouseItem { get; set; } = null!;
@@ -60,6 +68,7 @@ public class CafeteriaAddOn : BaseEntity, IBranchEntity, ISoftDelete
     public decimal SellPrice { get; set; }
     public Guid WarehouseItemId { get; set; }
     public int DeductQuantity { get; set; } = 1;
+    public InventoryUnitKind DeductUnit { get; set; } = InventoryUnitKind.Base;
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

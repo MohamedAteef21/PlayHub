@@ -38,6 +38,7 @@ type RecipeLineFormRow = {
   id?: string;
   warehouseItemId: string;
   quantity: string;
+  unit: InventoryUnitKind;
 };
 
 const movementLabels: Record<number, string> = {
@@ -52,7 +53,7 @@ const movementLabels: Record<number, string> = {
 };
 
 function newRecipeLineRow(partial?: Partial<RecipeLineFormRow>): RecipeLineFormRow {
-  return { key: crypto.randomUUID(), warehouseItemId: '', quantity: '1', ...partial };
+  return { key: crypto.randomUUID(), warehouseItemId: '', quantity: '1', unit: InventoryUnitKind.Base, ...partial };
 }
 
 function newVariantRow(partial?: Partial<VariantFormRow>): VariantFormRow {
@@ -67,7 +68,7 @@ function newVariantRow(partial?: Partial<VariantFormRow>): VariantFormRow {
 }
 
 function isStockKind(kind: number) {
-  return kind === CafeteriaItemKind.Warehouse || kind === CafeteriaItemKind.SellAsIs;
+  return kind === CafeteriaItemKind.Warehouse;
 }
 
 function itemMinVariantPrice(item: CafeteriaItem): number {
@@ -100,6 +101,7 @@ export function InventoryPage() {
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [voucherNotes, setVoucherNotes] = useState('');
   const [voucherLines, setVoucherLines] = useState<Record<string, string>>({});
+  const [voucherLineUnits, setVoucherLineUnits] = useState<Record<string, InventoryUnitKind>>({});
   const [itemFormOpen, setItemFormOpen] = useState(false);
   const [formContext, setFormContext] = useState<'warehouse' | 'menu'>('warehouse');
   const [editingItem, setEditingItem] = useState<CafeteriaItem | null>(null);
@@ -109,6 +111,9 @@ export function InventoryPage() {
   const [itemQty, setItemQty] = useState('0');
   const [itemThreshold, setItemThreshold] = useState('5');
   const [itemIsActive, setItemIsActive] = useState(true);
+  const [linkedWarehouseItemId, setLinkedWarehouseItemId] = useState('');
+  const [baseSellPrice, setBaseSellPrice] = useState('');
+  const [largeSellPrice, setLargeSellPrice] = useState('');
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
   const [unitsPerLarge, setUnitsPerLarge] = useState('1');
@@ -119,6 +124,7 @@ export function InventoryPage() {
   const [addonPrice, setAddonPrice] = useState('');
   const [addonWarehouseId, setAddonWarehouseId] = useState('');
   const [addonDeductQty, setAddonDeductQty] = useState('1');
+  const [addonDeductUnit, setAddonDeductUnit] = useState<InventoryUnitKind>(InventoryUnitKind.Base);
   const [addonIsActive, setAddonIsActive] = useState(true);
   const [unitFormOpen, setUnitFormOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<InventoryUnit | null>(null);
@@ -152,13 +158,8 @@ export function InventoryPage() {
     [allItems]
   );
 
-  const stockItems = useMemo(
-    () => allItems.filter((i) => isStockKind(i.kind)),
-    [allItems]
-  );
-
   const warehouseTabItems = useMemo(
-    () => allItems.filter((i) => i.kind === CafeteriaItemKind.Warehouse || i.kind === CafeteriaItemKind.SellAsIs),
+    () => allItems.filter((i) => i.kind === CafeteriaItemKind.Warehouse),
     [allItems]
   );
 
@@ -186,6 +187,8 @@ export function InventoryPage() {
     enabled: tab === 'vouchers',
   });
   const vouchers = vouchersPage?.items ?? [];
+  const selectedLinkedWarehouseItem = warehouseItems.find((i) => i.id === linkedWarehouseItemId) ?? null;
+  const selectedAddonWarehouseItem = warehouseItems.find((i) => i.id === addonWarehouseId) ?? null;
 
   function buildVariantsPayload(includeRecipes: boolean) {
     return variantRows
@@ -203,10 +206,25 @@ export function InventoryPage() {
                   ...(rl.id ? { id: rl.id } : {}),
                   warehouseItemId: rl.warehouseItemId,
                   quantity: Number(rl.quantity),
+                  unit: rl.unit,
                 })),
             }
           : {}),
       }));
+  }
+
+  function buildSellAsIsVariantPayload() {
+    const name = itemName.trim();
+    const price = Number(baseSellPrice) || 0;
+    const existing = variantRows[0];
+    return [
+      {
+        ...(existing?.id ? { id: existing.id } : {}),
+        name,
+        sellPrice: price,
+        ...(editingItem ? { isActive: existing?.isActive ?? true } : {}),
+      },
+    ];
   }
 
   const saveItemMutation = useMutation({
@@ -215,7 +233,7 @@ export function InventoryPage() {
         throw new Error(t('inventory.nameNoDigits'));
       }
       if (
-        (itemKind === CafeteriaItemKind.SellAsIs || itemKind === CafeteriaItemKind.Menu) &&
+        itemKind === CafeteriaItemKind.Menu &&
         variantRows.some((row) => row.name.trim() && nameHasDigits(row.name))
       ) {
         throw new Error(t('inventory.nameNoDigits'));
@@ -225,7 +243,12 @@ export function InventoryPage() {
       const needsVariants =
         itemKind === CafeteriaItemKind.SellAsIs ||
         itemKind === CafeteriaItemKind.Menu;
-      const variants = needsVariants ? buildVariantsPayload(includeRecipes) : [];
+      const variants =
+        itemKind === CafeteriaItemKind.SellAsIs
+          ? buildSellAsIsVariantPayload()
+          : needsVariants
+            ? buildVariantsPayload(includeRecipes)
+            : [];
 
       const unitPayload = formContext === 'warehouse' && isStockKind(itemKind)
         ? {
@@ -234,6 +257,31 @@ export function InventoryPage() {
             unitsPerLarge: largeUnitId ? Number(unitsPerLarge) || 1 : undefined,
           }
         : {};
+      const sellAsIsPayload =
+        formContext === 'menu' && itemKind === CafeteriaItemKind.SellAsIs
+          ? {
+              linkedWarehouseItemId: linkedWarehouseItemId || undefined,
+              baseSellPrice: Number(baseSellPrice),
+              largeSellPrice:
+                selectedLinkedWarehouseItem?.largeUnitName && largeSellPrice !== ''
+                  ? Number(largeSellPrice)
+                  : undefined,
+            }
+          : {};
+      const createVariants = variants.map((variant) => {
+        const payload: {
+          name: string;
+          sellPrice: number;
+          recipeLines?: { id?: string; warehouseItemId: string; quantity: number; unit?: number }[];
+        } = {
+          name: variant.name,
+          sellPrice: variant.sellPrice,
+        };
+        if ('recipeLines' in variant && Array.isArray(variant.recipeLines)) {
+          payload.recipeLines = variant.recipeLines;
+        }
+        return payload;
+      });
 
       if (editingItem) {
         return cafeteriaApi.updateItem(editingItem.id, {
@@ -244,6 +292,7 @@ export function InventoryPage() {
           isActive: itemIsActive,
           variants,
           ...unitPayload,
+          ...sellAsIsPayload,
         });
       }
 
@@ -253,12 +302,9 @@ export function InventoryPage() {
         nameAr: itemNameAr.trim() || undefined,
         currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
         minThreshold: Number(itemThreshold) || 0,
-        variants: variants.map(({ name, sellPrice, recipeLines }) => ({
-          name,
-          sellPrice,
-          ...(recipeLines ? { recipeLines } : {}),
-        })),
+        variants: createVariants,
         ...unitPayload,
+        ...sellAsIsPayload,
       });
     },
     onSuccess: () => {
@@ -276,6 +322,9 @@ export function InventoryPage() {
         nameAr: item.nameAr ?? undefined,
         minThreshold: item.minThreshold,
         isActive: !item.isActive,
+        linkedWarehouseItemId: item.linkedWarehouseItemId ?? undefined,
+        baseSellPrice: item.baseSellPrice ?? undefined,
+        largeSellPrice: item.largeSellPrice ?? undefined,
         variants: (item.variants ?? []).map((v) => ({
           id: v.id,
           name: v.name,
@@ -285,6 +334,7 @@ export function InventoryPage() {
             id: rl.id,
             warehouseItemId: rl.warehouseItemId,
             quantity: rl.quantity,
+            unit: rl.unit,
           })),
         })),
       }),
@@ -311,6 +361,7 @@ export function InventoryPage() {
         sellPrice: Number(addonPrice),
         warehouseItemId: addonWarehouseId,
         deductQuantity: Number(addonDeductQty) || 1,
+        deductUnit: addonDeductUnit,
       };
       if (editingAddon) {
         return cafeteriaApi.updateAddOn(editingAddon.id, { ...payload, isActive: addonIsActive });
@@ -368,7 +419,7 @@ export function InventoryPage() {
 
   const createVoucherMutation = useMutation({
     mutationFn: async () => {
-      const lines = stockItems
+      const lines = warehouseItems
         .map((item) => {
           const raw = voucherLines[item.id];
           if (raw === undefined || raw === '') return null;
@@ -382,7 +433,11 @@ export function InventoryPage() {
             return { cafeteriaItemId: item.id, quantity: delta };
           }
           if (voucherType === StockVoucherType.StockIn) {
-            return { cafeteriaItemId: item.id, quantity: qty, unit: InventoryUnitKind.Base };
+            return {
+              cafeteriaItemId: item.id,
+              quantity: qty,
+              unit: voucherLineUnits[item.id] ?? InventoryUnitKind.Base,
+            };
           }
           return { cafeteriaItemId: item.id, quantity: qty };
         })
@@ -400,10 +455,25 @@ export function InventoryPage() {
     onSuccess: () => {
       setVoucherOpen(false);
       setVoucherLines({});
+      setVoucherLineUnits({});
       setVoucherNotes('');
       setError('');
       queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const resetCatalogMutation = useMutation({
+    mutationFn: inventoryApi.resetCatalog,
+    onSuccess: () => {
+      setError('');
+      setVoucherLines({});
+      setVoucherLineUnits({});
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-items'] });
+      queryClient.invalidateQueries({ queryKey: ['cafeteria-addons'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -457,6 +527,9 @@ export function InventoryPage() {
     setItemQty('0');
     setItemThreshold('5');
     setItemIsActive(true);
+    setLinkedWarehouseItemId('');
+    setBaseSellPrice('');
+    setLargeSellPrice('');
     setBaseUnitId('');
     setLargeUnitId('');
     setUnitsPerLarge('1');
@@ -473,6 +546,9 @@ export function InventoryPage() {
     setItemQty('0');
     setItemThreshold('5');
     setItemIsActive(true);
+    setLinkedWarehouseItemId('');
+    setBaseSellPrice('');
+    setLargeSellPrice('');
     setBaseUnitId(units[0]?.id ?? '');
     setLargeUnitId('');
     setUnitsPerLarge('1');
@@ -489,6 +565,11 @@ export function InventoryPage() {
     setItemNameAr(item.nameAr ?? '');
     setItemThreshold(String(item.minThreshold));
     setItemIsActive(item.isActive);
+    setLinkedWarehouseItemId(item.linkedWarehouseItemId ?? '');
+    setBaseSellPrice(
+      item.baseSellPrice != null ? String(item.baseSellPrice) : String(item.variants?.[0]?.sellPrice ?? '')
+    );
+    setLargeSellPrice(item.largeSellPrice != null ? String(item.largeSellPrice) : '');
     setBaseUnitId(resolveUnitId(units, item.baseUnitName));
     setLargeUnitId(resolveUnitId(units, item.largeUnitName));
     setUnitsPerLarge(String(item.unitsPerLarge || 1));
@@ -505,6 +586,7 @@ export function InventoryPage() {
                   id: rl.id,
                   warehouseItemId: rl.warehouseItemId,
                   quantity: String(rl.quantity),
+                  unit: rl.unit ?? InventoryUnitKind.Base,
                 })
               ),
             })
@@ -522,6 +604,7 @@ export function InventoryPage() {
     setAddonPrice('');
     setAddonWarehouseId('');
     setAddonDeductQty('1');
+    setAddonDeductUnit(InventoryUnitKind.Base);
     setAddonIsActive(true);
     setError('');
   }
@@ -532,6 +615,7 @@ export function InventoryPage() {
     setAddonPrice('');
     setAddonWarehouseId(warehouseItems[0]?.id ?? '');
     setAddonDeductQty('1');
+    setAddonDeductUnit(InventoryUnitKind.Base);
     setAddonIsActive(true);
     setError('');
     setAddonFormOpen(true);
@@ -543,6 +627,7 @@ export function InventoryPage() {
     setAddonPrice(String(addon.sellPrice));
     setAddonWarehouseId(addon.warehouseItemId);
     setAddonDeductQty(String(addon.deductQuantity));
+    setAddonDeductUnit(addon.deductUnit ?? InventoryUnitKind.Base);
     setAddonIsActive(addon.isActive);
     setError('');
     setAddonFormOpen(true);
@@ -633,13 +718,23 @@ export function InventoryPage() {
   }
 
   function needsVariants() {
-    return itemKind === CafeteriaItemKind.SellAsIs || itemKind === CafeteriaItemKind.Menu;
+    return itemKind === CafeteriaItemKind.Menu;
   }
 
   function canSaveItem() {
     if (!itemName.trim() || nameHasDigits(itemName)) return false;
     if (itemNameAr.trim() && nameHasDigits(itemNameAr)) return false;
     if (formContext === 'warehouse' && isStockKind(itemKind) && !baseUnitId) return false;
+    if (formContext === 'menu' && itemKind === CafeteriaItemKind.SellAsIs) {
+      if (!linkedWarehouseItemId || baseSellPrice === '' || Number.isNaN(Number(baseSellPrice))) return false;
+      if (
+        selectedLinkedWarehouseItem?.largeUnitName &&
+        (largeSellPrice === '' || Number.isNaN(Number(largeSellPrice)))
+      ) {
+        return false;
+      }
+      return true;
+    }
     if (needsVariants() && validVariantRows().length === 0) return false;
     return true;
   }
@@ -663,10 +758,23 @@ export function InventoryPage() {
     <div>
       <PageHeader title={t('inventory.title')}>
         {tab === 'warehouse' && canManageItems && (
-          <Button onClick={() => openCreateItem('warehouse')}>
-            <Icon name="plus" className="h-4 w-4" />
-            {t('inventory.addItem')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              loading={resetCatalogMutation.isPending}
+              onClick={() => {
+                if (window.confirm(t('inventory.resetCatalogConfirm'))) {
+                  resetCatalogMutation.mutate();
+                }
+              }}
+            >
+              {t('inventory.resetCatalog')}
+            </Button>
+            <Button onClick={() => openCreateItem('warehouse')}>
+              <Icon name="plus" className="h-4 w-4" />
+              {t('inventory.addItem')}
+            </Button>
+          </div>
         )}
         {tab === 'menu' && canManageItems && (
           <Button onClick={() => openCreateItem('menu')}>
@@ -692,6 +800,7 @@ export function InventoryPage() {
               size="sm"
               onClick={() => {
                 setVoucherType(StockVoucherType.StockIn);
+                setVoucherLineUnits({});
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -703,6 +812,7 @@ export function InventoryPage() {
               variant="secondary"
               onClick={() => {
                 setVoucherType(StockVoucherType.StockCount);
+                setVoucherLineUnits({});
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -714,6 +824,7 @@ export function InventoryPage() {
               variant="secondary"
               onClick={() => {
                 setVoucherType(StockVoucherType.Settlement);
+                setVoucherLineUnits({});
                 setVoucherOpen(true);
                 setError('');
               }}
@@ -916,7 +1027,12 @@ export function InventoryPage() {
                 <td className="px-4 py-3 font-medium">{addon.name}</td>
                 <td className="px-4 py-3">{formatCurrency(addon.sellPrice)}</td>
                 <td className="px-4 py-3 text-sm">{addon.warehouseItemName}</td>
-                <td className="px-4 py-3">{addon.deductQuantity}</td>
+                <td className="px-4 py-3">
+                  {addon.deductQuantity}{' '}
+                  {addon.deductUnit === InventoryUnitKind.Large && addon.warehouseLargeUnitName
+                    ? addon.warehouseLargeUnitName
+                    : addon.warehouseBaseUnitName}
+                </td>
                 <td className="px-4 py-3">{addon.availableQuantity}</td>
                 <td className="px-4 py-3">
                   <Badge status={addon.isActive ? 'gaming' : 'idle'}>
@@ -1098,12 +1214,12 @@ export function InventoryPage() {
           </p>
           <Input label={t('inventory.notes')} value={voucherNotes} onChange={(e) => setVoucherNotes(e.target.value)} />
           <div className="max-h-72 space-y-2 overflow-y-auto">
-            {stockItems
+            {warehouseItems
               .filter((i) => i.isActive)
               .map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{itemLabel(item)}</p>
@@ -1111,6 +1227,22 @@ export function InventoryPage() {
                       {t('inventory.systemQty')}: {item.currentQuantity}
                     </p>
                   </div>
+                  {voucherType === StockVoucherType.StockIn && item.largeUnitName && (
+                    <select
+                      title={t('inventory.stockInUnit')}
+                      className="w-28 shrink-0 rounded-lg border border-border bg-surface-elevated px-2 py-2 text-sm"
+                      value={voucherLineUnits[item.id] ?? InventoryUnitKind.Base}
+                      onChange={(e) =>
+                        setVoucherLineUnits((prev) => ({
+                          ...prev,
+                          [item.id]: Number(e.target.value) as InventoryUnitKind,
+                        }))
+                      }
+                    >
+                      <option value={InventoryUnitKind.Base}>{item.baseUnitName}</option>
+                      <option value={InventoryUnitKind.Large}>{item.largeUnitName}</option>
+                    </select>
+                  )}
                   <Input
                     type="number"
                     className="w-24 shrink-0"
@@ -1139,35 +1271,28 @@ export function InventoryPage() {
         }
       >
         <div className="max-h-[70vh] space-y-3 overflow-y-auto pe-1">
-          <div>
-            <label className="mb-1 block text-sm text-muted">{t('inventory.kind')}</label>
-            <select
-              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
-              value={itemKind}
-              onChange={(e) => {
-                const k = Number(e.target.value);
-                setItemKind(k);
-                if (k === CafeteriaItemKind.Warehouse) {
-                  setVariantRows([]);
-                } else if (variantRows.length === 0) {
-                  setVariantRows([newVariantRow()]);
-                }
-              }}
-              disabled={!!editingItem}
-            >
-              {formContext === 'warehouse' ? (
-                <>
-                  <option value={CafeteriaItemKind.Warehouse}>{t('inventory.kindWarehouse')}</option>
-                  <option value={CafeteriaItemKind.SellAsIs}>{t('inventory.kindSellAsIs')}</option>
-                </>
-              ) : (
-                <>
-                  <option value={CafeteriaItemKind.Menu}>{t('inventory.kindMenu')}</option>
-                  <option value={CafeteriaItemKind.SellAsIs}>{t('inventory.kindSellAsIs')}</option>
-                </>
-              )}
-            </select>
-          </div>
+          {formContext === 'warehouse' ? (
+            <div>
+              <label className="mb-1 block text-sm text-muted">{t('inventory.kind')}</label>
+              <div className="rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm">
+                {t('inventory.kindWarehouse')}
+              </div>
+            </div>
+          ) : (
+            <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={itemKind === CafeteriaItemKind.SellAsIs}
+                onChange={(e) => {
+                  if (editingItem) return;
+                  setItemKind(e.target.checked ? CafeteriaItemKind.SellAsIs : CafeteriaItemKind.Menu);
+                  setError('');
+                }}
+                disabled={!!editingItem}
+              />
+              <span>{t('inventory.sellAsIsCheckbox')}</span>
+            </label>
+          )}
 
           <Input
             label={t('inventory.itemNameAr')}
@@ -1270,7 +1395,48 @@ export function InventoryPage() {
                 {t('common.active')}
               </label>
               {itemKind === CafeteriaItemKind.SellAsIs && (
-                <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <p className="text-xs text-muted">{t('inventory.sellAsIsMenuHint')}</p>
+                  <div>
+                    <label className="mb-1 block text-sm text-muted">{t('inventory.linkWarehouseItem')}</label>
+                    <select
+                      className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+                      value={linkedWarehouseItemId}
+                      onChange={(e) => {
+                        setLinkedWarehouseItemId(e.target.value);
+                        setLargeSellPrice('');
+                      }}
+                    >
+                      <option value="">{t('inventory.selectWarehouseItem')}</option>
+                      {warehouseItems
+                        .filter((w) => w.isActive || w.id === linkedWarehouseItemId)
+                        .map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {itemLabel(w)} ({w.baseUnitName}
+                            {w.largeUnitName ? ` / ${w.largeUnitName}` : ''})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <Input
+                    label={t('inventory.baseSellPrice')}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={baseSellPrice}
+                    onChange={(e) => setBaseSellPrice(e.target.value)}
+                  />
+                  {selectedLinkedWarehouseItem?.largeUnitName && (
+                    <Input
+                      label={t('inventory.largeSellPrice', { unit: selectedLinkedWarehouseItem.largeUnitName })}
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={largeSellPrice}
+                      onChange={(e) => setLargeSellPrice(e.target.value)}
+                    />
+                  )}
+                </div>
               )}
             </>
           )}
@@ -1349,7 +1515,9 @@ export function InventoryPage() {
                           {t('inventory.addRecipeLine')}
                         </Button>
                       </div>
-                      {row.recipeLines.map((rl) => (
+                      {row.recipeLines.map((rl) => {
+                        const selectedRecipeWarehouse = warehouseItems.find((w) => w.id === rl.warehouseItemId);
+                        return (
                         <div key={rl.key} className="flex flex-wrap items-end gap-2">
                           <div className="min-w-[10rem] flex-1">
                             <label className="mb-1 block text-xs text-muted">
@@ -1359,7 +1527,10 @@ export function InventoryPage() {
                               className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
                               value={rl.warehouseItemId}
                               onChange={(e) =>
-                                updateRecipeLine(row.key, rl.key, { warehouseItemId: e.target.value })
+                                updateRecipeLine(row.key, rl.key, {
+                                  warehouseItemId: e.target.value,
+                                  unit: InventoryUnitKind.Base,
+                                })
                               }
                             >
                               <option value="">{t('inventory.selectWarehouseItem')}</option>
@@ -1370,6 +1541,27 @@ export function InventoryPage() {
                                     {itemLabel(w)} ({w.currentQuantity})
                                   </option>
                                 ))}
+                            </select>
+                          </div>
+                          <div className="w-28">
+                            <label className="mb-1 block text-xs text-muted">{t('inventory.recipeUnit')}</label>
+                            <select
+                              className="w-full rounded-lg border border-border bg-surface-elevated px-2 py-1.5 text-sm"
+                              value={rl.unit}
+                              onChange={(e) =>
+                                updateRecipeLine(row.key, rl.key, {
+                                  unit: Number(e.target.value) as InventoryUnitKind,
+                                })
+                              }
+                            >
+                              <option value={InventoryUnitKind.Base}>
+                                {selectedRecipeWarehouse?.baseUnitName || t('inventory.baseUnitKind')}
+                              </option>
+                              {selectedRecipeWarehouse?.largeUnitName && (
+                                <option value={InventoryUnitKind.Large}>
+                                  {selectedRecipeWarehouse.largeUnitName}
+                                </option>
+                              )}
                             </select>
                           </div>
                           <div className="w-24">
@@ -1393,7 +1585,8 @@ export function InventoryPage() {
                             {t('common.delete')}
                           </Button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1431,7 +1624,10 @@ export function InventoryPage() {
             <select
               className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
               value={addonWarehouseId}
-              onChange={(e) => setAddonWarehouseId(e.target.value)}
+              onChange={(e) => {
+                setAddonWarehouseId(e.target.value);
+                setAddonDeductUnit(InventoryUnitKind.Base);
+              }}
             >
               <option value="">{t('inventory.selectWarehouseItem')}</option>
               {warehouseItems
@@ -1451,6 +1647,21 @@ export function InventoryPage() {
             value={addonDeductQty}
             onChange={(e) => setAddonDeductQty(e.target.value)}
           />
+          <div>
+            <label className="mb-1 block text-sm text-muted">{t('inventory.deductUnit')}</label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
+              value={addonDeductUnit}
+              onChange={(e) => setAddonDeductUnit(Number(e.target.value) as InventoryUnitKind)}
+            >
+              <option value={InventoryUnitKind.Base}>
+                {selectedAddonWarehouseItem?.baseUnitName || t('inventory.baseUnitKind')}
+              </option>
+              {selectedAddonWarehouseItem?.largeUnitName && (
+                <option value={InventoryUnitKind.Large}>{selectedAddonWarehouseItem.largeUnitName}</option>
+              )}
+            </select>
+          </div>
           {editingAddon && (
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -1563,6 +1774,7 @@ function VoucherCard({
         {voucher.lines.map((l) => (
           <li key={l.id}>
             {l.itemName}: {l.quantity}
+            {l.enteredUnit === InventoryUnitKind.Large && ` · ${t('inventory.largeUnitKind')}`}
             {l.systemQuantity != null && ` · ${t('inventory.systemQty')} ${l.systemQuantity}`}
             {l.variance != null &&
               l.variance !== 0 &&

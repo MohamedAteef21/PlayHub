@@ -37,6 +37,7 @@ public class CafeteriaService : ICafeteriaService
     {
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var query = _db.CafeteriaItems
+            .Include(i => i.LinkedWarehouseItem)
             .Include(i => i.Variants).ThenInclude(v => v.RecipeLines).ThenInclude(r => r.WarehouseItem)
             .Where(i => i.BranchId == branchId);
 
@@ -53,6 +54,7 @@ public class CafeteriaService : ICafeteriaService
     {
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var item = await _db.CafeteriaItems
+            .Include(i => i.LinkedWarehouseItem)
             .Include(i => i.Variants).ThenInclude(v => v.RecipeLines).ThenInclude(r => r.WarehouseItem)
             .FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct);
         return item is null ? null : MapItem(item);
@@ -62,17 +64,51 @@ public class CafeteriaService : ICafeteriaService
     {
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var kind = request.Kind;
-        var tracksStock = kind is CafeteriaItemKind.Warehouse or CafeteriaItemKind.SellAsIs;
+        var tracksStock = kind == CafeteriaItemKind.Warehouse;
         var name = RequireTextName(request.Name, "Item name");
         var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : RequireTextName(request.NameAr, "Arabic item name");
 
-        var (baseUnit, largeUnit, unitsPerLarge) = tracksStock
-            ? await ResolveUnitsAsync(request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct)
-            : ("قطعة", (string?)null, 1);
+        CafeteriaItem? linkedWarehouse = null;
+        string baseUnit;
+        string? largeUnit;
+        int unitsPerLarge;
+        List<UpsertCafeteriaItemVariantRequest> variants;
 
-        var variants = kind == CafeteriaItemKind.Warehouse
-            ? []
-            : NormalizeVariants(request.Variants);
+        if (kind == CafeteriaItemKind.Warehouse)
+        {
+            (baseUnit, largeUnit, unitsPerLarge) = await ResolveUnitsAsync(
+                request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct);
+            variants = [];
+        }
+        else if (kind == CafeteriaItemKind.SellAsIs)
+        {
+            if (!request.LinkedWarehouseItemId.HasValue)
+                throw new InvalidOperationException("Sell-as-is products must link to a warehouse item.");
+            linkedWarehouse = await RequireWarehouseItemAsync(branchId, request.LinkedWarehouseItemId.Value, ct);
+            if (linkedWarehouse.Kind != CafeteriaItemKind.Warehouse)
+                throw new InvalidOperationException("Sell-as-is must link to a warehouse item.");
+            if (request.BaseSellPrice is null || request.BaseSellPrice < 0)
+                throw new InvalidOperationException("Base unit sell price is required.");
+            if (linkedWarehouse.LargeUnitName is not null && request.LargeSellPrice is null)
+                throw new InvalidOperationException("Large unit sell price is required when the warehouse item has a large unit.");
+            if (request.LargeSellPrice is < 0)
+                throw new InvalidOperationException("Large unit sell price cannot be negative.");
+
+            baseUnit = linkedWarehouse.BaseUnitName;
+            largeUnit = linkedWarehouse.LargeUnitName;
+            unitsPerLarge = linkedWarehouse.UnitsPerLarge;
+            var defaultPrice = request.BaseSellPrice.Value;
+            variants = request.Variants is { Count: > 0 }
+                ? NormalizeVariants(request.Variants.Select(v => v with { RecipeLines = null }).ToList())
+                : NormalizeVariants([
+                    new UpsertCafeteriaItemVariantRequest(null, name, defaultPrice, true, 0, null)
+                ]);
+        }
+        else
+        {
+            (baseUnit, largeUnit, unitsPerLarge) = ("قطعة", (string?)null, 1);
+            variants = NormalizeVariants(request.Variants);
+        }
 
         // Soft-deleted item with same name → restore instead of "already exists" / duplicate feel.
         var deleted = await _db.CafeteriaItems
@@ -93,7 +129,13 @@ public class CafeteriaService : ICafeteriaService
             deleted.BaseUnitName = baseUnit;
             deleted.LargeUnitName = largeUnit;
             deleted.UnitsPerLarge = unitsPerLarge;
-            deleted.SellPrice = variants.Count > 0 ? variants.Min(v => v.SellPrice) : Math.Max(0, request.SellPrice);
+            deleted.LinkedWarehouseItemId = linkedWarehouse?.Id;
+            deleted.BaseSellPrice = kind == CafeteriaItemKind.SellAsIs ? request.BaseSellPrice : null;
+            deleted.LargeSellPrice = kind == CafeteriaItemKind.SellAsIs ? request.LargeSellPrice : null;
+            deleted.SellPrice = variants.Count > 0
+                ? variants.Min(v => v.SellPrice)
+                : (request.BaseSellPrice ?? Math.Max(0, request.SellPrice));
+            deleted.CurrentQuantity = kind == CafeteriaItemKind.Warehouse ? deleted.CurrentQuantity : 0;
             if (kind != CafeteriaItemKind.Warehouse)
                 await ReplaceVariantsAsync(branchId, deleted, variants, ct);
             await _db.SaveChangesAsync(ct);
@@ -122,7 +164,9 @@ public class CafeteriaService : ICafeteriaService
             stock = ItemUnitHelper.ToBaseQuantity(temp, request.CurrentQuantity, request.InitialStockUnit);
         }
 
-        var minPrice = variants.Count > 0 ? variants.Min(v => v.SellPrice) : Math.Max(0, request.SellPrice);
+        var minPrice = variants.Count > 0
+            ? variants.Min(v => v.SellPrice)
+            : (request.BaseSellPrice ?? Math.Max(0, request.SellPrice));
 
         var item = new CafeteriaItem
         {
@@ -131,12 +175,15 @@ public class CafeteriaService : ICafeteriaService
             Name = name,
             NameAr = nameAr,
             SellPrice = minPrice,
-            CurrentQuantity = stock,
+            CurrentQuantity = kind == CafeteriaItemKind.Warehouse ? stock : 0,
             MinThreshold = Math.Max(0, request.MinThreshold),
             Kind = kind,
             BaseUnitName = baseUnit,
             LargeUnitName = largeUnit,
-            UnitsPerLarge = unitsPerLarge
+            UnitsPerLarge = unitsPerLarge,
+            LinkedWarehouseItemId = linkedWarehouse?.Id,
+            BaseSellPrice = kind == CafeteriaItemKind.SellAsIs ? request.BaseSellPrice : null,
+            LargeSellPrice = kind == CafeteriaItemKind.SellAsIs ? request.LargeSellPrice : null
         };
 
         foreach (var v in variants)
@@ -154,7 +201,7 @@ public class CafeteriaService : ICafeteriaService
 
         _db.CafeteriaItems.Add(item);
 
-        if (stock > 0)
+        if (kind == CafeteriaItemKind.Warehouse && stock > 0)
         {
             _db.InventoryMovements.Add(new InventoryMovement
             {
@@ -187,24 +234,70 @@ public class CafeteriaService : ICafeteriaService
         var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var item = await _db.CafeteriaItems
             .Include(i => i.Variants).ThenInclude(v => v.RecipeLines)
+            .Include(i => i.LinkedWarehouseItem)
             .FirstOrDefaultAsync(i => i.Id == id && i.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
 
         var kind = request.Kind;
-        var tracksStock = kind is CafeteriaItemKind.Warehouse or CafeteriaItemKind.SellAsIs;
+        var tracksStock = kind == CafeteriaItemKind.Warehouse;
         var oldBase = item.BaseUnitName;
         var oldLarge = item.LargeUnitName;
         var oldFactor = item.UnitsPerLarge;
         var name = RequireTextName(request.Name, "Item name");
         var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : RequireTextName(request.NameAr, "Arabic item name");
 
-        var (baseUnit, largeUnit, unitsPerLarge) = tracksStock
-            ? await ResolveUnitsAsync(request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct)
-            : ("قطعة", (string?)null, 1);
+        CafeteriaItem? linkedWarehouse = null;
+        string baseUnit;
+        string? largeUnit;
+        int unitsPerLarge;
+        List<UpsertCafeteriaItemVariantRequest> variants;
 
-        var variants = kind == CafeteriaItemKind.Warehouse
-            ? []
-            : NormalizeVariants(request.Variants);
+        if (kind == CafeteriaItemKind.Warehouse)
+        {
+            (baseUnit, largeUnit, unitsPerLarge) = await ResolveUnitsAsync(
+                request.BaseUnitId, request.LargeUnitId, request.UnitsPerLarge, ct);
+            variants = [];
+            item.LinkedWarehouseItemId = null;
+            item.BaseSellPrice = null;
+            item.LargeSellPrice = null;
+        }
+        else if (kind == CafeteriaItemKind.SellAsIs)
+        {
+            if (!request.LinkedWarehouseItemId.HasValue)
+                throw new InvalidOperationException("Sell-as-is products must link to a warehouse item.");
+            linkedWarehouse = await RequireWarehouseItemAsync(branchId, request.LinkedWarehouseItemId.Value, ct);
+            if (request.BaseSellPrice is null || request.BaseSellPrice < 0)
+                throw new InvalidOperationException("Base unit sell price is required.");
+            if (linkedWarehouse.LargeUnitName is not null && request.LargeSellPrice is null)
+                throw new InvalidOperationException("Large unit sell price is required when the warehouse item has a large unit.");
+            if (request.LargeSellPrice is < 0)
+                throw new InvalidOperationException("Large unit sell price cannot be negative.");
+
+            baseUnit = linkedWarehouse.BaseUnitName;
+            largeUnit = linkedWarehouse.LargeUnitName;
+            unitsPerLarge = linkedWarehouse.UnitsPerLarge;
+            item.LinkedWarehouseItemId = linkedWarehouse.Id;
+            item.BaseSellPrice = request.BaseSellPrice;
+            item.LargeSellPrice = request.LargeSellPrice;
+            var defaultPrice = request.BaseSellPrice.Value;
+            variants = request.Variants is { Count: > 0 }
+                ? NormalizeVariants(request.Variants.Select(v => v with { RecipeLines = null }).ToList())
+                : NormalizeVariants([
+                    new UpsertCafeteriaItemVariantRequest(null, name, defaultPrice, true, 0, null)
+                ]);
+            // Keep variant prices aligned with base sell price for sell-as-is defaults.
+            variants = variants.Select(v => v with { SellPrice = v.SellPrice > 0 ? v.SellPrice : defaultPrice, RecipeLines = null }).ToList();
+        }
+        else
+        {
+            (baseUnit, largeUnit, unitsPerLarge) = ("قطعة", (string?)null, 1);
+            variants = NormalizeVariants(request.Variants);
+            item.LinkedWarehouseItemId = null;
+            item.BaseSellPrice = null;
+            item.LargeSellPrice = null;
+            // Menu products keep CurrentQuantity at 0 — stock lives on warehouse ingredients.
+            item.CurrentQuantity = 0;
+        }
 
         var nameTaken = await _db.CafeteriaItems.AnyAsync(
             i => i.BranchId == branchId && i.Id != id && i.Name == name && i.Kind == kind, ct);
@@ -216,7 +309,9 @@ public class CafeteriaService : ICafeteriaService
         item.MinThreshold = Math.Max(0, request.MinThreshold);
         item.IsActive = request.IsActive;
         item.Kind = kind;
-        item.SellPrice = variants.Count > 0 ? variants.Min(v => v.SellPrice) : Math.Max(0, request.SellPrice);
+        item.SellPrice = variants.Count > 0
+            ? variants.Min(v => v.SellPrice)
+            : (request.BaseSellPrice ?? Math.Max(0, request.SellPrice));
         item.BaseUnitName = baseUnit;
         item.LargeUnitName = largeUnit;
         item.UnitsPerLarge = unitsPerLarge;
@@ -244,6 +339,11 @@ public class CafeteriaService : ICafeteriaService
                     ChangedByUserId = _tenantContext.UserId
                 });
             }
+        }
+        else if (kind != CafeteriaItemKind.Warehouse)
+        {
+            // Sellable products do not hold stock themselves.
+            item.CurrentQuantity = 0;
         }
 
         await ReplaceVariantsAsync(branchId, item, variants, ct);
@@ -296,6 +396,8 @@ public class CafeteriaService : ICafeteriaService
             throw new InvalidOperationException("Deduct quantity must be at least 1.");
 
         var warehouse = await RequireWarehouseItemAsync(branchId, request.WarehouseItemId, ct);
+        if (request.DeductUnit == InventoryUnitKind.Large && string.IsNullOrWhiteSpace(warehouse.LargeUnitName))
+            throw new InvalidOperationException("This warehouse item has no large unit.");
 
         var addOn = new CafeteriaAddOn
         {
@@ -305,6 +407,7 @@ public class CafeteriaService : ICafeteriaService
             SellPrice = request.SellPrice,
             WarehouseItemId = warehouse.Id,
             DeductQuantity = request.DeductQuantity,
+            DeductUnit = request.DeductUnit,
             IsActive = true
         };
         _db.CafeteriaAddOns.Add(addOn);
@@ -331,10 +434,13 @@ public class CafeteriaService : ICafeteriaService
             throw new InvalidOperationException("Deduct quantity must be at least 1.");
 
         var warehouse = await RequireWarehouseItemAsync(branchId, request.WarehouseItemId, ct);
+        if (request.DeductUnit == InventoryUnitKind.Large && string.IsNullOrWhiteSpace(warehouse.LargeUnitName))
+            throw new InvalidOperationException("This warehouse item has no large unit.");
         addOn.Name = request.Name.Trim();
         addOn.SellPrice = request.SellPrice;
         addOn.WarehouseItemId = warehouse.Id;
         addOn.DeductQuantity = request.DeductQuantity;
+        addOn.DeductUnit = request.DeductUnit;
         addOn.IsActive = request.IsActive;
         addOn.WarehouseItem = warehouse;
 
@@ -863,8 +969,8 @@ public class CafeteriaService : ICafeteriaService
             i => i.Id == warehouseItemId && i.BranchId == branchId && i.IsActive, ct)
             ?? throw new KeyNotFoundException("Warehouse item not found.");
 
-        if (item.Kind is not (CafeteriaItemKind.Warehouse or CafeteriaItemKind.SellAsIs))
-            throw new InvalidOperationException("Recipe/add-on stock must come from a warehouse or sell-as-is item.");
+        if (item.Kind != CafeteriaItemKind.Warehouse)
+            throw new InvalidOperationException("Recipe/add-on stock must come from an active warehouse item.");
 
         return item;
     }
@@ -886,7 +992,8 @@ public class CafeteriaService : ICafeteriaService
             variant.RecipeLines.Add(new CafeteriaVariantRecipeLine
             {
                 WarehouseItemId = line.WarehouseItemId,
-                Quantity = line.Quantity
+                Quantity = line.Quantity,
+                Unit = line.Unit
             });
         }
     }
@@ -966,21 +1073,29 @@ public class CafeteriaService : ICafeteriaService
         }
     }
 
-    private static CafeteriaItemDto MapItem(CafeteriaItem i) =>
-        new(
+    private static CafeteriaItemDto MapItem(CafeteriaItem i)
+    {
+        var stockQty = i.Kind == CafeteriaItemKind.SellAsIs && i.LinkedWarehouseItem is not null
+            ? i.LinkedWarehouseItem.CurrentQuantity
+            : i.CurrentQuantity;
+        return new(
             i.Id,
             i.BranchId,
             i.Name,
             i.NameAr,
             i.SellPrice,
-            i.CurrentQuantity,
+            stockQty,
             i.MinThreshold,
-            i.CurrentQuantity <= i.MinThreshold,
+            stockQty <= i.MinThreshold,
             i.IsActive,
             i.Kind,
-            i.BaseUnitName,
-            i.LargeUnitName,
-            i.UnitsPerLarge,
+            i.LinkedWarehouseItem?.BaseUnitName ?? i.BaseUnitName,
+            i.LinkedWarehouseItem?.LargeUnitName ?? i.LargeUnitName,
+            i.LinkedWarehouseItem?.UnitsPerLarge ?? i.UnitsPerLarge,
+            i.LinkedWarehouseItemId,
+            i.LinkedWarehouseItem?.Name,
+            i.BaseSellPrice,
+            i.LargeSellPrice,
             i.CreatedAt,
             i.Variants
                 .OrderBy(v => v.SortOrder)
@@ -997,9 +1112,11 @@ public class CafeteriaService : ICafeteriaService
                             r.WarehouseItemId,
                             r.WarehouseItem?.Name ?? "",
                             r.Quantity,
+                            r.Unit,
                             r.WarehouseItem?.CurrentQuantity ?? 0))
                         .ToList()))
                 .ToList());
+    }
 
     private static CafeteriaAddOnDto MapAddOn(CafeteriaAddOn a) =>
         new(
@@ -1010,6 +1127,10 @@ public class CafeteriaService : ICafeteriaService
             a.WarehouseItemId,
             a.WarehouseItem?.Name ?? "",
             a.DeductQuantity,
+            a.DeductUnit,
+            a.WarehouseItem?.BaseUnitName ?? "قطعة",
+            a.WarehouseItem?.LargeUnitName,
+            a.WarehouseItem?.UnitsPerLarge ?? 1,
             a.WarehouseItem?.CurrentQuantity ?? 0,
             a.IsActive,
             a.CreatedAt);

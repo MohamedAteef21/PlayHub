@@ -8,12 +8,14 @@ public record RecipeLineDto(
     Guid WarehouseItemId,
     string WarehouseItemName,
     int Quantity,
+    InventoryUnitKind Unit,
     int AvailableQuantity);
 
 public record UpsertRecipeLineRequest(
     Guid? Id,
     Guid WarehouseItemId,
-    int Quantity);
+    int Quantity,
+    InventoryUnitKind Unit = InventoryUnitKind.Base);
 
 public record CafeteriaItemVariantDto(
     Guid Id,
@@ -45,6 +47,10 @@ public record CafeteriaItemDto(
     string BaseUnitName,
     string? LargeUnitName,
     int UnitsPerLarge,
+    Guid? LinkedWarehouseItemId,
+    string? LinkedWarehouseItemName,
+    decimal? BaseSellPrice,
+    decimal? LargeSellPrice,
     DateTime CreatedAt,
     IReadOnlyList<CafeteriaItemVariantDto> Variants);
 
@@ -59,7 +65,10 @@ public record CreateCafeteriaItemRequest(
     Guid? BaseUnitId = null,
     Guid? LargeUnitId = null,
     int UnitsPerLarge = 1,
-    InventoryUnitKind InitialStockUnit = InventoryUnitKind.Base);
+    InventoryUnitKind InitialStockUnit = InventoryUnitKind.Base,
+    Guid? LinkedWarehouseItemId = null,
+    decimal? BaseSellPrice = null,
+    decimal? LargeSellPrice = null);
 
 public record UpdateCafeteriaItemRequest(
     string Name,
@@ -71,7 +80,10 @@ public record UpdateCafeteriaItemRequest(
     decimal SellPrice = 0,
     Guid? BaseUnitId = null,
     Guid? LargeUnitId = null,
-    int UnitsPerLarge = 1);
+    int UnitsPerLarge = 1,
+    Guid? LinkedWarehouseItemId = null,
+    decimal? BaseSellPrice = null,
+    decimal? LargeSellPrice = null);
 
 public record CafeteriaAddOnDto(
     Guid Id,
@@ -81,6 +93,10 @@ public record CafeteriaAddOnDto(
     Guid WarehouseItemId,
     string WarehouseItemName,
     int DeductQuantity,
+    InventoryUnitKind DeductUnit,
+    string WarehouseBaseUnitName,
+    string? WarehouseLargeUnitName,
+    int WarehouseUnitsPerLarge,
     int AvailableQuantity,
     bool IsActive,
     DateTime CreatedAt);
@@ -89,14 +105,16 @@ public record CreateCafeteriaAddOnRequest(
     string Name,
     decimal SellPrice,
     Guid WarehouseItemId,
-    int DeductQuantity = 1);
+    int DeductQuantity = 1,
+    InventoryUnitKind DeductUnit = InventoryUnitKind.Base);
 
 public record UpdateCafeteriaAddOnRequest(
     string Name,
     decimal SellPrice,
     Guid WarehouseItemId,
     int DeductQuantity,
-    bool IsActive);
+    bool IsActive,
+    InventoryUnitKind DeductUnit = InventoryUnitKind.Base);
 
 public record CafeteriaSaleLineAddOnInput(
     Guid AddOnId,
@@ -106,7 +124,7 @@ public record CafeteriaSaleLineInput(
     Guid CafeteriaItemId,
     Guid VariantId,
     int Quantity,
-    /// <summary>For SellAsIs: stock to deduct (base units). Ignored for recipe menu items (auto from recipe).</summary>
+    /// <summary>For SellAsIs: stock portions to deduct in <see cref="Unit"/>.</summary>
     int StockDeductQuantity = 0,
     InventoryUnitKind Unit = InventoryUnitKind.Base,
     IReadOnlyList<CafeteriaSaleLineAddOnInput>? AddOns = null);

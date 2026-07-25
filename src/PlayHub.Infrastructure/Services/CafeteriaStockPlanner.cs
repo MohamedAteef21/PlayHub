@@ -27,6 +27,8 @@ public static class CafeteriaStockPlanner
         CafeteriaItemVariant Variant,
         int Quantity,
         int ParentStockDeduct,
+        /// <summary>Warehouse item that receives parent deduct (linked sell-as-is), else the item itself.</summary>
+        CafeteriaItem? ParentStockTarget,
         decimal UnitPrice,
         decimal ProductTotal,
         decimal AddOnsTotal,
@@ -50,15 +52,16 @@ public static class CafeteriaStockPlanner
             throw new InvalidOperationException("Quantity must be at least 1.");
 
         var item = await db.CafeteriaItems
-            .Include(i => i.Variants).ThenInclude(v => v.RecipeLines)
+            .Include(i => i.LinkedWarehouseItem)
+            .Include(i => i.Variants).ThenInclude(v => v.RecipeLines).ThenInclude(r => r.WarehouseItem)
             .FirstOrDefaultAsync(i => i.Id == itemId && i.BranchId == branchId && i.IsActive, ct)
             ?? throw new KeyNotFoundException("Cafeteria item not found.");
 
         if (item.Kind == CafeteriaItemKind.Warehouse)
-            throw new InvalidOperationException("Warehouse items cannot be sold directly. Use Menu or Sell-as-is products.");
+            throw new InvalidOperationException("Warehouse items cannot be sold directly. Configure a product first.");
 
         var variant = item.Variants.FirstOrDefault(v => v.Id == variantId && v.IsActive)
-            ?? throw new KeyNotFoundException("Variant not found for this item.");
+            ?? throw new KeyNotFoundException("Product option not found for this item.");
 
         var recipeLines = variant.RecipeLines.Where(r => r.Quantity > 0).ToList();
         var hasRecipe = recipeLines.Count > 0;
@@ -72,7 +75,12 @@ public static class CafeteriaStockPlanner
         if (hasRecipe)
         {
             foreach (var line in recipeLines)
-                AddNeed(line.WarehouseItemId, checked(line.Quantity * quantity));
+            {
+                var wh = line.WarehouseItem
+                    ?? await db.CafeteriaItems.FirstAsync(i => i.Id == line.WarehouseItemId, ct);
+                var perPortion = ItemUnitHelper.ToBaseQuantity(wh, line.Quantity, line.Unit);
+                AddNeed(line.WarehouseItemId, checked(perPortion * quantity));
+            }
         }
 
         var plannedAddOns = new List<PlannedAddOn>();
@@ -85,10 +93,13 @@ public static class CafeteriaStockPlanner
                     throw new InvalidOperationException("Add-on quantity must be at least 1.");
 
                 var addOn = await db.CafeteriaAddOns
+                    .Include(a => a.WarehouseItem)
                     .FirstOrDefaultAsync(a => a.Id == input.AddOnId && a.BranchId == branchId && a.IsActive, ct)
                     ?? throw new KeyNotFoundException("Add-on not found.");
 
-                var deduct = checked(addOn.DeductQuantity * input.Quantity);
+                var perAddOn = ItemUnitHelper.ToBaseQuantity(
+                    addOn.WarehouseItem, addOn.DeductQuantity, addOn.DeductUnit);
+                var deduct = checked(perAddOn * input.Quantity);
                 AddNeed(addOn.WarehouseItemId, deduct);
                 var lineTotal = addOn.SellPrice * input.Quantity;
                 addOnsTotal += lineTotal;
@@ -126,40 +137,40 @@ public static class CafeteriaStockPlanner
         if (missing.Count > 0 && !allowSkipMissing)
             throw new MissingIngredientsException(missing);
 
-        // Mark add-ons skipped when their warehouse was skipped
         var skippedIds = ingredients.Where(i => i.Skipped).Select(i => i.WarehouseItem.Id).ToHashSet();
         for (var i = 0; i < plannedAddOns.Count; i++)
         {
             var a = plannedAddOns[i];
             if (skippedIds.Contains(a.AddOn.WarehouseItemId))
-            {
                 plannedAddOns[i] = a with { Skipped = true, StockDeduct = 0 };
-            }
         }
 
         int parentStockDeduct = 0;
+        CafeteriaItem? parentStockTarget = null;
+        decimal unitPrice = variant.SellPrice;
+
         if (!hasRecipe)
         {
-            // Sell-as-is (or menu without recipe): deduct from parent stock.
-            if (stockDeductQuantity > 0)
-            {
-                parentStockDeduct = unit == InventoryUnitKind.Large
-                    ? ItemUnitHelper.ToBaseQuantity(item, stockDeductQuantity, InventoryUnitKind.Large)
-                    : stockDeductQuantity;
-            }
-            else
-            {
-                parentStockDeduct = unit == InventoryUnitKind.Large
-                    ? ItemUnitHelper.ToBaseQuantity(item, quantity, InventoryUnitKind.Large)
-                    : quantity;
-            }
+            // Sell-as-is: deduct from linked warehouse (preferred) or parent stock.
+            parentStockTarget = item.LinkedWarehouseItemId.HasValue
+                ? item.LinkedWarehouseItem
+                    ?? await db.CafeteriaItems.FirstAsync(i => i.Id == item.LinkedWarehouseItemId, ct)
+                : item;
 
-            if (item.CurrentQuantity < parentStockDeduct)
+            var stockSource = parentStockTarget;
+            var portions = stockDeductQuantity > 0 ? stockDeductQuantity : quantity;
+            parentStockDeduct = ItemUnitHelper.ToBaseQuantity(stockSource, portions, unit);
+
+            unitPrice = unit == InventoryUnitKind.Large
+                ? (item.LargeSellPrice ?? item.BaseSellPrice ?? variant.SellPrice)
+                : (item.BaseSellPrice ?? variant.SellPrice);
+
+            if (stockSource.CurrentQuantity < parentStockDeduct)
             {
                 if (!allowSkipMissing)
                 {
                     throw new MissingIngredientsException([
-                        new MissingIngredientDto(item.Id, item.Name, parentStockDeduct, item.CurrentQuantity)
+                        new MissingIngredientDto(stockSource.Id, stockSource.Name, parentStockDeduct, stockSource.CurrentQuantity)
                     ]);
                 }
 
@@ -167,15 +178,14 @@ public static class CafeteriaStockPlanner
             }
         }
 
-        var productTotal = variant.SellPrice * quantity;
-        // Recompute add-ons total excluding skipped (still charge for skipped add-ons? User said skip deduct only)
-        // Keep charging — only stock deduct is skipped.
+        var productTotal = unitPrice * quantity;
         return new SaleLinePlan(
             item,
             variant,
             quantity,
             parentStockDeduct,
-            variant.SellPrice,
+            parentStockTarget,
+            unitPrice,
             productTotal,
             addOnsTotal,
             productTotal + addOnsTotal,
@@ -198,12 +208,13 @@ public static class CafeteriaStockPlanner
     {
         if (plan.ParentStockDeduct > 0)
         {
-            plan.Item.CurrentQuantity -= plan.ParentStockDeduct;
+            var target = plan.ParentStockTarget ?? plan.Item;
+            target.CurrentQuantity -= plan.ParentStockDeduct;
             db.InventoryMovements.Add(new InventoryMovement
             {
                 TenantId = tenant.TenantId,
                 BranchId = branchId,
-                CafeteriaItemId = plan.Item.Id,
+                CafeteriaItemId = target.Id,
                 MovementType = InventoryMovementType.Sale,
                 QuantityChange = -plan.ParentStockDeduct,
                 ReferenceType = referenceType,
@@ -289,13 +300,6 @@ public static class CafeteriaStockPlanner
                     WasSkipped = false
                 });
             }
-        }
-
-        foreach (var addOn in plan.AddOns.Where(a => !a.Skipped && a.StockDeduct > 0))
-        {
-            // Ingredient loop already deducted shared warehouse qty aggregated.
-            // Add-ons that share warehouse with recipe are already covered in Ingredients.
-            // Only need movement note if add-on warehouse wasn't in ingredients? It's always in ingredients via AddNeed.
         }
     }
 }

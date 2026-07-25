@@ -66,4 +66,6 @@ public interface IInventoryService
     Task<StockVoucherDto> CreateVoucherAsync(CreateStockVoucherRequest request, CancellationToken ct = default);
     Task<StockVoucherDto> PostVoucherAsync(Guid id, CancellationToken ct = default);
     Task<StockVoucherDto> CreateSettlementFromCountAsync(Guid countVoucherId, string? notes = null, CancellationToken ct = default);
+    /// <summary>Soft-deletes branch cafeteria/warehouse catalog, vouchers, and clears movements so the stock cycle can start clean.</summary>
+    Task ResetCatalogAsync(CancellationToken ct = default);
 }

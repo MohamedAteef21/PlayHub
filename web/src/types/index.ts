@@ -590,6 +590,7 @@ export interface RecipeLine {
   warehouseItemId: string;
   warehouseItemName: string;
   quantity: number;
+  unit: InventoryUnitKind;
   availableQuantity: number;
 }
 
@@ -624,6 +625,10 @@ export interface CafeteriaItem {
   baseUnitName: string;
   largeUnitName: string | null;
   unitsPerLarge: number;
+  linkedWarehouseItemId: string | null;
+  linkedWarehouseItemName: string | null;
+  baseSellPrice: number | null;
+  largeSellPrice: number | null;
   createdAt: string;
   variants: CafeteriaItemVariant[];
 }
@@ -636,6 +641,10 @@ export interface CafeteriaAddOn {
   warehouseItemId: string;
   warehouseItemName: string;
   deductQuantity: number;
+  deductUnit: InventoryUnitKind;
+  warehouseBaseUnitName: string;
+  warehouseLargeUnitName: string | null;
+  warehouseUnitsPerLarge: number;
   availableQuantity: number;
   isActive: boolean;
   createdAt: string;

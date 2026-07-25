@@ -40,7 +40,7 @@ import type {
   SessionDetail,
   SessionLive,
 } from '@/types';
-import { CafeteriaItemKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
+import { CafeteriaItemKind, InventoryUnitKind, PaymentMethod, SessionMode, SessionStatus, TimeUnit, WatchingBilling, PaymentAccountType } from '@/types';
 
 type CafCartAddOn = { addOnId: string; name: string; price: number; quantity: number };
 
@@ -941,7 +941,8 @@ export function DashboardPage() {
         line.stockDeduct,
         sessionCustomerName || cafCustomerName.trim() || undefined,
         line.addOns.map((a) => ({ addOnId: a.addOnId, quantity: a.quantity })),
-        allowSkip
+        allowSkip,
+        InventoryUnitKind.Base
       );
     }
     if (last) onUpdate(last);

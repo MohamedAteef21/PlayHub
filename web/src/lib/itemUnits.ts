@@ -25,9 +25,9 @@ export function maxSellQuantity(item: CafeteriaItem, unit: InventoryUnitKind): n
 
 export function lineUnitPrice(item: CafeteriaItem, unit: InventoryUnitKind): number {
   if (unit === InventoryUnitKind.Large && hasLargeUnit(item)) {
-    return item.sellPrice * item.unitsPerLarge;
+    return item.largeSellPrice ?? item.baseSellPrice ?? item.sellPrice * item.unitsPerLarge;
   }
-  return item.sellPrice;
+  return item.baseSellPrice ?? item.sellPrice;
 }
 
 export function formatStockDisplay(item: CafeteriaItem): string {

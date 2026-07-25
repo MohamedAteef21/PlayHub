@@ -258,7 +258,8 @@ export const sessionsApi = {
     stockDeductQuantity: number,
     customerName?: string,
     addOns?: { addOnId: string; quantity: number }[],
-    allowSkipMissingIngredients?: boolean
+    allowSkipMissingIngredients?: boolean,
+    unit?: number
   ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${sessionId}/cafeteria`, {
       method: 'POST',
@@ -268,6 +269,7 @@ export const sessionsApi = {
         quantity,
         stockDeductQuantity,
         customerName: customerName || undefined,
+        unit,
         addOns: addOns?.length ? addOns : undefined,
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
       }),
@@ -447,13 +449,16 @@ export const cafeteriaApi = {
     largeUnitId?: string;
     unitsPerLarge?: number;
     initialStockUnit?: number;
+    linkedWarehouseItemId?: string;
+    baseSellPrice?: number;
+    largeSellPrice?: number;
     variants?: {
       id?: string;
       name: string;
       sellPrice: number;
       isActive?: boolean;
       sortOrder?: number;
-      recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+      recipeLines?: { id?: string; warehouseItemId: string; quantity: number; unit?: number }[];
     }[];
   }) =>
     apiFetch<import('@/types').CafeteriaItem>('/cafeteria/items', {
@@ -472,13 +477,16 @@ export const cafeteriaApi = {
       baseUnitId?: string;
       largeUnitId?: string;
       unitsPerLarge?: number;
+      linkedWarehouseItemId?: string;
+      baseSellPrice?: number;
+      largeSellPrice?: number;
       variants?: {
         id?: string;
         name: string;
         sellPrice: number;
         isActive?: boolean;
         sortOrder?: number;
-        recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+        recipeLines?: { id?: string; warehouseItemId: string; quantity: number; unit?: number }[];
       }[];
     }
   ) =>
@@ -497,6 +505,7 @@ export const cafeteriaApi = {
     sellPrice: number;
     warehouseItemId: string;
     deductQuantity: number;
+    deductUnit?: number;
   }) =>
     apiFetch<import('@/types').CafeteriaAddOn>('/cafeteria/addons', {
       method: 'POST',
@@ -509,6 +518,7 @@ export const cafeteriaApi = {
       sellPrice: number;
       warehouseItemId: string;
       deductQuantity: number;
+      deductUnit?: number;
       isActive: boolean;
     }
   ) =>
@@ -531,6 +541,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     payment: import('@/types').PaymentRequest,
@@ -553,6 +564,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }
@@ -640,6 +652,7 @@ export const inventoryApi = {
       body: JSON.stringify(data),
     }),
   deleteUnit: (id: string) => apiFetch<void>(`/inventory/units/${id}`, { method: 'DELETE' }),
+  resetCatalog: () => apiFetch<void>('/inventory/reset-catalog', { method: 'POST' }),
   getConversionLogs: (itemId?: string) =>
     apiFetch<import('@/types').ItemUnitConversionLog[]>(
       `/inventory/conversion-logs${itemId ? `?itemId=${itemId}` : ''}`

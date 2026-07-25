@@ -376,10 +376,16 @@ public class CafeteriaItemConfiguration : IEntityTypeConfiguration<CafeteriaItem
     {
         builder.ToTable("cafeteria_items");
         builder.Property(x => x.SellPrice).HasPrecision(18, 2);
+        builder.Property(x => x.BaseSellPrice).HasPrecision(18, 2);
+        builder.Property(x => x.LargeSellPrice).HasPrecision(18, 2);
         builder.Property(x => x.BaseUnitName).HasMaxLength(100).IsRequired();
         builder.Property(x => x.LargeUnitName).HasMaxLength(100);
         builder.HasIndex(x => new { x.TenantId, x.BranchId, x.IsActive });
         builder.HasIndex(x => new { x.BranchId, x.Kind, x.IsActive });
+        builder.HasOne(x => x.LinkedWarehouseItem)
+            .WithMany()
+            .HasForeignKey(x => x.LinkedWarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
