@@ -114,6 +114,8 @@ export function InventoryPage() {
   const [linkedWarehouseItemId, setLinkedWarehouseItemId] = useState('');
   const [baseSellPrice, setBaseSellPrice] = useState('');
   const [largeSellPrice, setLargeSellPrice] = useState('');
+  /** Warehouse create: also publish a sell-as-is cafeteria product with unit prices. */
+  const [warehouseSellAsIs, setWarehouseSellAsIs] = useState(false);
   const [baseUnitId, setBaseUnitId] = useState('');
   const [largeUnitId, setLargeUnitId] = useState('');
   const [unitsPerLarge, setUnitsPerLarge] = useState('1');
@@ -189,6 +191,8 @@ export function InventoryPage() {
   const vouchers = vouchersPage?.items ?? [];
   const selectedLinkedWarehouseItem = warehouseItems.find((i) => i.id === linkedWarehouseItemId) ?? null;
   const selectedAddonWarehouseItem = warehouseItems.find((i) => i.id === addonWarehouseId) ?? null;
+  const selectedBaseUnit = units.find((u) => u.id === baseUnitId) ?? null;
+  const selectedLargeUnit = units.find((u) => u.id === largeUnitId) ?? null;
 
   function buildVariantsPayload(includeRecipes: boolean) {
     return variantRows
@@ -228,7 +232,7 @@ export function InventoryPage() {
   }
 
   const saveItemMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (nameHasDigits(itemName) || (itemNameAr.trim() && nameHasDigits(itemNameAr))) {
         throw new Error(t('inventory.nameNoDigits'));
       }
@@ -240,30 +244,28 @@ export function InventoryPage() {
       }
 
       const includeRecipes = formContext === 'menu' && itemKind === CafeteriaItemKind.Menu;
-      const needsVariants =
-        itemKind === CafeteriaItemKind.SellAsIs ||
-        itemKind === CafeteriaItemKind.Menu;
       const variants =
         itemKind === CafeteriaItemKind.SellAsIs
           ? buildSellAsIsVariantPayload()
-          : needsVariants
+          : itemKind === CafeteriaItemKind.Menu
             ? buildVariantsPayload(includeRecipes)
             : [];
 
-      const unitPayload = formContext === 'warehouse' && isStockKind(itemKind)
-        ? {
-            baseUnitId: baseUnitId || undefined,
-            largeUnitId: largeUnitId || undefined,
-            unitsPerLarge: largeUnitId ? Number(unitsPerLarge) || 1 : undefined,
-          }
-        : {};
+      const unitPayload =
+        formContext === 'warehouse' && itemKind === CafeteriaItemKind.Warehouse
+          ? {
+              baseUnitId: baseUnitId || undefined,
+              largeUnitId: largeUnitId || undefined,
+              unitsPerLarge: largeUnitId ? Number(unitsPerLarge) || 1 : undefined,
+            }
+          : {};
       const sellAsIsPayload =
-        formContext === 'menu' && itemKind === CafeteriaItemKind.SellAsIs
+        itemKind === CafeteriaItemKind.SellAsIs
           ? {
               linkedWarehouseItemId: linkedWarehouseItemId || undefined,
               baseSellPrice: Number(baseSellPrice),
               largeSellPrice:
-                selectedLinkedWarehouseItem?.largeUnitName && largeSellPrice !== ''
+                (selectedLinkedWarehouseItem?.largeUnitName || largeUnitId) && largeSellPrice !== ''
                   ? Number(largeSellPrice)
                   : undefined,
             }
@@ -296,14 +298,44 @@ export function InventoryPage() {
         });
       }
 
+      // Warehouse create (+ optional sell-as-is cafeteria product).
+      if (formContext === 'warehouse') {
+        const warehouse = await cafeteriaApi.createItem({
+          name: itemName.trim(),
+          kind: CafeteriaItemKind.Warehouse,
+          nameAr: itemNameAr.trim() || undefined,
+          currentQuantity: Number(itemQty) || 0,
+          minThreshold: Number(itemThreshold) || 0,
+          variants: [],
+          ...unitPayload,
+        });
+        if (warehouseSellAsIs) {
+          await cafeteriaApi.createItem({
+            name: itemName.trim(),
+            kind: CafeteriaItemKind.SellAsIs,
+            nameAr: itemNameAr.trim() || undefined,
+            minThreshold: 0,
+            linkedWarehouseItemId: warehouse.id,
+            baseSellPrice: Number(baseSellPrice),
+            largeSellPrice: largeUnitId && largeSellPrice !== '' ? Number(largeSellPrice) : undefined,
+            variants: [
+              {
+                name: itemName.trim(),
+                sellPrice: Number(baseSellPrice) || 0,
+              },
+            ],
+          });
+        }
+        return warehouse;
+      }
+
       return cafeteriaApi.createItem({
         name: itemName.trim(),
         kind: itemKind,
         nameAr: itemNameAr.trim() || undefined,
-        currentQuantity: formContext === 'warehouse' ? Number(itemQty) || 0 : 0,
+        currentQuantity: 0,
         minThreshold: Number(itemThreshold) || 0,
         variants: createVariants,
-        ...unitPayload,
         ...sellAsIsPayload,
       });
     },
@@ -530,6 +562,7 @@ export function InventoryPage() {
     setLinkedWarehouseItemId('');
     setBaseSellPrice('');
     setLargeSellPrice('');
+    setWarehouseSellAsIs(false);
     setBaseUnitId('');
     setLargeUnitId('');
     setUnitsPerLarge('1');
@@ -549,6 +582,7 @@ export function InventoryPage() {
     setLinkedWarehouseItemId('');
     setBaseSellPrice('');
     setLargeSellPrice('');
+    setWarehouseSellAsIs(false);
     setBaseUnitId(units[0]?.id ?? '');
     setLargeUnitId('');
     setUnitsPerLarge('1');
@@ -565,6 +599,7 @@ export function InventoryPage() {
     setItemNameAr(item.nameAr ?? '');
     setItemThreshold(String(item.minThreshold));
     setItemIsActive(item.isActive);
+    setWarehouseSellAsIs(false);
     setLinkedWarehouseItemId(item.linkedWarehouseItemId ?? '');
     setBaseSellPrice(
       item.baseSellPrice != null ? String(item.baseSellPrice) : String(item.variants?.[0]?.sellPrice ?? '')
@@ -724,7 +759,12 @@ export function InventoryPage() {
   function canSaveItem() {
     if (!itemName.trim() || nameHasDigits(itemName)) return false;
     if (itemNameAr.trim() && nameHasDigits(itemNameAr)) return false;
-    if (formContext === 'warehouse' && isStockKind(itemKind) && !baseUnitId) return false;
+    if (formContext === 'warehouse' && itemKind === CafeteriaItemKind.Warehouse && !baseUnitId) return false;
+    if (formContext === 'warehouse' && warehouseSellAsIs && !editingItem) {
+      if (baseSellPrice === '' || Number.isNaN(Number(baseSellPrice))) return false;
+      if (largeUnitId && (largeSellPrice === '' || Number.isNaN(Number(largeSellPrice)))) return false;
+      return true;
+    }
     if (formContext === 'menu' && itemKind === CafeteriaItemKind.SellAsIs) {
       if (!linkedWarehouseItemId || baseSellPrice === '' || Number.isNaN(Number(baseSellPrice))) return false;
       if (
@@ -1278,26 +1318,14 @@ export function InventoryPage() {
                 {t('inventory.kindWarehouse')}
               </div>
             </div>
-          ) : (
-            <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={itemKind === CafeteriaItemKind.SellAsIs}
-                onChange={(e) => {
-                  if (editingItem) return;
-                  const sellAsIs = e.target.checked;
-                  setItemKind(sellAsIs ? CafeteriaItemKind.SellAsIs : CafeteriaItemKind.Menu);
-                  setLinkedWarehouseItemId('');
-                  setBaseSellPrice('');
-                  setLargeSellPrice('');
-                  setVariantRows(sellAsIs ? [] : [newVariantRow()]);
-                  setError('');
-                }}
-                disabled={!!editingItem}
-              />
-              <span>{t('inventory.sellAsIsCheckbox')}</span>
-            </label>
-          )}
+          ) : itemKind === CafeteriaItemKind.SellAsIs ? (
+            <div>
+              <label className="mb-1 block text-sm text-muted">{t('inventory.kind')}</label>
+              <div className="rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm">
+                {t('inventory.kindSellAsIs')}
+              </div>
+            </div>
+          ) : null}
 
           <Input
             label={t('inventory.itemNameAr')}
@@ -1379,6 +1407,62 @@ export function InventoryPage() {
                   value={itemQty}
                   onChange={(e) => setItemQty(e.target.value)}
                 />
+              )}
+              {!editingItem && (
+                <div className="space-y-3 rounded-lg border border-border p-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={warehouseSellAsIs}
+                      onChange={(e) => {
+                        setWarehouseSellAsIs(e.target.checked);
+                        if (!e.target.checked) {
+                          setBaseSellPrice('');
+                          setLargeSellPrice('');
+                        }
+                        setError('');
+                      }}
+                    />
+                    <span>{t('inventory.sellAsIsCheckbox')}</span>
+                  </label>
+                  {warehouseSellAsIs && (
+                    <>
+                      <p className="text-xs text-muted">{t('inventory.sellAsIsWarehouseHint')}</p>
+                      <Input
+                        label={
+                          selectedBaseUnit
+                            ? t('inventory.baseSellPriceWithUnit', {
+                                unit: formatUnitName(selectedBaseUnit, i18n.language),
+                              })
+                            : t('inventory.baseSellPrice')
+                        }
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={baseSellPrice}
+                        onChange={(e) => setBaseSellPrice(e.target.value)}
+                      />
+                      {largeUnitId ? (
+                        <Input
+                          label={
+                            selectedLargeUnit
+                              ? t('inventory.largeSellPriceWithUnit', {
+                                  unit: formatUnitName(selectedLargeUnit, i18n.language),
+                                })
+                              : t('inventory.largeSellPrice')
+                          }
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={largeSellPrice}
+                          onChange={(e) => setLargeSellPrice(e.target.value)}
+                        />
+                      ) : (
+                        <p className="text-xs text-muted">{t('inventory.noLargeUnitOnItem')}</p>
+                      )}
+                    </>
+                  )}
+                </div>
               )}
             </>
           )}

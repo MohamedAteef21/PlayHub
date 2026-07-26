@@ -641,7 +641,7 @@ export const en = {
     selectWarehouseItem: 'Select warehouse item',
     deductQty: 'Deduct per sale',
     deductUnit: 'Deduct unit',
-    sellAsIsCheckbox: 'Sell as-is (shows in cafeteria with unit prices)',
+    sellAsIsCheckbox: 'Sell as-is in cafeteria',
     linkWarehouseItem: 'Warehouse item to sell',
     baseSellPrice: 'Small unit price',
     baseSellPriceWithUnit: 'Small unit price ({{unit}})',
@@ -656,7 +656,9 @@ export const en = {
     baseUnitKind: 'Base',
     largeUnitKind: 'Large',
     sellAsIsMenuHint:
-      'Links a warehouse item for direct sale in the cafeteria. Set small-unit price, and large-unit price when the item has a large unit.',
+      'Sell-as-is product linked to a warehouse item. Edit small/large unit prices for cafeteria.',
+    sellAsIsWarehouseHint:
+      'Creates a cafeteria product for this warehouse item. Enter small-unit price, and large-unit price if a large unit is set.',
     variants: 'Product names',
     variant: 'Product name',
     addVariant: 'Add product name',
@@ -1686,7 +1688,7 @@ export const ar = {
     selectWarehouseItem: 'اختر صنف المخزن',
     deductQty: 'الخصم لكل بيع',
     deductUnit: 'وحدة الخصم',
-    sellAsIsCheckbox: 'يتباع زي ما هو (يظهر في الكافتيريا بأسعار الوحدات)',
+    sellAsIsCheckbox: 'يتباع زي ما هو في الكافتيريا',
     linkWarehouseItem: 'صنف المخزن للبيع',
     baseSellPrice: 'سعر الوحدة الصغرى',
     baseSellPriceWithUnit: 'سعر الوحدة الصغرى ({{unit}})',
@@ -1701,7 +1703,9 @@ export const ar = {
     baseUnitKind: 'أساسية',
     largeUnitKind: 'كبيرة',
     sellAsIsMenuHint:
-      'يربط صنف مخزن للبيع مباشرة في الكافتيريا. حدّد سعر الوحدة الصغرى، وسعر الوحدة الكبرى إذا كان للصنف وحدة كبرى.',
+      'منتج بيع كما هو مرتبط بصنف مخزن. عدّل سعر الوحدة الصغرى والكبرى للكافتيريا.',
+    sellAsIsWarehouseHint:
+      'ينشئ منتج كافتيريا لهذا الصنف. أدخل سعر الوحدة الصغرى، وسعر الوحدة الكبرى إذا اخترت وحدة كبرى.',
     variants: 'أسماء المنتجات',
     variant: 'اسم المنتج',
     addVariant: 'إضافة اسم منتج',
