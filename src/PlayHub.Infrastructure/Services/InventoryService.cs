@@ -180,6 +180,10 @@ public class InventoryService : IInventoryService
                 i => i.Id == line.CafeteriaItemId && i.BranchId == branchId, ct)
                 ?? throw new KeyNotFoundException($"Cafeteria item {line.CafeteriaItemId} not found.");
 
+            if (item.Kind != CafeteriaItemKind.Warehouse)
+                throw new InvalidOperationException(
+                    $"Item '{item.Name}' is not a warehouse item. Stock vouchers only use warehouse items.");
+
             int? systemQty = request.VoucherType is StockVoucherType.StockCount or StockVoucherType.Settlement
                 ? item.CurrentQuantity
                 : null;
@@ -347,6 +351,74 @@ public class InventoryService : IInventoryService
         return MapVoucher(voucher);
     }
 
+
+    public async Task ResetCatalogAsync(CancellationToken ct = default)
+    {
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
+
+        var openSessions = await _db.Sessions.CountAsync(x =>
+            x.BranchId == branchId &&
+            !x.IsDeleted &&
+            (x.Status == SessionStatus.Open || x.Status == SessionStatus.Paused), ct);
+        if (openSessions > 0)
+            throw new InvalidOperationException("Close open play sessions before resetting inventory catalog.");
+
+        var held = await _db.CafeteriaHolds.CountAsync(x =>
+            x.BranchId == branchId &&
+            !x.IsDeleted &&
+            x.Status == CafeteriaHoldStatus.Open, ct);
+        if (held > 0)
+            throw new InvalidOperationException("Settle or cancel held cafeteria sales before resetting inventory catalog.");
+
+        var now = DateTime.UtcNow;
+        var userId = _tenantContext.UserId == Guid.Empty ? (Guid?)null : _tenantContext.UserId;
+
+        var recipeLines = await _db.CafeteriaVariantRecipeLines
+            .Where(r => r.Variant.CafeteriaItem.BranchId == branchId)
+            .ToListAsync(ct);
+        _db.CafeteriaVariantRecipeLines.RemoveRange(recipeLines);
+
+        var addOns = await _db.CafeteriaAddOns.Where(a => a.BranchId == branchId && !a.IsDeleted).ToListAsync(ct);
+        foreach (var a in addOns)
+        {
+            a.IsDeleted = true;
+            a.IsActive = false;
+            a.DeletedAt = now;
+            a.DeletedByUserId = userId;
+        }
+
+        var items = await _db.CafeteriaItems
+            .Include(i => i.Variants)
+            .Where(i => i.BranchId == branchId && !i.IsDeleted)
+            .ToListAsync(ct);
+        foreach (var item in items)
+        {
+            foreach (var v in item.Variants)
+                v.IsActive = false;
+            item.IsDeleted = true;
+            item.IsActive = false;
+            item.DeletedAt = now;
+            item.DeletedByUserId = userId;
+            item.CurrentQuantity = 0;
+        }
+
+        var vouchers = await _db.StockVouchers.Where(v => v.BranchId == branchId && !v.IsDeleted).ToListAsync(ct);
+        foreach (var v in vouchers)
+        {
+            v.IsDeleted = true;
+            v.DeletedAt = now;
+            v.DeletedByUserId = userId;
+        }
+
+        var movements = await _db.InventoryMovements.Where(m => m.BranchId == branchId).ToListAsync(ct);
+        _db.InventoryMovements.RemoveRange(movements);
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Inventory.ResetCatalog", "Branch", branchId,
+            new { ItemCount = items.Count, AddOnCount = addOns.Count, VoucherCount = vouchers.Count }, ct: ct);
+    }
+
+
     private static StockVoucherDto MapVoucher(StockVoucher v) =>
         new(
             v.Id,
@@ -378,7 +450,9 @@ public class InventoryService : IInventoryService
     private static CafeteriaItemDto MapItem(CafeteriaItem i) =>
         new(i.Id, i.BranchId, i.Name, i.NameAr, i.SellPrice, i.CurrentQuantity, i.MinThreshold,
             i.CurrentQuantity <= i.MinThreshold, i.IsActive, i.Kind,
-            i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge, i.CreatedAt,
+            i.BaseUnitName, i.LargeUnitName, i.UnitsPerLarge,
+            i.LinkedWarehouseItemId, i.LinkedWarehouseItem?.Name,
+            i.BaseSellPrice, i.LargeSellPrice, i.CreatedAt,
             (i.Variants ?? [])
                 .OrderBy(v => v.SortOrder)
                 .ThenBy(v => v.Name)
@@ -387,7 +461,7 @@ public class InventoryService : IInventoryService
                     (v.RecipeLines ?? [])
                         .Select(r => new RecipeLineDto(
                             r.Id, r.WarehouseItemId, r.WarehouseItem?.Name ?? "", r.Quantity,
-                            r.WarehouseItem?.CurrentQuantity ?? 0))
+                            r.Unit, r.WarehouseItem?.CurrentQuantity ?? 0))
                         .ToList()))
                 .ToList());
 }

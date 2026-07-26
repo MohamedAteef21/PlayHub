@@ -135,3 +135,28 @@ public class SessionCafeteriaReturn : BaseEntity
     public SessionCafeteriaLine SessionCafeteriaLine { get; set; } = null!;
     public User ReturnedByUser { get; set; } = null!;
 }
+
+/// <summary>Future hold on a device (or room device) until started or cancelled.</summary>
+public class DeviceReservation : BaseEntity, IBranchEntity, ISoftDelete
+{
+    public Guid TenantId { get; set; }
+    public Guid BranchId { get; set; }
+    public Guid DeviceId { get; set; }
+    public DateTime StartsAt { get; set; }
+    public DateTime? EndsAt { get; set; }
+    public Guid? CustomerId { get; set; }
+    public string? GuestName { get; set; }
+    public string? Notes { get; set; }
+    public ReservationStatus Status { get; set; } = ReservationStatus.Pending;
+    public Guid? SessionId { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public Guid? DeletedByUserId { get; set; }
+
+    public Device Device { get; set; } = null!;
+    public Branch Branch { get; set; } = null!;
+    public Customer? Customer { get; set; }
+    public Session? Session { get; set; }
+    public User CreatedByUser { get; set; } = null!;
+}

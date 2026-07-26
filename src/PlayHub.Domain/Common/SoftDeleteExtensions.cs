@@ -8,4 +8,11 @@ public static class SoftDeleteExtensions
         entity.DeletedAt = DateTime.UtcNow;
         entity.DeletedByUserId = deletedByUserId;
     }
+
+    public static void RestoreFromDeleted(this ISoftDelete entity)
+    {
+        entity.IsDeleted = false;
+        entity.DeletedAt = null;
+        entity.DeletedByUserId = null;
+    }
 }

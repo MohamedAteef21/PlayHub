@@ -107,8 +107,25 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: res.statusText }));
-    const message = body.message ?? 'Request failed';
+    const body = await res.json().catch(() => ({ message: res.statusText })) as {
+      message?: string;
+      detail?: string;
+      title?: string;
+      code?: string;
+      errors?: Record<string, string[] | string>;
+    };
+    let message = body.message || body.detail || body.title || 'Request failed';
+    if (body.errors && typeof body.errors === 'object') {
+      const parts = Object.entries(body.errors).flatMap(([key, val]) => {
+        const texts = Array.isArray(val) ? val : [String(val)];
+        return texts.map((t) => (key ? `${key}: ${t}` : t));
+      });
+      if (parts.length) message = parts.join(' · ');
+    }
+    if (res.status === 405) {
+      message =
+        'Reservation API is unavailable on the server (HTTP 405). Redeploy the API, then try again.';
+    }
     if (isSubscriptionExpiredPayload(body)) {
       useAuthStore.getState().logout();
     }
@@ -180,6 +197,7 @@ export const sessionsApi = {
     customerId?: string;
     isQuickGuest?: boolean;
     quickGuestName?: string;
+    reservationId?: string;
   }) =>
     apiFetch<import('@/types').SessionLive>('/sessions/open', {
       method: 'POST',
@@ -195,7 +213,17 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number; matchCount?: number | null }) =>
+  transfer: (id: string, targetDeviceId: string) =>
+    apiFetch<import('@/types').SessionLive>(`/sessions/${id}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ targetDeviceId }),
+    }),
+  convert: (id: string, data: {
+    pricingPlanId: string;
+    controllerCount?: number | null;
+    watcherCount?: number | null;
+    matchCount?: number | null;
+  }) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -230,7 +258,8 @@ export const sessionsApi = {
     stockDeductQuantity: number,
     customerName?: string,
     addOns?: { addOnId: string; quantity: number }[],
-    allowSkipMissingIngredients?: boolean
+    allowSkipMissingIngredients?: boolean,
+    unit?: number
   ) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${sessionId}/cafeteria`, {
       method: 'POST',
@@ -240,6 +269,7 @@ export const sessionsApi = {
         quantity,
         stockDeductQuantity,
         customerName: customerName || undefined,
+        unit,
         addOns: addOns?.length ? addOns : undefined,
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
       }),
@@ -419,13 +449,16 @@ export const cafeteriaApi = {
     largeUnitId?: string;
     unitsPerLarge?: number;
     initialStockUnit?: number;
+    linkedWarehouseItemId?: string;
+    baseSellPrice?: number;
+    largeSellPrice?: number;
     variants?: {
       id?: string;
       name: string;
       sellPrice: number;
       isActive?: boolean;
       sortOrder?: number;
-      recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+      recipeLines?: { id?: string; warehouseItemId: string; quantity: number; unit?: number }[];
     }[];
   }) =>
     apiFetch<import('@/types').CafeteriaItem>('/cafeteria/items', {
@@ -444,13 +477,16 @@ export const cafeteriaApi = {
       baseUnitId?: string;
       largeUnitId?: string;
       unitsPerLarge?: number;
+      linkedWarehouseItemId?: string;
+      baseSellPrice?: number;
+      largeSellPrice?: number;
       variants?: {
         id?: string;
         name: string;
         sellPrice: number;
         isActive?: boolean;
         sortOrder?: number;
-        recipeLines?: { id?: string; warehouseItemId: string; quantity: number }[];
+        recipeLines?: { id?: string; warehouseItemId: string; quantity: number; unit?: number }[];
       }[];
     }
   ) =>
@@ -469,6 +505,7 @@ export const cafeteriaApi = {
     sellPrice: number;
     warehouseItemId: string;
     deductQuantity: number;
+    deductUnit?: number;
   }) =>
     apiFetch<import('@/types').CafeteriaAddOn>('/cafeteria/addons', {
       method: 'POST',
@@ -481,6 +518,7 @@ export const cafeteriaApi = {
       sellPrice: number;
       warehouseItemId: string;
       deductQuantity: number;
+      deductUnit?: number;
       isActive: boolean;
     }
   ) =>
@@ -503,6 +541,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     payment: import('@/types').PaymentRequest,
@@ -525,6 +564,7 @@ export const cafeteriaApi = {
       variantId: string;
       quantity: number;
       stockDeductQuantity?: number;
+      unit?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }
@@ -612,6 +652,7 @@ export const inventoryApi = {
       body: JSON.stringify(data),
     }),
   deleteUnit: (id: string) => apiFetch<void>(`/inventory/units/${id}`, { method: 'DELETE' }),
+  resetCatalog: () => apiFetch<void>('/inventory/reset-catalog', { method: 'POST' }),
   getConversionLogs: (itemId?: string) =>
     apiFetch<import('@/types').ItemUnitConversionLog[]>(
       `/inventory/conversion-logs${itemId ? `?itemId=${itemId}` : ''}`
@@ -788,6 +829,28 @@ export const alertsApi = {
   },
 };
 
+export const reservationsApi = {
+  list: () => apiFetch<import('@/types').DeviceReservation[]>('/reservations'),
+  create: (data: {
+    deviceId: string;
+    startsAt: string;
+    endsAt?: string | null;
+    customerId: string;
+    guestName?: string | null;
+    notes?: string | null;
+  }) =>
+    apiFetch<import('@/types').DeviceReservation>('/reservations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  cancel: (id: string) =>
+    apiFetch<{ message: string }>(`/reservations/${id}/cancel`, { method: 'POST' }),
+  checkConflict: (deviceId: string) =>
+    apiFetch<import('@/types').ReservationConflict>(
+      `/reservations/conflict?deviceId=${encodeURIComponent(deviceId)}`
+    ),
+};
+
 export const platformApi = {
   getDashboard: () => apiFetch<import('@/types').SuperAdminDashboard>('/platform/dashboard'),
   getAlertSettings: () =>
@@ -886,11 +949,12 @@ export const uploadsApi = {
 };
 
 export const customersApi = {
-  getAll: (q?: string, page = 1, pageSize = 20) => {
+  getAll: (q?: string, page = 1, pageSize = 20, withOutstandingDebt = false) => {
     const params = new URLSearchParams();
     if (q?.trim()) params.set('q', q.trim());
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
+    if (withOutstandingDebt) params.set('withOutstandingDebt', 'true');
     return apiFetch<import('@/types').PagedResult<import('@/types').Customer>>(
       `/customers?${params}`
     );
@@ -919,6 +983,24 @@ export const customersApi = {
     apiFetch<import('@/types').PagedResult<import('@/types').WalletTransaction>>(
       `/customers/${id}/wallet?page=${page}&pageSize=${pageSize}`
     ),
+  getSessions: (id: string, page = 1, pageSize = 20) =>
+    apiFetch<import('@/types').PagedResult<import('@/types').SessionHistory>>(
+      `/customers/${id}/sessions?page=${page}&pageSize=${pageSize}`
+    ),
+};
+
+export const receivablesApi = {
+  list: (customerId?: string) => {
+    const q = customerId ? `?customerId=${encodeURIComponent(customerId)}` : '';
+    return apiFetch<import('@/types').Receivable[]>(`/receivables${q}`);
+  },
+  summary: () =>
+    apiFetch<import('@/types').ReceivableSummary>('/receivables/summary'),
+  collect: (paymentId: string, data: { collectionMethod: number; proofFileUrl?: string }) =>
+    apiFetch<import('@/types').Receivable>(`/receivables/${paymentId}/collect`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const offersApi = {
@@ -939,6 +1021,37 @@ export const offersApi = {
       body: JSON.stringify(data),
     }),
   delete: (id: string) => apiFetch<void>(`/offers/${id}`, { method: 'DELETE' }),
+};
+
+export const loyaltyOffersApi = {
+  getAll: (activeOnly?: boolean) => {
+    const params = new URLSearchParams();
+    if (activeOnly != null) params.set('activeOnly', String(activeOnly));
+    const q = params.toString();
+    return apiFetch<import('@/types').LoyaltyOffer[]>(`/loyalty-offers${q ? `?${q}` : ''}`);
+  },
+  getById: (id: string) =>
+    apiFetch<import('@/types').LoyaltyOffer>(`/loyalty-offers/${id}`),
+  create: (data: import('@/types').UpsertLoyaltyOfferRequest) =>
+    apiFetch<import('@/types').LoyaltyOffer>('/loyalty-offers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: import('@/types').UpsertLoyaltyOfferRequest) =>
+    apiFetch<import('@/types').LoyaltyOffer>(`/loyalty-offers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => apiFetch<void>(`/loyalty-offers/${id}`, { method: 'DELETE' }),
+  getCustomerCredits: (customerId: string, availableOnly = true) =>
+    apiFetch<import('@/types').LoyaltyCredit[]>(
+      `/customers/${customerId}/loyalty-credits?availableOnly=${availableOnly}`
+    ),
+  redeem: (data: { creditId: string; sessionId: string; quantity: number }) =>
+    apiFetch<{ message: string }>('/loyalty-credits/redeem', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const whatsappApi = {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PlayHub.Application.Cafeteria;
 using PlayHub.Application.Common;
+using PlayHub.Application.Loyalty;
 using PlayHub.Application.Sessions;
 using PlayHub.Domain.Entities;
 using PlayHub.Domain.Enums;
@@ -17,6 +18,7 @@ public class SessionService : ISessionService
     private readonly ISessionCostCalculator _costCalculator;
     private readonly ISessionNotifier _notifier;
     private readonly LowStockNotifier _lowStock;
+    private readonly ILoyaltyOfferService _loyalty;
 
     public SessionService(
         PlayHubDbContext db,
@@ -24,7 +26,8 @@ public class SessionService : ISessionService
         IAuditService audit,
         ISessionCostCalculator costCalculator,
         ISessionNotifier notifier,
-        LowStockNotifier lowStock)
+        LowStockNotifier lowStock,
+        ILoyaltyOfferService loyalty)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -32,6 +35,7 @@ public class SessionService : ISessionService
         _costCalculator = costCalculator;
         _notifier = notifier;
         _lowStock = lowStock;
+        _loyalty = loyalty;
     }
 
     public async Task<IReadOnlyList<SessionLiveDto>> GetActiveSessionsAsync(CancellationToken ct = default)
@@ -44,20 +48,38 @@ public class SessionService : ISessionService
     }
 
     public async Task<PagedResult<SessionHistoryDto>> GetSessionHistoryAsync(
-        DateTime? from = null, DateTime? to = null, int page = 1, int pageSize = 20, CancellationToken ct = default)
+        DateTime? from = null,
+        DateTime? to = null,
+        int page = 1,
+        int pageSize = 20,
+        Guid? customerId = null,
+        CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
         var (p, size, skip) = PagingHelper.Normalize(page, pageSize);
 
         var query = _db.Sessions
             .AsNoTracking()
             .Include(s => s.Device)
             .Include(s => s.Room)
+            .Include(s => s.Branch)
             .Include(s => s.OpenedByUser)
             .Include(s => s.ClosedByUser)
             .Include(s => s.Customer)
             .Include(s => s.CafeteriaLines)
-            .Where(s => s.BranchId == branchId);
+            .AsQueryable();
+
+        if (customerId.HasValue)
+        {
+            var allowed = _tenantContext.AllowedBranchIds;
+            query = query.Where(s =>
+                s.CustomerId == customerId.Value
+                && allowed.Contains(s.BranchId));
+        }
+        else
+        {
+            var branchId = BranchGuard.RequireBranchId(_tenantContext);
+            query = query.Where(s => s.BranchId == branchId);
+        }
 
         if (from.HasValue)
             query = query.Where(s => s.StartedAt >= from.Value);
@@ -137,6 +159,17 @@ public class SessionService : ISessionService
         if (request.PlannedDurationMinutes is > 24 * 60)
             throw new InvalidOperationException("Planned duration cannot exceed 24 hours.");
 
+        DeviceReservation? linkedReservation = null;
+        if (request.ReservationId.HasValue)
+        {
+            linkedReservation = await _db.DeviceReservations.FirstOrDefaultAsync(
+                r => r.Id == request.ReservationId.Value
+                     && r.BranchId == branchId
+                     && r.DeviceId == device.Id
+                     && r.Status == ReservationStatus.Pending, ct)
+                ?? throw new InvalidOperationException("Reservation not found or already used.");
+        }
+
         var snapshot = JsonSerializer.Serialize(new
         {
             plan.TimeUnit,
@@ -171,7 +204,13 @@ public class SessionService : ISessionService
         };
 
         _db.Sessions.Add(session);
+        if (linkedReservation is not null)
+        {
+            linkedReservation.Status = ReservationStatus.Started;
+            linkedReservation.SessionId = session.Id;
+        }
         await _db.SaveChangesAsync(ct);
+
         await _audit.LogAsync("Session.Opened", "Session", session.Id, new
         {
             device.Identifier,
@@ -182,7 +221,8 @@ public class SessionService : ISessionService
             PlanName = plan.Name,
             session.CustomerId,
             session.IsQuickGuest,
-            session.QuickGuestName
+            session.QuickGuestName,
+            request.ReservationId
         }, ct: ct);
 
         await _db.Entry(session).Reference(s => s.Device).LoadAsync(ct);
@@ -291,6 +331,64 @@ public class SessionService : ISessionService
         return live;
     }
 
+    /// <summary>
+    /// Move an active session to another idle device in the same branch.
+    /// Preserves timer, pauses, cafeteria, billing segments, and planned duration.
+    /// </summary>
+    public async Task<SessionLiveDto> TransferSessionAsync(
+        Guid id, TransferSessionRequest request, CancellationToken ct = default)
+    {
+        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var billingRoundUp = await GetBillingRoundUpAsync(ct);
+
+        var session = await GetMutableActiveSessionAsync(id, branchId, ct);
+        var fromDeviceId = session.DeviceId;
+        var fromRoomId = session.RoomId;
+
+        if (request.TargetDeviceId == fromDeviceId)
+            throw new InvalidOperationException("Session is already on that device.");
+
+        var target = await _db.Devices
+            .Include(d => d.Room)
+            .FirstOrDefaultAsync(d => d.Id == request.TargetDeviceId && d.BranchId == branchId, ct)
+            ?? throw new KeyNotFoundException("Target device not found.");
+
+        if (!target.IsActive)
+            throw new InvalidOperationException("Target device is inactive.");
+
+        if (await _db.Sessions.AnyAsync(
+                s => s.DeviceId == target.Id && s.Status != SessionStatus.Closed, ct))
+            throw new InvalidOperationException("Target device already has an active session.");
+
+        if (await _db.DeviceMaintenances.AnyAsync(
+                m => m.DeviceId == target.Id && m.CompletedAt == null, ct))
+            throw new InvalidOperationException("Target device is in maintenance.");
+
+        if (session.SessionMode == SessionMode.Watching
+            && session.WatcherCount is > 0
+            && session.WatcherCount > GetMaxWatchingCapacity(target))
+            throw new InvalidOperationException(
+                $"Target watching capacity is {GetMaxWatchingCapacity(target)}, session has {session.WatcherCount} watchers.");
+
+        session.DeviceId = target.Id;
+        session.RoomId = target.RoomId;
+
+        await _db.SaveChangesAsync(ct);
+        await _audit.LogAsync("Session.Transferred", "Session", session.Id, new
+        {
+            FromDeviceId = fromDeviceId,
+            FromRoomId = fromRoomId,
+            ToDeviceId = target.Id,
+            ToRoomId = target.RoomId,
+            TargetName = target.Name
+        }, ct: ct);
+
+        await LoadSessionGraphAsync(session, ct);
+        var transferred = MapLive(session, billingRoundUp);
+        await _notifier.NotifySessionUpdatedAsync(branchId, transferred, ct);
+        return transferred;
+    }
+
     /// <summary>Change the number of watchers on an active watching session.
     /// Per-screen (time-billed) plans accrue the elapsed segment at the old headcount first.</summary>
     public async Task<SessionLiveDto> UpdateWatcherCountAsync(Guid id, UpdateWatchersRequest request, CancellationToken ct = default)
@@ -328,17 +426,13 @@ public class SessionService : ISessionService
             if (session.Status != SessionStatus.Open)
                 throw new InvalidOperationException("Resume the session before changing the watcher count.");
 
-            // Bill what has already run at the old headcount, then restart the segment at the new one.
-            // Intermediate segments are billed at exact prorated time (no round-up) so frequent
-            // headcount changes don't each add a full minimum unit; the final segment still rounds up.
+            // Freeze the current headcount as a billing segment, then restart at the new count.
+            // Intermediate splits use billingRoundUp=false so frequent changes don't each add a full hour.
             var changeAt = DateTime.UtcNow;
             var elapsed = _costCalculator.GetElapsedSeconds(SessionStatus.Open, session.StartedAt, session.TotalPausedSeconds, null, changeAt);
-            var billableSeconds = GetBillableSeconds(session.PlannedDurationMinutes, elapsed);
-            var segmentCost = _costCalculator.CalculateTimeCost(
-                session.RateSnapshot, SessionMode.Watching, billableSeconds,
-                session.ControllerCount, session.WatcherCount, billingRoundUp: false);
-
-            session.AccruedTimeCost += segmentCost;
+            var segment = SessionBillingSegments.Build(
+                _costCalculator, session, changeAt, billingRoundUp: false, matchCount: null, out _);
+            SessionBillingSegments.Append(session, segment);
             session.OriginalStartedAt ??= session.StartedAt;
 
             // Keep the booking end time: the new segment carries only the remaining minutes.
@@ -399,21 +493,54 @@ public class SessionService : ISessionService
             .FirstOrDefaultAsync(s => s.Id == id && s.BranchId == branchId && s.Status != SessionStatus.Closed, ct)
             ?? throw new KeyNotFoundException("Active session not found.");
 
-        if (request.ControllerCount is < 1 or > 4)
-            throw new InvalidOperationException("Controller count must be between 1 and 4.");
-
         var plan = await _db.PricingPlans
             .Include(p => p.GamingRates)
             .Include(p => p.WatchingRates)
-            .FirstOrDefaultAsync(p => p.Id == request.PricingPlanId && p.IsActive && p.SessionMode == SessionMode.Gaming
+            .FirstOrDefaultAsync(p => p.Id == request.PricingPlanId && p.IsActive
                 && (p.BranchId == null || p.BranchId == branchId), ct)
-            ?? throw new KeyNotFoundException("Gaming pricing plan not found.");
+            ?? throw new KeyNotFoundException("Pricing plan not found.");
 
-        var rateTier = SessionCostCalculator.GamingRateTier(request.ControllerCount);
-        var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
-        var hasRate = plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0);
-        if (!hasRate && !hasPackage)
-            throw new InvalidOperationException($"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
+        int? nextControllers = null;
+        int? nextWatchers = null;
+
+        if (plan.SessionMode == SessionMode.Gaming)
+        {
+            var controllers = request.ControllerCount
+                ?? throw new InvalidOperationException("Controller count is required for gaming plans.");
+            if (controllers is < 1 or > 4)
+                throw new InvalidOperationException("Controller count must be between 1 and 4.");
+
+            var rateTier = SessionCostCalculator.GamingRateTier(controllers);
+            var hasPackage = plan.PackagePrice is > 0 && plan.PackageDurationMinutes is > 0;
+            var hasRate = plan.GamingRates.Any(r => r.ControllerCount == rateTier && r.Rate > 0);
+            if (!hasRate && !hasPackage)
+                throw new InvalidOperationException(
+                    $"No gaming rate configured for {(rateTier == 1 ? "individual" : "couple")} in this plan.");
+
+            nextControllers = controllers;
+            nextWatchers = null;
+        }
+        else if (plan.SessionMode == SessionMode.Watching)
+        {
+            var watchers = request.WatcherCount
+                ?? throw new InvalidOperationException("Watcher count is required for watching plans.");
+            if (watchers < 1)
+                throw new InvalidOperationException("Watcher count must be at least 1.");
+
+            var maxCapacity = GetMaxWatchingCapacity(session.Device);
+            if (watchers > maxCapacity)
+                throw new InvalidOperationException($"This room supports at most {maxCapacity} watcher(s).");
+
+            if (!plan.WatchingRates.Any(r => r.RatePerPerson > 0))
+                throw new InvalidOperationException("No watching rate configured in this plan.");
+
+            nextWatchers = watchers;
+            nextControllers = null;
+        }
+        else
+        {
+            throw new InvalidOperationException("Unsupported pricing plan mode.");
+        }
 
         // End any active pause and finalize the current billing segment
         if (session.Status == SessionStatus.Paused)
@@ -448,9 +575,10 @@ public class SessionService : ISessionService
             WatchingRates = plan.WatchingRates.Select(r => new { r.RatePerPerson })
         });
 
-        session.SessionMode = SessionMode.Gaming;
+        session.SessionMode = plan.SessionMode;
         session.PricingPlanId = plan.Id;
-        session.ControllerCount = request.ControllerCount;
+        session.ControllerCount = nextControllers;
+        session.WatcherCount = nextWatchers;
         session.RoomSurchargePerHour = 0;
         session.RateSnapshot = snapshot;
         session.StartedAt = convertAt;
@@ -463,7 +591,9 @@ public class SessionService : ISessionService
         {
             SegmentCost = segmentCost,
             session.AccruedTimeCost,
+            TargetMode = plan.SessionMode.ToString(),
             request.ControllerCount,
+            request.WatcherCount,
             PlanName = plan.Name,
             plan.TimeUnit,
             request.MatchCount
@@ -670,6 +800,15 @@ public class SessionService : ISessionService
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _loyalty.EvaluateAfterSessionCloseAsync(session.Id, ct);
+        }
+        catch
+        {
+            // Loyalty evaluation must not block session close / invoice.
+        }
 
         await _audit.LogAsync("Session.Closed", "Session", session.Id, new
         {
@@ -1036,22 +1175,58 @@ public class SessionService : ISessionService
             session.PlannedDurationMinutes,
             remaining,
             timeExpired,
+            // Watching can convert to gaming; gaming can also switch to watching / match / other plans.
             session.SessionMode == SessionMode.Watching && session.Status != SessionStatus.Closed,
             session.Status != SessionStatus.Closed,
             timeUnit,
             session.SessionMode == SessionMode.Gaming
                 ? _costCalculator.GetGamingRate(session.RateSnapshot, session.ControllerCount)
-                : null,
+                : session.SessionMode == SessionMode.Watching
+                    ? _costCalculator.GetWatchingRatePerPerson(session.RateSnapshot)
+                    : null,
             session.SessionMode == SessionMode.Gaming && session.ControllerCount is > 0
                 ? (SessionCostCalculator.GamingRateTier(session.ControllerCount.Value) == 2 ? "Couple" : "Individual")
-                : null,
+                : session.SessionMode == SessionMode.Watching
+                    ? $"Watching×{session.WatcherCount ?? 0}"
+                    : null,
             session.CustomerId,
             session.Customer?.Code,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,
             session.Customer?.Phone,
             session.IsQuickGuest,
             session.QuickGuestName,
-            session.CafeteriaLines.Select(MapCafeteriaLine).ToList());
+            session.CafeteriaLines.Select(MapCafeteriaLine).ToList(),
+            BuildLiveBillingSegments(session, billingRoundUp, isPerGame));
+    }
+
+    /// <summary>
+    /// Accrued segments plus the current open segment (preview only — not persisted).
+    /// Per-match sessions omit the open segment until match count is entered at close.
+    /// </summary>
+    private List<BillingSegmentDto> BuildLiveBillingSegments(Session session, bool billingRoundUp, bool isPerGame)
+    {
+        var segments = SessionBillingSegments.Read(session);
+        if (session.Status == SessionStatus.Closed || isPerGame)
+            return segments;
+
+        try
+        {
+            var current = SessionBillingSegments.Build(
+                _costCalculator,
+                session,
+                DateTime.UtcNow,
+                billingRoundUp,
+                matchCount: null,
+                out _,
+                chargeFullPlannedBooking: false);
+            segments = [.. segments, current];
+        }
+        catch (InvalidOperationException)
+        {
+            // Leave accrued-only if the current segment cannot be priced yet.
+        }
+
+        return segments;
     }
 
     private static SessionCafeteriaLineDto MapCafeteriaLine(SessionCafeteriaLine l) =>
@@ -1083,11 +1258,40 @@ public class SessionService : ISessionService
             ? session.TotalCost
             : timeCost + cafeteriaCost;
 
+        decimal? playHours = null;
+        int? matchCount = null;
+        int? peopleCount = session.SessionMode == SessionMode.Watching ? session.WatcherCount : null;
+
+        var segments = SessionBillingSegments.Read(session);
+        if (segments.Count > 0)
+        {
+            var matchQty = segments.Where(s => s.Kind == "Match").Sum(s => s.Quantity);
+            if (matchQty > 0) matchCount = (int)Math.Round(matchQty);
+
+            var hourQty = segments
+                .Where(s => s.QuantityUnit is "hour" or "hours" or "h")
+                .Sum(s => s.Quantity);
+            if (hourQty > 0) playHours = decimal.Round(hourQty, 2);
+        }
+
+        if (playHours is null && session.ClosedAt.HasValue)
+        {
+            var elapsedSec = (decimal)(session.ClosedAt.Value - session.StartedAt).TotalSeconds
+                             - session.TotalPausedSeconds;
+            if (elapsedSec < 0) elapsedSec = 0;
+            playHours = decimal.Round(elapsedSec / 3600m, 2);
+        }
+        else if (playHours is null && session.PlannedDurationMinutes is > 0)
+        {
+            playHours = decimal.Round(session.PlannedDurationMinutes.Value / 60m, 2);
+        }
+
         return new SessionHistoryDto(
             session.Id,
             session.DeviceId,
             session.Device.Name,
             session.Room?.Name,
+            session.Branch?.Name,
             session.SessionMode,
             session.Status,
             session.StartedAt,
@@ -1100,7 +1304,13 @@ public class SessionService : ISessionService
             session.CustomerId,
             session.IsQuickGuest ? session.QuickGuestName : session.Customer?.Name,
             session.IsQuickGuest,
-            session.QuickGuestName);
+            session.QuickGuestName,
+            session.ControllerCount,
+            session.WatcherCount,
+            session.PlannedDurationMinutes,
+            playHours,
+            matchCount,
+            peopleCount);
     }
 
     private static SessionDetailDto MapDetail(Session session)

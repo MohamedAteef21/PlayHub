@@ -24,7 +24,14 @@ public class InventoryUnitService : IInventoryUnitService
     public async Task<IReadOnlyList<InventoryUnitDto>> GetAllAsync(bool activeOnly = true, CancellationToken ct = default)
     {
         var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
-        await EnsureDefaultUnitsAsync(ownerId, ct);
+        try
+        {
+            await EnsureDefaultUnitsAsync(ownerId, ct);
+        }
+        catch (Exception)
+        {
+            // Listing must stay available even if default seeding fails.
+        }
 
         var q = _db.InventoryUnits.Where(u => u.OwnerUserId == ownerId);
         if (activeOnly)
@@ -43,6 +50,26 @@ public class InventoryUnitService : IInventoryUnitService
             throw new InvalidOperationException("Unit name is required.");
 
         var ownerId = await OwnerScope.ResolveCatalogOwnerIdAsync(_db, _tenantContext, ct);
+        var nameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim();
+
+        // Reactivate a soft-deleted unit with the same name instead of failing on the unique index.
+        var deleted = await _db.InventoryUnits
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                u => u.TenantId == _tenantContext.TenantId
+                     && u.OwnerUserId == ownerId
+                     && u.Name == name
+                     && u.IsDeleted, ct);
+        if (deleted is not null)
+        {
+            deleted.RestoreFromDeleted();
+            deleted.IsActive = true;
+            deleted.NameAr = nameAr;
+            await _db.SaveChangesAsync(ct);
+            await _audit.LogAsync("InventoryUnit.Restored", "InventoryUnit", deleted.Id, new { deleted.Name }, ct: ct);
+            return new InventoryUnitDto(deleted.Id, deleted.Name, deleted.NameAr, deleted.IsActive, deleted.CreatedAt);
+        }
+
         var exists = await _db.InventoryUnits.AnyAsync(
             u => u.TenantId == _tenantContext.TenantId
                  && u.OwnerUserId == ownerId
@@ -55,7 +82,7 @@ public class InventoryUnitService : IInventoryUnitService
             TenantId = _tenantContext.TenantId,
             OwnerUserId = ownerId,
             Name = name,
-            NameAr = string.IsNullOrWhiteSpace(request.NameAr) ? null : request.NameAr.Trim(),
+            NameAr = nameAr,
             IsActive = true
         };
         _db.InventoryUnits.Add(unit);
@@ -210,19 +237,33 @@ public class InventoryUnitService : IInventoryUnitService
 
     private async Task EnsureDefaultUnitsAsync(Guid ownerId, CancellationToken ct)
     {
-        var existingNames = await _db.InventoryUnits
-            .Where(u => u.OwnerUserId == ownerId)
-            .Select(u => u.Name)
+        var existing = await _db.InventoryUnits
+            .IgnoreQueryFilters()
+            .Where(u => u.TenantId == _tenantContext.TenantId && u.OwnerUserId == ownerId)
             .ToListAsync(ct);
 
-        var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        var activeNames = new HashSet<string>(
+            existing.Where(u => !u.IsDeleted).Select(u => u.Name),
+            StringComparer.OrdinalIgnoreCase);
         var added = false;
 
-        var defaults = new[] { "قطعة", "علبة", "كرتونة" };
-        foreach (var name in defaults)
+        void EnsureName(string name)
         {
-            if (existingSet.Contains(name))
-                continue;
+            if (string.IsNullOrWhiteSpace(name) || activeNames.Contains(name))
+                return;
+
+            var deleted = existing.FirstOrDefault(u =>
+                u.IsDeleted && string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (deleted is not null)
+            {
+                deleted.RestoreFromDeleted();
+                deleted.IsActive = true;
+                deleted.NameAr ??= name;
+                activeNames.Add(name);
+                added = true;
+                return;
+            }
+
             _db.InventoryUnits.Add(new InventoryUnit
             {
                 TenantId = _tenantContext.TenantId,
@@ -231,9 +272,12 @@ public class InventoryUnitService : IInventoryUnitService
                 NameAr = name,
                 IsActive = true
             });
-            existingSet.Add(name);
+            activeNames.Add(name);
             added = true;
         }
+
+        foreach (var name in new[] { "قطعة", "علبة", "كرتونة" })
+            EnsureName(name);
 
         // Pull unit names used on this owner's branches into their private catalog.
         var ownerBranchIds = await _db.Branches
@@ -251,30 +295,28 @@ public class InventoryUnitService : IInventoryUnitService
                 .Select(i => new { i.BaseUnitName, i.LargeUnitName })
                 .ToListAsync(ct);
 
-            var names = used
-                .SelectMany(x => new[] { x.BaseUnitName, x.LargeUnitName })
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Select(n => n!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var name in names)
+            foreach (var name in used
+                         .SelectMany(x => new[] { x.BaseUnitName, x.LargeUnitName })
+                         .Where(n => !string.IsNullOrWhiteSpace(n))
+                         .Select(n => n!.Trim())
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (existingSet.Contains(name))
-                    continue;
-                _db.InventoryUnits.Add(new InventoryUnit
-                {
-                    TenantId = _tenantContext.TenantId,
-                    OwnerUserId = ownerId,
-                    Name = name,
-                    NameAr = name,
-                    IsActive = true
-                });
-                existingSet.Add(name);
-                added = true;
+                EnsureName(name);
             }
         }
 
-        if (added)
+        if (!added)
+            return;
+
+        try
+        {
             await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Concurrent seed / unique races must not break listing units.
+            foreach (var entry in _db.ChangeTracker.Entries<InventoryUnit>().ToList())
+                entry.State = EntityState.Detached;
+        }
     }
 }

@@ -31,8 +31,9 @@ public class SessionsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] Guid? customerId = null,
         CancellationToken ct = default) =>
-        await ExecuteAsync(() => _sessionService.GetSessionHistoryAsync(from, to, page, pageSize, ct));
+        await ExecuteAsync(() => _sessionService.GetSessionHistoryAsync(from, to, page, pageSize, customerId, ct));
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = PermissionPolicies.SessionsView)]
@@ -67,6 +68,13 @@ public class SessionsController : ControllerBase
     [ProducesResponseType(typeof(SessionLiveDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> Extend(Guid id, [FromBody] ExtendSessionRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _sessionService.ExtendSessionAsync(id, request, ct));
+
+    /// <summary>Move an open/paused session to another idle device (preserves timer and charges).</summary>
+    [HttpPost("{id:guid}/transfer")]
+    [Authorize(Policy = PermissionPolicies.SessionsCreate)]
+    [ProducesResponseType(typeof(SessionLiveDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Transfer(Guid id, [FromBody] TransferSessionRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _sessionService.TransferSessionAsync(id, request, ct));
 
     /// <summary>Change the watcher headcount on an active watching session.</summary>
     [HttpPost("{id:guid}/watchers")]

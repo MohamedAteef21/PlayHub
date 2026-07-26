@@ -61,6 +61,21 @@ public class InventoryController : ControllerBase
     public async Task<IActionResult> SettlementFromCount(Guid countId, [FromBody] SettlementFromCountRequest? body, CancellationToken ct) =>
         await ExecuteAsync(() => _inventoryService.CreateSettlementFromCountAsync(countId, body?.Notes, ct), StatusCodes.Status201Created);
 
+    [HttpPost("reset-catalog")]
+    [Authorize(Policy = PermissionPolicies.InventoryManageItems)]
+    public async Task<IActionResult> ResetCatalog(CancellationToken ct)
+    {
+        try
+        {
+            await _inventoryService.ResetCatalogAsync(ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action, int successStatus = StatusCodes.Status200OK)
     {
         try
