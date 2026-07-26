@@ -477,8 +477,8 @@ public class InventoryUnitConfiguration : IEntityTypeConfiguration<InventoryUnit
         builder.ToTable("inventory_units");
         builder.Property(x => x.Name).HasMaxLength(100).IsRequired();
         builder.Property(x => x.NameAr).HasMaxLength(100);
-        // Soft-deleted rows must not block re-creating the same unit name.
-        builder.HasIndex(x => new { x.TenantId, x.Name })
+        // Per-owner catalog: soft-deleted rows must not block re-creating the same unit name.
+        builder.HasIndex(x => new { x.TenantId, x.OwnerUserId, x.Name })
             .IsUnique()
             .HasFilter("[IsDeleted] = 0");
         builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
