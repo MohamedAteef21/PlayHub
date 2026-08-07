@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from '@/layouts/AppLayout';
-import { LoginPage, RegisterPage } from '@/pages/AuthPages';
+import { LoginPage } from '@/pages/AuthPages';
 import { BranchSelectPage } from '@/pages/BranchSelectPage';
 import { HomeDashboardPage } from '@/pages/HomeDashboardPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -16,9 +16,18 @@ import { UsersPage } from '@/pages/UsersPage';
 import { ActivityLogPage } from '@/pages/ActivityLogPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { SuperAdminSettingsPage } from '@/pages/SuperAdminSettingsPage';
 import { useAuthStore, useUiStore } from '@/store';
 import { AuthSessionKeepAlive } from '@/components/AuthSessionKeepAlive';
+import { SuperAdminRouteGuard } from '@/components/SuperAdminRouteGuard';
+import { isSuperAdmin } from '@/lib/permissions';
 import '@/i18n';
+
+function SettingsRoute() {
+  const user = useAuthStore((s) => s.user);
+  if (isSuperAdmin(user)) return <SuperAdminSettingsPage />;
+  return <SettingsPage />;
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
@@ -56,24 +65,26 @@ export default function App() {
         <AuthSessionKeepAlive />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/register" element={<Navigate to="/login" replace />} />
           <Route path="/select-branch" element={
             <ProtectedRoute><BranchSelectPage /></ProtectedRoute>
           } />
           <Route element={
             <ProtectedRoute><AppLayout /></ProtectedRoute>
           }>
-            <Route index element={<HomeDashboardPage />} />
-            <Route path="floor" element={<DashboardPage />} />
-            <Route path="sessions" element={<SessionHistoryPage />} />
-            <Route path="cafeteria" element={<CafeteriaPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="accounting" element={<AccountingPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="activity" element={<ActivityLogPage />} />
-            <Route path="customers" element={<CustomersPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route element={<SuperAdminRouteGuard />}>
+              <Route index element={<HomeDashboardPage />} />
+              <Route path="floor" element={<DashboardPage />} />
+              <Route path="sessions" element={<SessionHistoryPage />} />
+              <Route path="cafeteria" element={<CafeteriaPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="accounting" element={<AccountingPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="activity" element={<ActivityLogPage />} />
+              <Route path="customers" element={<CustomersPage />} />
+              <Route path="settings" element={<SettingsRoute />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

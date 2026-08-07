@@ -126,31 +126,30 @@ export const authApi = {
       body: JSON.stringify({ email: username, password }),
     }),
 
-  register: (data: {
-    tenantName: string;
-    slug: string;
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    branchName: string;
-  }) =>
-    apiFetch<AuthResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
   selectBranch: (branchId: string) =>
     apiFetch<AuthResponse>('/auth/select-branch', {
       method: 'POST',
       body: JSON.stringify({ branchId }),
     }),
 
-  logout: (refreshToken: string) =>
-    apiFetch<void>('/auth/logout', {
-      method: 'POST',
-      body: JSON.stringify({ refreshToken }),
-    }),
+  logout: async (refreshToken: string) => {
+    // Best-effort revoke: no refresh-retry, short timeout — UI must not wait on this.
+    const { accessToken } = useAuthStore.getState();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 2500);
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ refreshToken }),
+        signal: ctrl.signal,
+      });
+    } finally {
+      window.clearTimeout(timer);
+    }
+  },
 
   updatePreferences: (data: { preferredLanguage?: string; preferredTheme?: string }) =>
     apiFetch<import('@/types').AuthUser>('/auth/preferences', {
@@ -196,7 +195,7 @@ export const sessionsApi = {
       method: 'POST',
       body: JSON.stringify({ additionalMinutes }),
     }),
-  convert: (id: string, data: { pricingPlanId: string; controllerCount: number }) =>
+  convert: (id: string, data: { pricingPlanId: string; controllerCount: number; matchCount?: number | null }) =>
     apiFetch<import('@/types').SessionLive>(`/sessions/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -211,6 +210,7 @@ export const sessionsApi = {
     };
     discountAmount?: number;
     discountReason?: string;
+    matchCount?: number | null;
   }) =>
     apiFetch<import('@/types').SessionDetail>(`/sessions/${id}/close`, {
       method: 'POST',
@@ -515,6 +515,43 @@ export const cafeteriaApi = {
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
       }),
     }),
+  getOpenHolds: () => apiFetch<import('@/types').CafeteriaHold[]>('/cafeteria/holds'),
+  createHold: (
+    lines: {
+      cafeteriaItemId: string;
+      variantId: string;
+      quantity: number;
+      addOns?: { addOnId: string; quantity: number }[];
+    }[],
+    opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }
+  ) =>
+    apiFetch<import('@/types').CafeteriaHold>('/cafeteria/holds', {
+      method: 'POST',
+      body: JSON.stringify({
+        lines,
+        guestName: opts?.guestName,
+        customerId: opts?.customerId,
+        allowSkipMissingIngredients: opts?.allowSkipMissingIngredients || undefined,
+      }),
+    }),
+  attachHoldToSession: (holdId: string, sessionId: string) =>
+    apiFetch<import('@/types').CafeteriaHold>(`/cafeteria/holds/${holdId}/attach-session`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    }),
+  convertHoldToSale: (
+    holdId: string,
+    payment: import('@/types').PaymentRequest,
+    customerName?: string
+  ) =>
+    apiFetch<import('@/types').CafeteriaSale>(`/cafeteria/holds/${holdId}/convert-sale`, {
+      method: 'POST',
+      body: JSON.stringify({ payment, customerName: customerName || undefined }),
+    }),
+  cancelHold: (holdId: string) =>
+    apiFetch<import('@/types').CafeteriaHold>(`/cafeteria/holds/${holdId}/cancel`, {
+      method: 'POST',
+    }),
 };
 
 export const inventoryApi = {
@@ -579,12 +616,12 @@ export const inventoryApi = {
 
 export const accountingApi = {
   getCategories: () => apiFetch<import('@/types').ExpenseCategory[]>('/accounting/categories'),
-  createCategory: (data: { name: string; nameAr?: string }) =>
+  createCategory: (data: { name: string; nameAr?: string; kind: number }) =>
     apiFetch<import('@/types').ExpenseCategory>('/accounting/categories', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateCategory: (id: string, data: { name: string; nameAr?: string; isActive: boolean }) =>
+  updateCategory: (id: string, data: { name: string; nameAr?: string; kind: number; isActive: boolean }) =>
     apiFetch<import('@/types').ExpenseCategory>(`/accounting/categories/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -698,7 +735,7 @@ export const usersApi = {
     }),
   delete: (id: string) => apiFetch<void>(`/users/${id}`, { method: 'DELETE' }),
   resetPassword: (id: string, newPassword: string) =>
-    apiFetch<void>(`/users/${id}/reset-password`, {
+    apiFetch<import('@/types').ResetPasswordResult>(`/users/${id}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ newPassword }),
     }),
@@ -745,6 +782,36 @@ export const alertsApi = {
     if (!res.ok) throw new Error('Failed to download PDF');
     return res.blob();
   },
+};
+
+export const platformApi = {
+  getDashboard: () => apiFetch<import('@/types').SuperAdminDashboard>('/platform/dashboard'),
+  getAlertSettings: () =>
+    apiFetch<import('@/types').PlatformAlertSettings>('/platform/alert-settings'),
+  upsertAlertSettings: (data: {
+    smtpUsername?: string | null;
+    smtpPassword?: string | null;
+    senderDisplayName?: string | null;
+    whatsAppIntegrationApiBaseUrl?: string | null;
+    whatsAppIntegrationApiKey?: string | null;
+    whatsAppIntegrationEnabled?: boolean;
+  }) =>
+    apiFetch<import('@/types').PlatformAlertSettings>('/platform/alert-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  testEmail: () =>
+    apiFetch<{ message: string }>('/platform/alert-settings/test-email', { method: 'POST' }),
+  getNotificationTargets: () =>
+    apiFetch<import('@/types').NotificationTarget[]>('/platform/notification-targets'),
+  upsertNotificationTarget: (
+    userId: string,
+    data: import('@/types').UpsertNotificationTargetRequest
+  ) =>
+    apiFetch<import('@/types').NotificationTarget>(`/platform/notification-targets/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
 
 export const auditApi = {

@@ -10,7 +10,9 @@ public record CustomerDto(
     string? Notes,
     decimal WalletBalance,
     bool IsActive,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    decimal OutstandingDebtAmount,
+    int OutstandingDebtCount);
 
 public record WalletTopUpRequest(
     decimal Amount,

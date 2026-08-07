@@ -1,0 +1,32 @@
+# PlayHub — Render Blueprint
+# Dashboard → New → Blueprint → connect this repo → Apply
+# Requires a paid instance (Starter+) for persistent disk + always-on WhatsApp session.
+# Free tier spins down and has no disk — QR would reset every cold start.
+
+services:
+  - type: web
+    name: playhub-whatsapp-gateway
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./whatsapp-gateway/Dockerfile
+    dockerContext: ./whatsapp-gateway
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      - key: DATA_DIR
+        value: /data
+      - key: NODE_ENV
+        value: production
+      - key: QUIET_QR_TERMINAL
+        value: "1"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+      - key: REQUIRE_SESSION_ID
+        value: "1"
+    disk:
+      name: wa-sessions
+      mountPath: /data
+      sizeGB: 1

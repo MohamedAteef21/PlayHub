@@ -280,3 +280,73 @@ public class StockVoucherLine : BaseEntity
     public StockVoucher StockVoucher { get; set; } = null!;
     public CafeteriaItem CafeteriaItem { get; set; } = null!;
 }
+
+/// <summary>
+/// Waiting-list cafeteria tab: stock is dispensed now, then later attached to a session or converted to walk-in sale.
+/// </summary>
+public class CafeteriaHold : BaseEntity, IBranchEntity, ISoftDelete
+{
+    public Guid TenantId { get; set; }
+    public Guid BranchId { get; set; }
+    public string? GuestName { get; set; }
+    public Guid? CustomerId { get; set; }
+    public CafeteriaHoldStatus Status { get; set; } = CafeteriaHoldStatus.Open;
+    public decimal TotalAmount { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public Guid? AttachedSessionId { get; set; }
+    public Guid? ConvertedSaleId { get; set; }
+    public DateTime? FinalizedAt { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public Guid? DeletedByUserId { get; set; }
+
+    public Branch Branch { get; set; } = null!;
+    public Customer? Customer { get; set; }
+    public User CreatedByUser { get; set; } = null!;
+    public Session? AttachedSession { get; set; }
+    public CafeteriaSale? ConvertedSale { get; set; }
+    public ICollection<CafeteriaHoldLine> Lines { get; set; } = [];
+}
+
+public class CafeteriaHoldLine : BaseEntity
+{
+    public Guid HoldId { get; set; }
+    public Guid CafeteriaItemId { get; set; }
+    public Guid? VariantId { get; set; }
+    public string? VariantName { get; set; }
+    public int Quantity { get; set; }
+    public int StockDeductQuantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal LineTotal { get; set; }
+
+    public CafeteriaHold Hold { get; set; } = null!;
+    public CafeteriaItem CafeteriaItem { get; set; } = null!;
+    public CafeteriaItemVariant? Variant { get; set; }
+    public ICollection<CafeteriaHoldLineAddOn> AddOns { get; set; } = [];
+    public ICollection<CafeteriaHoldLineIngredientDeduct> IngredientDeducts { get; set; } = [];
+}
+
+public class CafeteriaHoldLineAddOn : BaseEntity
+{
+    public Guid HoldLineId { get; set; }
+    public Guid AddOnId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal LineTotal { get; set; }
+    public int StockDeductQuantity { get; set; }
+
+    public CafeteriaHoldLine HoldLine { get; set; } = null!;
+    public CafeteriaAddOn AddOn { get; set; } = null!;
+}
+
+public class CafeteriaHoldLineIngredientDeduct : BaseEntity
+{
+    public Guid HoldLineId { get; set; }
+    public Guid WarehouseItemId { get; set; }
+    public int Quantity { get; set; }
+    public bool WasSkipped { get; set; }
+
+    public CafeteriaHoldLine HoldLine { get; set; } = null!;
+    public CafeteriaItem WarehouseItem { get; set; } = null!;
+}

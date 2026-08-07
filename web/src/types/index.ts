@@ -65,6 +65,10 @@ export interface SessionLive {
   remainingSeconds: number | null;
   timeExpired: boolean;
   canConvertToGaming: boolean;
+  canChangePricing: boolean;
+  timeUnit: number | null;
+  appliedHourlyRate: number | null;
+  appliedRateTier: string | null;
   customerId: string | null;
   customerCode: string | null;
   customerName: string | null;
@@ -108,6 +112,18 @@ export interface SessionInvoice {
   paymentStatus: number;
 }
 
+export interface BillingSegment {
+  kind: string;
+  label: string;
+  rate: number;
+  quantity: number;
+  quantityUnit: string;
+  amount: number;
+  startedAt: string;
+  endedAt: string;
+  controllerTier: number | null;
+}
+
 export interface SessionDetail {
   id: string;
   branchId: string;
@@ -142,6 +158,7 @@ export interface SessionDetail {
   isQuickGuest: boolean;
   quickGuestName: string | null;
   invoiceNumber: string | null;
+  billingSegments: BillingSegment[];
   cafeteriaLines: SessionCafeteriaLine[];
   invoice: SessionInvoice | null;
 }
@@ -155,6 +172,8 @@ export interface Customer {
   walletBalance: number;
   isActive: boolean;
   createdAt: string;
+  outstandingDebtAmount: number;
+  outstandingDebtCount: number;
 }
 
 export const WalletTransactionType = { TopUp: 1, Bonus: 2, Payment: 3, Adjustment: 4 } as const;
@@ -508,6 +527,8 @@ export interface ExpenseCategory {
   id: string;
   name: string;
   nameAr: string | null;
+  /** 0 = Expense (cash out), 1 = Revenue (cash in) */
+  kind: number;
   isActive: boolean;
 }
 
@@ -517,6 +538,7 @@ export interface Expense {
   branchName: string;
   categoryId: string;
   categoryName: string;
+  categoryKind: number;
   amount: number;
   description: string;
   expenseDate: string;
@@ -561,6 +583,7 @@ export interface CashDrawer {
   cashCafeteria: number;
   cashWalletTopUps: number;
   cashCollectedDebts: number;
+  cashManualIn: number;
   totalCashIn: number;
   cashExpenses: number;
   netCash: number;
@@ -628,6 +651,50 @@ export interface PaymentRequest {
   debtorName?: string;
   debtorPhone?: string;
   proofFileUrl?: string;
+  customerId?: string;
+}
+
+export interface ResetPasswordResult {
+  newPassword: string;
+}
+
+export interface CafeteriaHoldLineAddOn {
+  id: string;
+  addOnId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  stockDeductQuantity: number;
+}
+
+export interface CafeteriaHoldLine {
+  id: string;
+  cafeteriaItemId: string;
+  itemName: string;
+  variantId: string | null;
+  variantName: string | null;
+  quantity: number;
+  stockDeductQuantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  addOns: CafeteriaHoldLineAddOn[];
+}
+
+export interface CafeteriaHold {
+  id: string;
+  branchId: string;
+  guestName: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  status: number;
+  totalAmount: number;
+  createdAt: string;
+  createdByName: string;
+  attachedSessionId: string | null;
+  convertedSaleId: string | null;
+  finalizedAt: string | null;
+  lines: CafeteriaHoldLine[];
 }
 
 export interface ManagedUser {
@@ -675,6 +742,61 @@ export const PaymentAccountType = { BankTransfer: 1, DigitalWallet: 2 } as const
 
 export { NotificationChannel } from './alerts';
 export type { MasterAlertSettings, DeviceMaintenance } from './alerts';
+
+export interface PlatformAlertSettings {
+  id: string | null;
+  smtpUsername: string | null;
+  hasSmtpPassword: boolean;
+  senderDisplayName: string | null;
+  whatsAppComingSoon: boolean;
+  whatsAppIntegrationApiBaseUrl: string | null;
+  hasWhatsAppIntegrationApiKey: boolean;
+  whatsAppIntegrationEnabled: boolean;
+}
+
+export interface MasterSubscriptionRow {
+  id: string;
+  username: string;
+  fullName: string;
+  subscriptionExpiresAt: string | null;
+  isActive: boolean;
+  isLocked: boolean;
+  daysLeft: number | null;
+}
+
+export interface SuperAdminDashboard {
+  mastersCount: number;
+  activeMastersCount: number;
+  inactiveMastersCount: number;
+  staffCount: number;
+  totalUsers: number;
+  expiringWithin7Days: number;
+  expiringWithin30Days: number;
+  expiredOrLocked: number;
+  upcomingExpiries: MasterSubscriptionRow[];
+  lockedOrExpired: MasterSubscriptionRow[];
+}
+
+export interface NotificationTarget {
+  userId: string;
+  username: string;
+  fullName: string;
+  allowedChannels: number;
+  notifyLowStock: boolean;
+  notifySubscription: boolean;
+  notifyDeviceMaintenance: boolean;
+  alertRecipientEmail: string | null;
+  ownerWhatsAppPhone: string | null;
+}
+
+export interface UpsertNotificationTargetRequest {
+  allowedChannels: number;
+  notifyLowStock: boolean;
+  notifySubscription: boolean;
+  notifyDeviceMaintenance: boolean;
+  alertRecipientEmail?: string | null;
+  ownerWhatsAppPhone?: string | null;
+}
 
 export interface BranchPaymentAccount {
   id: string;

@@ -3,10 +3,10 @@ import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { branchesApi, usersApi } from '@/api/client';
-import { normalizePermissionCatalog } from '@/lib/permissions';
+import { isSuperAdmin as checkSuperAdmin, normalizePermissionCatalog } from '@/lib/permissions';
 import { useAuthStore } from '@/store';
 import type { ManagedUser, PermissionInfo } from '@/types';
-import { NotificationChannel, UserRole } from '@/types';
+import { UserRole } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icons';
@@ -32,16 +32,17 @@ export function UsersPage() {
   const user = useAuthStore((s) => s.user);
   const queryClient = useQueryClient();
   const canManage = !!user?.isMaster;
-  const isSuperAdmin = user?.role === UserRole.SuperAdmin || (user?.isMaster && user?.role == null);
+  const isSuperAdmin = checkSuperAdmin(user);
 
   const [open, setOpen] = useState(false);
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<number>(UserRole.Staff);
-  const [allowedChannels, setAllowedChannels] = useState<number>(NotificationChannel.EmailAndWhatsApp);
   const [isActive, setIsActive] = useState(true);
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState('');
   const [selectedPerms, setSelectedPerms] = useState<string[]>([]);
@@ -67,12 +68,12 @@ export function UsersPage() {
   const { data: branches = [] } = useQuery({
     queryKey: ['branches'],
     queryFn: branchesApi.getAll,
-    enabled: canManage,
+    enabled: canManage && !isSuperAdmin,
   });
 
-  // Staff can never manage users, so the Users permission module is not offered.
+  // Staff can never manage users; Assets is managed in Settings, not via staff grants.
   const grantablePermissions = useMemo(
-    () => permissions.filter((p) => p.module !== 'Users'),
+    () => permissions.filter((p) => p.module !== 'Users' && p.module !== 'Assets'),
     [permissions],
   );
 
@@ -84,7 +85,6 @@ export function UsersPage() {
       'PurchaseOrders',
       'Expenses',
       'Reports',
-      'Assets',
       'Customers',
       'Offers',
       'Settings',
@@ -147,7 +147,6 @@ export function UsersPage() {
     setFirstName('');
     setLastName('');
     setRole(isSuperAdmin ? UserRole.MasterAdmin : UserRole.Staff);
-    setAllowedChannels(NotificationChannel.EmailAndWhatsApp);
     setIsActive(true);
     setSubscriptionExpiresAt('');
     setSelectedPerms([]);
@@ -168,7 +167,6 @@ export function UsersPage() {
     setFirstName(u.firstName);
     setLastName(u.lastName);
     setRole(u.role ?? (u.isMaster ? UserRole.SuperAdmin : UserRole.Staff));
-    setAllowedChannels(u.allowedNotificationChannels ?? NotificationChannel.EmailAndWhatsApp);
     setIsActive(u.isActive);
     setSubscriptionExpiresAt(u.subscriptionExpiresAt ? u.subscriptionExpiresAt.slice(0, 10) : '');
     setSelectedPerms(u.permissions.filter((p) => p !== '*'));
@@ -219,12 +217,13 @@ export function UsersPage() {
         role,
         isMaster: isPrivilegedRole,
         subscriptionExpiresAt: isSuperAdmin ? subscriptionExpiresAt || null : null,
-        allowedNotificationChannels: isSuperAdmin && isPrivilegedRole ? allowedChannels : undefined,
         permissionCodes: role === UserRole.Staff ? selectedPerms : undefined,
         branchIds: isPrivilegedRole ? [] : selectedBranches,
       }),
     onSuccess: () => {
+      if (password.trim()) setRevealedPassword(password.trim());
       setOpen(false);
+      setPassword('');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -239,15 +238,16 @@ export function UsersPage() {
         role,
         isMaster: isPrivilegedRole,
         subscriptionExpiresAt: isSuperAdmin ? subscriptionExpiresAt || null : editUser!.subscriptionExpiresAt,
-        allowedNotificationChannels: isSuperAdmin && isPrivilegedRole ? allowedChannels : undefined,
         permissionCodes: role === UserRole.Staff ? selectedPerms : undefined,
         branchIds: isPrivilegedRole ? [] : selectedBranches,
       }),
     onSuccess: async () => {
       if (password.trim()) {
-        await usersApi.resetPassword(editUser!.id, password);
+        const result = await usersApi.resetPassword(editUser!.id, password);
+        setRevealedPassword(result.newPassword);
       }
       setOpen(false);
+      setPassword('');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
     onError: (e: Error) => setError(e.message),
@@ -412,31 +412,6 @@ export function UsersPage() {
                   : t('users.permissionsHint')}
             </p>
           </div>
-
-          {isSuperAdmin && isPrivilegedRole && (
-            <div>
-              <p className="mb-2 text-sm font-medium">{t('users.notificationChannels')}</p>
-              <p className="mb-2 text-xs text-muted">{t('users.notificationChannelsHint')}</p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={allowedChannels === NotificationChannel.Email ? 'primary' : 'secondary'}
-                  onClick={() => setAllowedChannels(NotificationChannel.Email)}
-                >
-                  {t('users.channelEmailOnly')}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={allowedChannels === NotificationChannel.EmailAndWhatsApp ? 'primary' : 'secondary'}
-                  onClick={() => setAllowedChannels(NotificationChannel.EmailAndWhatsApp)}
-                >
-                  {t('users.channelEmailWhatsApp')}
-                </Button>
-              </div>
-            </div>
-          )}
 
           {editUser && (
             <>
@@ -605,6 +580,42 @@ export function UsersPage() {
           >
             {t('common.save')}
           </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!revealedPassword}
+        onClose={() => {
+          setRevealedPassword(null);
+          setPasswordCopied(false);
+        }}
+        title={t('users.passwordRevealedTitle')}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">{t('users.passwordRevealedHint')}</p>
+          <div className="rounded-lg border border-border bg-surface-elevated px-4 py-3 font-mono text-lg" dir="ltr">
+            {revealedPassword}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                if (!revealedPassword) return;
+                await navigator.clipboard.writeText(revealedPassword);
+                setPasswordCopied(true);
+              }}
+            >
+              {passwordCopied ? t('users.passwordCopied') : t('users.copyPassword')}
+            </Button>
+            <Button
+              onClick={() => {
+                setRevealedPassword(null);
+                setPasswordCopied(false);
+              }}
+            >
+              {t('common.done')}
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

@@ -290,8 +290,19 @@ html.light .chrome-shell {
 }
 
 .chrome-topbar {
-  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 70%, var(--color-primary) 12%);
-  box-shadow: inset 0 -1px 0 color-mix(in oklab, white 6%, transparent);
+  /* Opaque so page content never shows through while sticky — avoids a cut line on scroll */
+  background: color-mix(in oklab, var(--color-surface-elevated) 94%, black 6%);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 55%, var(--color-primary) 10%);
+  box-shadow: 0 8px 24px color-mix(in oklab, black 18%, transparent);
+  isolation: isolate;
+}
+
+html.light .chrome-topbar {
+  background: color-mix(in oklab, #ffffff 92%, var(--color-surface-elevated) 8%);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
 .chrome-mark {

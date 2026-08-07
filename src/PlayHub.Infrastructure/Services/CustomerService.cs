@@ -3,6 +3,7 @@ using PlayHub.Application.Common;
 using PlayHub.Application.Customers;
 using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
+using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
 
 namespace PlayHub.Infrastructure.Services;
@@ -58,7 +59,7 @@ public class CustomerService : ICustomerService
             .Take(size)
             .ToListAsync(ct);
 
-        return new PagedResult<CustomerDto>(items.Select(Map).ToList(), total, p, size);
+        return new PagedResult<CustomerDto>(await MapManyAsync(items, ct), total, p, size);
     }
 
     public async Task<CustomerDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
@@ -77,7 +78,7 @@ public class CustomerService : ICustomerService
             if (!isMine) return null;
         }
 
-        return Map(customer);
+        return await MapAsync(customer, ct);
     }
 
     public async Task<CustomerDto> CreateAsync(CreateCustomerRequest request, CancellationToken ct = default)
@@ -118,7 +119,7 @@ public class CustomerService : ICustomerService
             customer.Phone
         }, ct: ct);
 
-        return Map(customer);
+        return await MapAsync(customer, ct);
     }
 
     public async Task<CustomerDto> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken ct = default)
@@ -150,7 +151,7 @@ public class CustomerService : ICustomerService
             customer.IsActive
         }, ct: ct);
 
-        return Map(customer);
+        return await MapAsync(customer, ct);
     }
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken ct = default)
@@ -220,7 +221,7 @@ public class CustomerService : ICustomerService
             customer.WalletBalance
         }, ct: ct);
 
-        return Map(customer);
+        return await MapAsync(customer, ct);
     }
 
     public async Task<PagedResult<WalletTransactionDto>> GetWalletTransactionsAsync(
@@ -263,6 +264,43 @@ public class CustomerService : ICustomerService
         return customer;
     }
 
-    private static CustomerDto Map(Customer c) =>
-        new(c.Id, c.Code, c.Name, c.Phone, c.Notes, c.WalletBalance, c.IsActive, c.CreatedAt);
+    private async Task<IReadOnlyList<CustomerDto>> MapManyAsync(IReadOnlyList<Customer> customers, CancellationToken ct)
+    {
+        if (customers.Count == 0)
+            return [];
+
+        var ids = customers.Select(c => c.Id).ToList();
+        var phones = customers.Select(c => c.Phone).Distinct().ToList();
+        var debts = await _db.InvoicePayments
+            .AsNoTracking()
+            .Where(p =>
+                p.Status == PaymentStatus.Deferred &&
+                (p.CustomerId != null && ids.Contains(p.CustomerId.Value)
+                 || (p.DebtorPhone != null && phones.Contains(p.DebtorPhone))))
+            .Select(p => new { p.CustomerId, p.DebtorPhone, p.Amount })
+            .ToListAsync(ct);
+
+        return customers.Select(c =>
+        {
+            var matching = debts.Where(d =>
+                d.CustomerId == c.Id || d.DebtorPhone == c.Phone).ToList();
+            return new CustomerDto(
+                c.Id,
+                c.Code,
+                c.Name,
+                c.Phone,
+                c.Notes,
+                c.WalletBalance,
+                c.IsActive,
+                c.CreatedAt,
+                matching.Sum(d => d.Amount),
+                matching.Count);
+        }).ToList();
+    }
+
+    private async Task<CustomerDto> MapAsync(Customer c, CancellationToken ct)
+    {
+        var list = await MapManyAsync([c], ct);
+        return list[0];
+    }
 }

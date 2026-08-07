@@ -38,35 +38,80 @@ public class TenantMiddleware
                 : tenantContext.IsMaster ? UserRole.MasterAdmin : UserRole.Staff;
             tenantContext.Permissions = context.User.FindAll("permission").Select(c => c.Value).ToList();
 
+            Guid? parentUserId = null;
             if (tenantContext.UserId != Guid.Empty)
             {
-                // Branches this user may access (assignments + owned for masters).
-                var assigned = await db.UserBranches.IgnoreQueryFilters()
-                    .Where(ub => ub.UserId == tenantContext.UserId)
-                    .Select(ub => ub.BranchId)
-                    .ToListAsync();
+                parentUserId = await db.Users.IgnoreQueryFilters()
+                    .AsNoTracking()
+                    .Where(u => u.Id == tenantContext.UserId && !u.IsDeleted)
+                    .Select(u => u.ParentUserId)
+                    .FirstOrDefaultAsync();
 
-                var owned = Array.Empty<Guid>();
-                if (tenantContext.IsMaster && !tenantContext.IsSuperAdmin)
+                // Catalog owner for global filters (masters share one TenantId).
+                if (tenantContext.IsSuperAdmin)
                 {
-                    owned = await db.Branches.IgnoreQueryFilters()
+                    tenantContext.CatalogOwnerUserId = null; // refined after branch selection
+                }
+                else if (tenantContext.IsMasterAdmin)
+                {
+                    tenantContext.CatalogOwnerUserId = tenantContext.UserId;
+                }
+                else
+                {
+                    tenantContext.CatalogOwnerUserId = parentUserId ?? tenantContext.UserId;
+                }
+
+                // Allowed branches — never trust stray UserBranch rows across masters.
+                if (tenantContext.IsSuperAdmin)
+                {
+                    tenantContext.AllowedBranchIds = await db.Branches.IgnoreQueryFilters()
+                        .Where(b => b.TenantId == tenantContext.TenantId && !b.IsDeleted)
+                        .Select(b => b.Id)
+                        .ToListAsync();
+                }
+                else if (tenantContext.IsMasterAdmin)
+                {
+                    // Masters only see branches they own (ignore UserBranch pointing at another master).
+                    tenantContext.AllowedBranchIds = await db.Branches.IgnoreQueryFilters()
                         .Where(b => b.TenantId == tenantContext.TenantId
                                     && b.OwnerUserId == tenantContext.UserId
                                     && !b.IsDeleted)
                         .Select(b => b.Id)
-                        .ToArrayAsync();
+                        .ToListAsync();
                 }
-
-                tenantContext.AllowedBranchIds = assigned.Concat(owned).Distinct().ToList();
+                else
+                {
+                    // Staff: assigned branches that belong to their master (ParentUserId).
+                    var ownerId = parentUserId ?? tenantContext.UserId;
+                    tenantContext.AllowedBranchIds = await (
+                        from ub in db.UserBranches.IgnoreQueryFilters()
+                        join b in db.Branches.IgnoreQueryFilters() on ub.BranchId equals b.Id
+                        where ub.UserId == tenantContext.UserId
+                              && b.TenantId == tenantContext.TenantId
+                              && !b.IsDeleted
+                              && b.OwnerUserId == ownerId
+                        select b.Id
+                    ).Distinct().ToListAsync();
+                }
             }
 
             if (Guid.TryParse(branchIdClaim, out var branchId))
             {
-                // Reject cross-branch access for non-SuperAdmin.
+                // Reject cross-branch / cross-master access for non-SuperAdmin.
                 if (tenantContext.IsSuperAdmin
                     || tenantContext.AllowedBranchIds.Contains(branchId))
                 {
                     tenantContext.BranchId = branchId;
+
+                    if (tenantContext.IsSuperAdmin)
+                    {
+                        // Scope SuperAdmin catalog view to the selected branch's owner.
+                        tenantContext.CatalogOwnerUserId = await db.Branches.IgnoreQueryFilters()
+                            .AsNoTracking()
+                            .Where(b => b.Id == branchId)
+                            .Select(b => b.OwnerUserId)
+                            .FirstOrDefaultAsync();
+                    }
                 }
                 else
                 {

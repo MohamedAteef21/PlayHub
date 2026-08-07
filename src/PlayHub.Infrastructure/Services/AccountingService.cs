@@ -3,6 +3,7 @@ using PlayHub.Application.Accounting;
 using PlayHub.Application.Common;
 using PlayHub.Domain.Common;
 using PlayHub.Domain.Entities;
+using PlayHub.Domain.Enums;
 using PlayHub.Infrastructure.Data;
 
 namespace PlayHub.Infrastructure.Services;
@@ -28,41 +29,50 @@ public class AccountingService : IAccountingService
             query = query.Where(c => c.OwnerUserId == ownerFilter.Value);
 
         return await query
-            .OrderBy(c => c.Name)
-            .Select(c => new ExpenseCategoryDto(c.Id, c.Name, c.NameAr, c.IsActive))
+            .OrderBy(c => c.Kind)
+            .ThenBy(c => c.Name)
+            .Select(c => new ExpenseCategoryDto(c.Id, c.Name, c.NameAr, c.Kind, c.IsActive))
             .ToListAsync(ct);
     }
 
     public async Task<ExpenseCategoryDto> CreateCategoryAsync(CreateExpenseCategoryRequest request, CancellationToken ct = default)
     {
+        if (!Enum.IsDefined(request.Kind))
+            throw new InvalidOperationException("Invalid category kind.");
+
         var ownerId = await OwnerScope.ResolveBusinessOwnerIdAsync(_db, _tenantContext, ct);
         var category = new ExpenseCategory
         {
             TenantId = _tenantContext.TenantId,
             OwnerUserId = ownerId,
             Name = request.Name.Trim(),
-            NameAr = request.NameAr?.Trim()
+            NameAr = request.NameAr?.Trim(),
+            Kind = request.Kind
         };
 
         _db.ExpenseCategories.Add(category);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("ExpenseCategory.Created", "ExpenseCategory", category.Id, new { category.Name }, ct: ct);
+        await _audit.LogAsync("ExpenseCategory.Created", "ExpenseCategory", category.Id, new { category.Name, category.Kind }, ct: ct);
 
-        return new ExpenseCategoryDto(category.Id, category.Name, category.NameAr, category.IsActive);
+        return MapCategory(category);
     }
 
     public async Task<ExpenseCategoryDto> UpdateCategoryAsync(Guid id, UpdateExpenseCategoryRequest request, CancellationToken ct = default)
     {
+        if (!Enum.IsDefined(request.Kind))
+            throw new InvalidOperationException("Invalid category kind.");
+
         var category = await RequireOwnedCategoryAsync(id, ct);
 
         category.Name = request.Name.Trim();
         category.NameAr = request.NameAr?.Trim();
+        category.Kind = request.Kind;
         category.IsActive = request.IsActive;
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("ExpenseCategory.Updated", "ExpenseCategory", category.Id, new { category.Name }, ct: ct);
+        await _audit.LogAsync("ExpenseCategory.Updated", "ExpenseCategory", category.Id, new { category.Name, category.Kind }, ct: ct);
 
-        return new ExpenseCategoryDto(category.Id, category.Name, category.NameAr, category.IsActive);
+        return MapCategory(category);
     }
 
     public async Task SoftDeleteCategoryAsync(Guid id, CancellationToken ct = default)
@@ -110,6 +120,7 @@ public class AccountingService : IAccountingService
         var total = await query.CountAsync(ct);
         var items = await query
             .OrderByDescending(e => e.ExpenseDate)
+            .ThenByDescending(e => e.CreatedAt)
             .Skip(skip)
             .Take(size)
             .ToListAsync(ct);
@@ -122,10 +133,10 @@ public class AccountingService : IAccountingService
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
 
         if (request.Amount <= 0)
-            throw new InvalidOperationException("Expense amount must be greater than zero.");
+            throw new InvalidOperationException("Amount must be greater than zero.");
 
         var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == request.CategoryId && c.IsActive, ct)
-            ?? throw new KeyNotFoundException("Expense category not found.");
+            ?? throw new KeyNotFoundException("Category not found.");
 
         var expense = new Expense
         {
@@ -140,7 +151,7 @@ public class AccountingService : IAccountingService
 
         _db.Expenses.Add(expense);
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Expense.Created", "Expense", expense.Id, new { expense.Amount, category.Name }, ct: ct);
+        await _audit.LogAsync("Expense.Created", "Expense", expense.Id, new { expense.Amount, category.Name, category.Kind }, ct: ct);
 
         await _db.Entry(expense).Reference(e => e.Category).LoadAsync(ct);
         await _db.Entry(expense).Reference(e => e.Branch).LoadAsync(ct);
@@ -154,17 +165,17 @@ public class AccountingService : IAccountingService
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
 
         if (request.Amount <= 0)
-            throw new InvalidOperationException("Expense amount must be greater than zero.");
+            throw new InvalidOperationException("Amount must be greater than zero.");
 
         var expense = await _db.Expenses
             .Include(e => e.Category)
             .Include(e => e.Branch)
             .Include(e => e.RecordedByUser)
             .FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
-            ?? throw new KeyNotFoundException("Expense not found.");
+            ?? throw new KeyNotFoundException("Cashbox entry not found.");
 
         var category = await _db.ExpenseCategories.FirstOrDefaultAsync(c => c.Id == request.CategoryId && c.IsActive, ct)
-            ?? throw new KeyNotFoundException("Expense category not found.");
+            ?? throw new KeyNotFoundException("Category not found.");
 
         expense.CategoryId = category.Id;
         expense.Amount = request.Amount;
@@ -172,7 +183,7 @@ public class AccountingService : IAccountingService
         expense.ExpenseDate = request.ExpenseDate;
 
         await _db.SaveChangesAsync(ct);
-        await _audit.LogAsync("Expense.Updated", "Expense", expense.Id, new { expense.Amount, category.Name }, ct: ct);
+        await _audit.LogAsync("Expense.Updated", "Expense", expense.Id, new { expense.Amount, category.Name, category.Kind }, ct: ct);
 
         await _db.Entry(expense).Reference(e => e.Category).LoadAsync(ct);
         return MapExpense(expense);
@@ -182,7 +193,7 @@ public class AccountingService : IAccountingService
     {
         var branchId = BranchGuard.RequireBranchId(_tenantContext);
         var expense = await _db.Expenses.FirstOrDefaultAsync(e => e.Id == id && e.BranchId == branchId, ct)
-            ?? throw new KeyNotFoundException("Expense not found.");
+            ?? throw new KeyNotFoundException("Cashbox entry not found.");
 
         expense.MarkAsDeleted(_tenantContext.UserId == Guid.Empty ? null : _tenantContext.UserId);
         await _db.SaveChangesAsync(ct);
@@ -201,23 +212,29 @@ public class AccountingService : IAccountingService
 
         var fromDate = from.Date;
         var toDate = to.Date.AddDays(1).AddTicks(-1);
+        var fromDay = DateOnly.FromDateTime(fromDate);
+        var toDay = DateOnly.FromDateTime(toDate);
 
         var revenueQuery = _db.RevenueEntries.AsQueryable();
-        var expenseQuery = _db.Expenses.AsQueryable();
+        var cashboxQuery = _db.Expenses.Include(e => e.Category).AsQueryable();
 
         if (effectiveBranchId.HasValue)
         {
             revenueQuery = revenueQuery.Where(r => r.BranchId == effectiveBranchId.Value);
-            expenseQuery = expenseQuery.Where(e => e.BranchId == effectiveBranchId.Value);
+            cashboxQuery = cashboxQuery.Where(e => e.BranchId == effectiveBranchId.Value);
         }
 
         revenueQuery = revenueQuery.Where(r => r.RecordedAt >= fromDate && r.RecordedAt <= toDate);
-        expenseQuery = expenseQuery.Where(e =>
-            e.ExpenseDate >= DateOnly.FromDateTime(fromDate) &&
-            e.ExpenseDate <= DateOnly.FromDateTime(toDate));
+        cashboxQuery = cashboxQuery.Where(e => e.ExpenseDate >= fromDay && e.ExpenseDate <= toDay);
 
-        var totalRevenue = await revenueQuery.SumAsync(r => r.Amount, ct);
-        var totalExpenses = await expenseQuery.SumAsync(e => e.Amount, ct);
+        var invoiceRevenue = await revenueQuery.SumAsync(r => r.Amount, ct);
+        var cashboxRevenue = await cashboxQuery
+            .Where(e => e.Category.Kind == ExpenseCategoryKind.Revenue)
+            .SumAsync(e => e.Amount, ct);
+        var totalRevenue = invoiceRevenue + cashboxRevenue;
+        var totalExpenses = await cashboxQuery
+            .Where(e => e.Category.Kind == ExpenseCategoryKind.Expense)
+            .SumAsync(e => e.Amount, ct);
 
         var branches = await _db.Branches.Where(b => b.IsActive).ToListAsync(ct);
         if (effectiveBranchId.HasValue)
@@ -229,16 +246,23 @@ public class AccountingService : IAccountingService
             var rev = await _db.RevenueEntries
                 .Where(r => r.BranchId == branch.Id && r.RecordedAt >= fromDate && r.RecordedAt <= toDate)
                 .SumAsync(r => r.Amount, ct);
+            var manualRev = await _db.Expenses
+                .Where(e => e.BranchId == branch.Id
+                    && e.ExpenseDate >= fromDay && e.ExpenseDate <= toDay
+                    && e.Category.Kind == ExpenseCategoryKind.Revenue)
+                .SumAsync(e => e.Amount, ct);
             var exp = await _db.Expenses
-                .Where(e => e.BranchId == branch.Id &&
-                    e.ExpenseDate >= DateOnly.FromDateTime(fromDate) &&
-                    e.ExpenseDate <= DateOnly.FromDateTime(toDate))
+                .Where(e => e.BranchId == branch.Id
+                    && e.ExpenseDate >= fromDay && e.ExpenseDate <= toDay
+                    && e.Category.Kind == ExpenseCategoryKind.Expense)
                 .SumAsync(e => e.Amount, ct);
 
-            byBranch.Add(new BranchFinancialSummaryDto(branch.Id, branch.Name, rev, exp, rev - exp));
+            var branchRev = rev + manualRev;
+            byBranch.Add(new BranchFinancialSummaryDto(branch.Id, branch.Name, branchRev, exp, branchRev - exp));
         }
 
-        var expensesByCategory = (await expenseQuery
+        var expensesByCategory = (await cashboxQuery
+            .Where(e => e.Category.Kind == ExpenseCategoryKind.Expense)
             .GroupBy(e => new { e.CategoryId, e.Category.Name })
             .Select(g => new { g.Key.CategoryId, g.Key.Name, Total = g.Sum(e => e.Amount) })
             .ToListAsync(ct))
@@ -247,22 +271,23 @@ public class AccountingService : IAccountingService
             .ToList();
 
         var dailyBreakdown = new List<DailyFinancialDto>();
-        for (var day = DateOnly.FromDateTime(fromDate); day <= DateOnly.FromDateTime(toDate); day = day.AddDays(1))
+        for (var day = fromDay; day <= toDay; day = day.AddDays(1))
         {
             var dayStart = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var dayEnd = day.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
 
             var revQ = _db.RevenueEntries.Where(r => r.RecordedAt >= dayStart && r.RecordedAt <= dayEnd);
-            var expQ = _db.Expenses.Where(e => e.ExpenseDate == day);
+            var boxQ = _db.Expenses.Where(e => e.ExpenseDate == day);
 
             if (effectiveBranchId.HasValue)
             {
                 revQ = revQ.Where(r => r.BranchId == effectiveBranchId.Value);
-                expQ = expQ.Where(e => e.BranchId == effectiveBranchId.Value);
+                boxQ = boxQ.Where(e => e.BranchId == effectiveBranchId.Value);
             }
 
-            var dayRev = await revQ.SumAsync(r => r.Amount, ct);
-            var dayExp = await expQ.SumAsync(e => e.Amount, ct);
+            var dayRev = await revQ.SumAsync(r => r.Amount, ct)
+                + await boxQ.Where(e => e.Category.Kind == ExpenseCategoryKind.Revenue).SumAsync(e => e.Amount, ct);
+            var dayExp = await boxQ.Where(e => e.Category.Kind == ExpenseCategoryKind.Expense).SumAsync(e => e.Amount, ct);
             dailyBreakdown.Add(new DailyFinancialDto(day, dayRev, dayExp, dayRev - dayExp));
         }
 
@@ -272,8 +297,11 @@ public class AccountingService : IAccountingService
             byBranch, expensesByCategory, dailyBreakdown);
     }
 
+    private static ExpenseCategoryDto MapCategory(ExpenseCategory c) =>
+        new(c.Id, c.Name, c.NameAr, c.Kind, c.IsActive);
+
     private static ExpenseDto MapExpense(Expense e) =>
-        new(e.Id, e.BranchId, e.Branch.Name, e.CategoryId, e.Category.Name,
+        new(e.Id, e.BranchId, e.Branch.Name, e.CategoryId, e.Category.Name, e.Category.Kind,
             e.Amount, e.Description, e.ExpenseDate, e.PurchaseOrderId,
             e.RecordedByUser.FullName, e.CreatedAt);
 }

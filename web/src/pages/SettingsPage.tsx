@@ -27,7 +27,7 @@ export function SettingsPage() {
   const canManageAssets = hasPermission(user, Permissions.AssetsManage);
   const canManageSettings = hasPermission(user, Permissions.SettingsManage);
   const isMaster = !!user?.isMaster;
-  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : canManageAssets ? 'venueAssets' : 'rooms');
+  const [tab, setTab] = useState<Tab>(isMaster ? 'branches' : 'rooms');
 
   const [branchOpen, setBranchOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchDetail | null>(null);
@@ -74,7 +74,6 @@ export function SettingsPage() {
   const [planPackageHours, setPlanPackageHours] = useState('5');
   const [planPackagePrice, setPlanPackagePrice] = useState('');
   const [planPackageCouplePrice, setPlanPackageCouplePrice] = useState('');
-  const [planVipSurcharge, setPlanVipSurcharge] = useState('0');
   const [error, setError] = useState('');
 
   const [assetTypeOpen, setAssetTypeOpen] = useState(false);
@@ -142,7 +141,7 @@ export function SettingsPage() {
   const { data: alertSettings } = useQuery({
     queryKey: ['alert-settings', user?.id],
     queryFn: alertsApi.getSettings,
-    enabled: isMaster && tab === 'alerts',
+    enabled: isMaster,
   });
 
   const { data: openMaintenance = [] } = useQuery({
@@ -171,7 +170,7 @@ export function SettingsPage() {
     queryKey: ['whatsapp', 'status'],
     queryFn: whatsappApi.status,
     enabled: canWhatsApp && tab === 'whatsapp',
-    refetchInterval: 5000,
+    refetchInterval: 2000,
     meta: { silent: true },
   });
 
@@ -181,7 +180,7 @@ export function SettingsPage() {
     queryKey: ['whatsapp', 'qr'],
     queryFn: whatsappApi.qr,
     enabled: canWhatsApp && tab === 'whatsapp' && !waReady,
-    refetchInterval: 5000,
+    refetchInterval: 2000,
     meta: { silent: true },
   });
 
@@ -586,7 +585,7 @@ export function SettingsPage() {
         timeUnit: isPkg ? TimeUnit.PerHour : unit,
         watchingBilling:
           planMode === SessionMode.Watching ? planWatchingBilling : WatchingBilling.PerPerson,
-        vipSurchargePerHour: Number(planVipSurcharge) || 0,
+        vipSurchargePerHour: 0,
         gamingRates:
           planMode === SessionMode.Gaming
             ? isPkg
@@ -622,7 +621,6 @@ export function SettingsPage() {
       setPlanIsPackage(false);
       setPlanPackagePrice('');
       setPlanPackageCouplePrice('');
-      setPlanVipSurcharge('0');
       setPlanIsActive(true);
       queryClient.invalidateQueries({ queryKey: ['all-plans'] });
       queryClient.invalidateQueries({ queryKey: ['plans'] });
@@ -650,23 +648,14 @@ export function SettingsPage() {
 
   const tabs: { id: Tab; label: string; icon: IconName }[] = [
     ...(isMaster ? [{ id: 'branches' as const, label: t('settings.branches'), icon: 'branch' as const }] : []),
-    ...(canManageAssets
-      ? [{ id: 'venueAssets' as const, label: t('settings.venueAssets'), icon: 'inventory' as const }]
-      : []),
     { id: 'rooms', label: t('settings.rooms'), icon: 'room' },
     { id: 'devices', label: t('settings.devices'), icon: 'gaming' },
     { id: 'pricing', label: t('settings.pricing'), icon: 'pricing' },
-    ...(isMaster
-      ? [{ id: 'alerts' as const, label: t('settings.alerts'), icon: 'mail' as const }]
-      : []),
     ...(canManageAssets
       ? [{ id: 'maintenance' as const, label: t('settings.maintenance'), icon: 'wrench' as const }]
       : []),
     ...((canManageSettings || isMaster)
       ? [{ id: 'payments' as const, label: t('settings.payments'), icon: 'accounting' as const }]
-      : []),
-    ...(canWhatsApp
-      ? [{ id: 'whatsapp' as const, label: t('settings.whatsapp'), icon: 'user' as const }]
       : []),
   ];
 
@@ -1015,7 +1004,6 @@ export function SettingsPage() {
                 setPlanPackageHours('5');
                 setPlanPackagePrice('');
                 setPlanPackageCouplePrice('');
-                setPlanVipSurcharge('0');
                 setPlanIsActive(true);
                 setPlanOpen(true);
               }}
@@ -1055,11 +1043,6 @@ export function SettingsPage() {
                         {t('settings.packageBadge')}: {Math.round((p.packageDurationMinutes / 60) * 10) / 10}{t('session.hoursShort')}
                       </p>
                     )}
-                    {(p.vipSurchargePerHour ?? 0) > 0 && (
-                      <p className="mt-1 text-xs text-muted">
-                        {t('settings.planVipSurcharge')}: {formatCurrency(p.vipSurchargePerHour)}
-                      </p>
-                    )}
                     {!p.isActive && (
                       <p className="mt-1 text-xs text-warning">{t('common.inactive')}</p>
                     )}
@@ -1097,7 +1080,6 @@ export function SettingsPage() {
                               ? String(p.gamingRates.find((r) => r.controllerCount === 2)?.rate ?? p.packagePrice ?? '')
                               : ''
                           );
-                          setPlanVipSurcharge(String(p.vipSurchargePerHour ?? 0));
                           setPlanIsActive(p.isActive);
                           setPlanOpen(true);
                         }}
@@ -1224,31 +1206,29 @@ export function SettingsPage() {
         </section>
       )}
 
-      {tab === 'alerts' && isMaster && (
+      {tab === 'alerts' && isMaster && alertSettings && alertSettings.allowedChannels !== NotificationChannel.None && (
         <section className="space-y-4">
           <p className="max-w-2xl text-sm text-muted">{t('settings.alertsHint')}</p>
-          {alertSettings && (
-            <p className="text-xs text-muted">
-              {t('settings.allowedChannelsNote')}{' '}
-              {(alertSettings.allowedChannels & NotificationChannel.WhatsApp) !== 0
-                ? t('users.channelEmailWhatsApp')
-                : t('users.channelEmailOnly')}
-            </p>
-          )}
           <Card className="max-w-2xl space-y-3">
-            <Input label={t('settings.smtpHost')} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
-            <Input label={t('settings.smtpPort')} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
-            <Input label={t('settings.smtpUsername')} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} placeholder="venue@gmail.com" />
-            <Input
-              label={t('settings.smtpPassword')}
-              type="password"
-              value={smtpPassword}
-              onChange={(e) => setSmtpPassword(e.target.value)}
-              placeholder={alertSettings?.hasSmtpPassword ? t('settings.smtpPasswordKeep') : ''}
-            />
-            <Input label={t('settings.senderDisplayName')} value={senderDisplayName} onChange={(e) => setSenderDisplayName(e.target.value)} />
-            <Input label={t('settings.alertRecipientEmail')} value={alertRecipientEmail} onChange={(e) => setAlertRecipientEmail(e.target.value)} />
-            <Input label={t('settings.ownerWhatsAppPhone')} value={ownerWhatsAppPhone} onChange={(e) => setOwnerWhatsAppPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+            {(alertSettings.allowedChannels & NotificationChannel.Email) !== 0 && (
+              <>
+                <Input label={t('settings.smtpHost')} value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                <Input label={t('settings.smtpPort')} type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+                <Input label={t('settings.smtpUsername')} value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} placeholder="venue@gmail.com" />
+                <Input
+                  label={t('settings.smtpPassword')}
+                  type="password"
+                  value={smtpPassword}
+                  onChange={(e) => setSmtpPassword(e.target.value)}
+                  placeholder={alertSettings?.hasSmtpPassword ? t('settings.smtpPasswordKeep') : ''}
+                />
+                <Input label={t('settings.senderDisplayName')} value={senderDisplayName} onChange={(e) => setSenderDisplayName(e.target.value)} />
+                <Input label={t('settings.alertRecipientEmail')} value={alertRecipientEmail} onChange={(e) => setAlertRecipientEmail(e.target.value)} />
+              </>
+            )}
+            {(alertSettings.allowedChannels & NotificationChannel.WhatsApp) !== 0 && (
+              <Input label={t('settings.ownerWhatsAppPhone')} value={ownerWhatsAppPhone} onChange={(e) => setOwnerWhatsAppPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={notifyLowStock} onChange={(e) => setNotifyLowStock(e.target.checked)} />
               {t('settings.notifyLowStock')}
@@ -1274,17 +1254,19 @@ export function SettingsPage() {
               >
                 {t('settings.saveAlerts')}
               </Button>
-              <Button
-                variant="secondary"
-                loading={testEmailMutation.isPending}
-                onClick={() => {
-                  setError('');
-                  setAlertsMsg('');
-                  testEmailMutation.mutate();
-                }}
-              >
-                {t('settings.testEmail')}
-              </Button>
+              {(alertSettings.allowedChannels & NotificationChannel.Email) !== 0 && (
+                <Button
+                  variant="secondary"
+                  loading={testEmailMutation.isPending}
+                  onClick={() => {
+                    setError('');
+                    setAlertsMsg('');
+                    testEmailMutation.mutate();
+                  }}
+                >
+                  {t('settings.testEmail')}
+                </Button>
+              )}
             </div>
           </Card>
         </section>
@@ -1343,8 +1325,10 @@ export function SettingsPage() {
                 {!waReady && (
                   <div className="space-y-3">
                     <p className="text-sm text-muted">{t('whatsapp.scanQr')}</p>
+                    <p className="text-xs text-warning">{t('whatsapp.qrFreshHint')}</p>
                     {qrImageSrc() ? (
                       <img
+                        key={waQr?.qrBase64 || waQr?.qr || 'qr'}
                         src={qrImageSrc()!}
                         alt="WhatsApp QR"
                         className="mx-auto h-56 w-56 rounded-xl border border-border bg-white p-2"
@@ -1801,16 +1785,6 @@ export function SettingsPage() {
           ) : planMode === SessionMode.Watching ? (
             <Input label={planRateLabel()} type="number" value={planRate} onChange={(e) => setPlanRate(e.target.value)} />
           ) : null}
-
-          <div>
-            <Input
-              label={t('settings.planVipSurcharge')}
-              type="number"
-              value={planVipSurcharge}
-              onChange={(e) => setPlanVipSurcharge(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-muted">{t('settings.vipSurchargeHint')}</p>
-          </div>
 
           {editingPlan && (
             <label className="flex items-center gap-2 text-sm">

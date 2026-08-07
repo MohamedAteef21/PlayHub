@@ -86,6 +86,24 @@ export function printSessionInvoice(
     })
     .join('');
 
+  const segmentsHtml = (detail.billingSegments ?? [])
+    .map((s) => {
+      const detailLine =
+        s.quantityUnit === 'match'
+          ? `${money(s.rate)} × ${s.quantity}`
+          : s.quantityUnit === 'hour'
+            ? `${money(s.rate)}/h × ${s.quantity}h`
+            : `${money(s.rate)} × ${s.quantity}`;
+      return `<tr>
+        <td>
+          <div>${escapeHtml(s.label)}</div>
+          <div style="color:#666;font-size:11px">${escapeHtml(detailLine)}</div>
+        </td>
+        <td style="text-align:end">${money(s.amount)}</td>
+      </tr>`;
+    })
+    .join('');
+
   const html = `<!DOCTYPE html>
 <html dir="${dir}" lang="${dir === 'rtl' ? 'ar' : 'en'}">
 <head>
@@ -133,6 +151,15 @@ export function printSessionInvoice(
     <div><span>${escapeHtml(labels.started)}</span><span>${startedAt.toLocaleString()}</span></div>
     <div><span>${escapeHtml(labels.closed)}</span><span>${closedAt.toLocaleString()}</span></div>
   </div>
+  ${segmentsHtml ? `
+  <hr />
+  <table>
+    <thead><tr>
+      <th>${escapeHtml(labels.timeCost)}</th>
+      <th style="text-align:end">${escapeHtml(labels.total)}</th>
+    </tr></thead>
+    <tbody>${segmentsHtml}</tbody>
+  </table>` : ''}
   ${linesHtml ? `
   <hr />
   <table>
@@ -145,7 +172,7 @@ export function printSessionInvoice(
   </table>` : ''}
   <hr />
   <div class="totals">
-    <div><span>${escapeHtml(labels.timeCost)}</span><span>${money(detail.timeCost)}</span></div>
+    ${!(detail.billingSegments?.length) ? `<div><span>${escapeHtml(labels.timeCost)}</span><span>${money(detail.timeCost)}</span></div>` : `<div><span>${escapeHtml(labels.timeCost)}</span><span>${money(detail.timeCost)}</span></div>`}
     ${detail.roomSurchargeCost > 0 ? `<div><span>${escapeHtml(labels.roomSurcharge)}</span><span>${money(detail.roomSurchargeCost)}</span></div>` : ''}
     <div><span>${escapeHtml(labels.cafeteria)}</span><span>${money(detail.cafeteriaCost)}</span></div>
     ${detail.discountAmount > 0 ? `<div><span>${escapeHtml(labels.discount)}${detail.discountReason ? ` (${escapeHtml(detail.discountReason)})` : ''}</span><span>-${money(detail.discountAmount)}</span></div>` : ''}

@@ -125,19 +125,34 @@ dotnet ef database update --project src/PlayHub.Infrastructure --startup-project
 
 ## Frontend (React)
 
+Local UI (hot reload):
+
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` — API requests proxy to `http://localhost:5052`.
+Open `http://localhost:4200` — API requests proxy to `http://localhost:5052`.
+
+To test the **same SPA the API serves** (MonsterASP-style, no separate Vite):
+
+```bash
+# PowerShell
+powershell -File scripts/sync-spa.ps1
+# or bash
+bash scripts/sync-spa.sh
+
+dotnet run --project src/PlayHub.Api
+```
+
+Then open the API URL (e.g. `http://localhost:5052`) and hard-refresh.
 
 ### Frontend modules
-- Auth (login, register) + branch selector
+- Auth (login) + branch selector — public register is disabled; Super Admin creates accounts
 - Live session dashboard with SignalR + local timers
 - EN/AR i18n with RTL support
-- Placeholder pages for cafeteria, inventory, accounting, reports
+- Super Admin: dashboard, users, platform alert settings
 
 
 - Inventory tracked **per branch**

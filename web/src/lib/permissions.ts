@@ -1,4 +1,11 @@
 import type { AuthUser, PermissionInfo } from '@/types';
+import { UserRole } from '@/types';
+
+export function isSuperAdmin(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  const role = Number(user.role);
+  return role === UserRole.SuperAdmin || (user.isMaster && (user.role == null || Number.isNaN(role)));
+}
 
 export function hasPermission(user: AuthUser | null, permission: string): boolean {
   if (!user) return false;

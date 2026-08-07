@@ -38,11 +38,14 @@ public class InvoicePayment : BaseEntity
     public PaymentStatus Status { get; set; }
     public string? DebtorName { get; set; }
     public string? DebtorPhone { get; set; }
+    /// <summary>Registered customer linked when debt is from a session/customer (for open-session warnings).</summary>
+    public Guid? CustomerId { get; set; }
     public DateTime? CollectedAt { get; set; }
     public PaymentMethod? CollectionMethod { get; set; }
     public Guid? CollectedByUserId { get; set; }
 
     public Invoice Invoice { get; set; } = null!;
+    public Customer? Customer { get; set; }
     public User? CollectedByUser { get; set; }
     public PaymentProof? Proof { get; set; }
 }
@@ -82,6 +85,8 @@ public class ExpenseCategory : BaseEntity, ITenantEntity, ISoftDelete
     public Guid? OwnerUserId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? NameAr { get; set; }
+    /// <summary>Expense (cash out) or Revenue (cash in). Existing rows default to Expense.</summary>
+    public ExpenseCategoryKind Kind { get; set; } = ExpenseCategoryKind.Expense;
     public bool IsActive { get; set; } = true;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

@@ -23,7 +23,7 @@ public class AssetService : IAssetService
 
     public async Task<IReadOnlyList<RoomDto>> GetRoomsAsync(CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
         var rooms = await _db.Rooms
@@ -38,7 +38,7 @@ public class AssetService : IAssetService
 
     public async Task<RoomDto?> GetRoomByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var ownerFilter = await OwnerScope.ResolveCatalogOwnerFilterAsync(_db, _tenantContext, ct);
 
         var room = await _db.Rooms
@@ -51,7 +51,7 @@ public class AssetService : IAssetService
 
     public async Task<RoomDto> CreateRoomAsync(CreateRoomRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var room = new Room
         {
@@ -79,7 +79,7 @@ public class AssetService : IAssetService
 
     public async Task<RoomDto> UpdateRoomAsync(Guid id, UpdateRoomRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var room = await _db.Rooms
             .Include(r => r.Devices)
@@ -104,7 +104,7 @@ public class AssetService : IAssetService
 
     public async Task SoftDeleteRoomAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var room = await _db.Rooms
             .Include(r => r.Devices)
             .FirstOrDefaultAsync(r => r.Id == id && r.BranchId == branchId, ct)
@@ -312,7 +312,7 @@ public class AssetService : IAssetService
 
     public async Task<IReadOnlyList<DeviceDto>> GetDevicesAsync(Guid? roomId = null, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var liveStatuses = await GetLiveStatusMapAsync(branchId, ct);
 
         var query = _db.Devices
@@ -330,7 +330,7 @@ public class AssetService : IAssetService
 
     public async Task<DeviceDto?> GetDeviceByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var liveStatuses = await GetLiveStatusMapAsync(branchId, ct);
 
         var device = await _db.Devices
@@ -344,7 +344,7 @@ public class AssetService : IAssetService
 
     public async Task<DeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         Room? room = null;
         if (request.RoomId.HasValue)
@@ -388,7 +388,7 @@ public class AssetService : IAssetService
 
     public async Task<DeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var device = await _db.Devices
             .Include(d => d.Room)
@@ -445,7 +445,7 @@ public class AssetService : IAssetService
 
     public async Task SoftDeleteDeviceAsync(Guid id, CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
         var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == id && d.BranchId == branchId, ct)
             ?? throw new KeyNotFoundException("Device not found.");
 
@@ -460,7 +460,7 @@ public class AssetService : IAssetService
 
     public async Task<AssetDashboardDto> GetDashboardAsync(CancellationToken ct = default)
     {
-        var branchId = BranchGuard.RequireBranchId(_tenantContext);
+        var branchId = await BranchGuard.RequireOwnedBranchIdAsync(_db, _tenantContext, ct);
 
         var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == branchId, ct)
             ?? throw new KeyNotFoundException("Branch not found.");

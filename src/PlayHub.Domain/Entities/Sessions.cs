@@ -27,6 +27,8 @@ public class Session : BaseEntity, IBranchEntity, ISoftDelete
     public int? PlannedDurationMinutes { get; set; }
     /// <summary>Frozen time cost from previous billing segments (e.g. watching before convert to gaming).</summary>
     public decimal AccruedTimeCost { get; set; }
+    /// <summary>JSON array of finalized billing segments for invoice breakdown.</summary>
+    public string BillingSegmentsJson { get; set; } = "[]";
     public decimal TimeCost { get; set; }
     /// <summary>VIP room hourly surcharge captured at session open (rate changes don't affect open sessions).</summary>
     public decimal RoomSurchargePerHour { get; set; }

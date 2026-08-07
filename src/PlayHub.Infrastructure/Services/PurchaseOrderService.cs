@@ -194,7 +194,8 @@ public class PurchaseOrderService : IPurchaseOrderService
         {
             TenantId = _tenantContext.TenantId,
             Name = "Inventory Purchases",
-            NameAr = "مشتريات المخزون"
+            NameAr = "مشتريات المخزون",
+            Kind = ExpenseCategoryKind.Expense
         };
         _db.ExpenseCategories.Add(category);
         await _db.SaveChangesAsync(ct);

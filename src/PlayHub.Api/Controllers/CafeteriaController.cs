@@ -113,6 +113,31 @@ public class CafeteriaController : ControllerBase
     public async Task<IActionResult> ReturnItem(Guid id, [FromBody] ReturnCafeteriaItemRequest request, CancellationToken ct) =>
         await ExecuteAsync(() => _cafeteriaService.ReturnItemAsync(id, request, ct));
 
+    [HttpGet("holds")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaView)]
+    public async Task<IActionResult> GetOpenHolds(CancellationToken ct) =>
+        Ok(await _cafeteriaService.GetOpenHoldsAsync(ct));
+
+    [HttpPost("holds")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaSell)]
+    public async Task<IActionResult> CreateHold([FromBody] CreateCafeteriaHoldRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.CreateHoldAsync(request, ct), StatusCodes.Status201Created);
+
+    [HttpPost("holds/{id:guid}/attach-session")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaSell)]
+    public async Task<IActionResult> AttachHoldToSession(Guid id, [FromBody] AttachHoldToSessionRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.AttachToSessionAsync(id, request, ct));
+
+    [HttpPost("holds/{id:guid}/convert-sale")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaSell)]
+    public async Task<IActionResult> ConvertHoldToSale(Guid id, [FromBody] ConvertHoldToSaleRequest request, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.ConvertToSaleAsync(id, request, ct));
+
+    [HttpPost("holds/{id:guid}/cancel")]
+    [Authorize(Policy = PermissionPolicies.CafeteriaSell)]
+    public async Task<IActionResult> CancelHold(Guid id, CancellationToken ct) =>
+        await ExecuteAsync(() => _cafeteriaService.CancelHoldAsync(id, ct));
+
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action, int successCode = StatusCodes.Status200OK)
     {
         try

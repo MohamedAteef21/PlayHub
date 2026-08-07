@@ -23,4 +23,10 @@ public interface ICafeteriaService
     Task<CafeteriaSaleDto?> GetSaleByIdAsync(Guid id, CancellationToken ct = default);
     Task<CafeteriaSaleDto> CreateStandaloneSaleAsync(CreateCafeteriaSaleRequest request, CancellationToken ct = default);
     Task<CafeteriaReturnDto> ReturnItemAsync(Guid saleId, ReturnCafeteriaItemRequest request, CancellationToken ct = default);
+
+    Task<IReadOnlyList<CafeteriaHoldDto>> GetOpenHoldsAsync(CancellationToken ct = default);
+    Task<CafeteriaHoldDto> CreateHoldAsync(CreateCafeteriaHoldRequest request, CancellationToken ct = default);
+    Task<CafeteriaHoldDto> AttachToSessionAsync(Guid holdId, AttachHoldToSessionRequest request, CancellationToken ct = default);
+    Task<CafeteriaSaleDto> ConvertToSaleAsync(Guid holdId, ConvertHoldToSaleRequest request, CancellationToken ct = default);
+    Task<CafeteriaHoldDto> CancelHoldAsync(Guid holdId, CancellationToken ct = default);
 }

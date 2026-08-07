@@ -77,8 +77,8 @@ public class UsersController : ControllerBase
     {
         try
         {
-            await _userService.ResetPasswordAsync(id, request, ct);
-            return NoContent();
+            var result = await _userService.ResetPasswordAsync(id, request, ct);
+            return Ok(result);
         }
         catch (InvalidOperationException ex)
         {

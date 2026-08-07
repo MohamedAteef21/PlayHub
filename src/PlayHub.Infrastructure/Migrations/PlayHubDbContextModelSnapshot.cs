@@ -250,6 +250,189 @@ namespace PlayHub.Infrastructure.Migrations
                     b.ToTable("cafeteria_add_ons", (string)null);
                 });
 
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHold", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AttachedSessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ConvertedSaleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("FinalizedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GuestName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttachedSessionId");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ConvertedSaleId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("TenantId", "BranchId", "Status");
+
+                    b.ToTable("cafeteria_holds", (string)null);
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CafeteriaItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("HoldId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StockDeductQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("VariantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("VariantName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CafeteriaItemId");
+
+                    b.HasIndex("HoldId");
+
+                    b.HasIndex("VariantId");
+
+                    b.ToTable("cafeteria_hold_lines", (string)null);
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLineAddOn", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AddOnId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("HoldLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StockDeductQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AddOnId");
+
+                    b.HasIndex("HoldLineId");
+
+                    b.ToTable("cafeteria_hold_line_add_ons", (string)null);
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLineIngredientDeduct", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("HoldLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("WarehouseItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("WasSkipped")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HoldLineId");
+
+                    b.HasIndex("WarehouseItemId");
+
+                    b.ToTable("cafeteria_hold_line_ingredient_deducts", (string)null);
+                });
+
             modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1015,6 +1198,9 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -1242,6 +1428,7 @@ namespace PlayHub.Infrastructure.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CollectedAt")
@@ -1256,11 +1443,16 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("DebtorName")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("DebtorPhone")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
 
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("uniqueidentifier");
@@ -1275,9 +1467,11 @@ namespace PlayHub.Infrastructure.Migrations
 
                     b.HasIndex("CollectedByUserId");
 
+                    b.HasIndex("CustomerId");
+
                     b.HasIndex("InvoiceId");
 
-                    b.ToTable("InvoicePayments");
+                    b.ToTable("invoice_payments", (string)null);
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.ItemUnitConversionLog", b =>
@@ -1753,6 +1947,48 @@ namespace PlayHub.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PlayHub.Domain.Entities.PlatformAlertSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SenderDisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SmtpPassword")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("SmtpUsername")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("WhatsAppIntegrationApiBaseUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("WhatsAppIntegrationApiKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("WhatsAppIntegrationEnabled")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique();
+
+                    b.ToTable("platform_alert_settings", (string)null);
+                });
+
             modelBuilder.Entity("PlayHub.Domain.Entities.PricingPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2090,6 +2326,10 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Property<decimal>("AccruedTimeCost")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("BillingSegmentsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("BranchId")
                         .HasColumnType("uniqueidentifier");
@@ -2899,6 +3139,110 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("WarehouseItem");
                 });
 
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHold", b =>
+                {
+                    b.HasOne("PlayHub.Domain.Entities.Session", "AttachedSession")
+                        .WithMany()
+                        .HasForeignKey("AttachedSessionId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("PlayHub.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaSale", "ConvertedSale")
+                        .WithMany()
+                        .HasForeignKey("ConvertedSaleId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("PlayHub.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("AttachedSession");
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("ConvertedSale");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLine", b =>
+                {
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItem", "CafeteriaItem")
+                        .WithMany()
+                        .HasForeignKey("CafeteriaItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaHold", "Hold")
+                        .WithMany("Lines")
+                        .HasForeignKey("HoldId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItemVariant", "Variant")
+                        .WithMany()
+                        .HasForeignKey("VariantId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.Navigation("CafeteriaItem");
+
+                    b.Navigation("Hold");
+
+                    b.Navigation("Variant");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLineAddOn", b =>
+                {
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaAddOn", "AddOn")
+                        .WithMany()
+                        .HasForeignKey("AddOnId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaHoldLine", "HoldLine")
+                        .WithMany("AddOns")
+                        .HasForeignKey("HoldLineId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("AddOn");
+
+                    b.Navigation("HoldLine");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLineIngredientDeduct", b =>
+                {
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaHoldLine", "HoldLine")
+                        .WithMany("IngredientDeducts")
+                        .HasForeignKey("HoldLineId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("PlayHub.Domain.Entities.CafeteriaItem", "WarehouseItem")
+                        .WithMany()
+                        .HasForeignKey("WarehouseItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("HoldLine");
+
+                    b.Navigation("WarehouseItem");
+                });
+
             modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaItem", b =>
                 {
                     b.HasOne("PlayHub.Domain.Entities.Branch", "Branch")
@@ -3368,6 +3712,11 @@ namespace PlayHub.Infrastructure.Migrations
                         .HasForeignKey("CollectedByUserId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("PlayHub.Domain.Entities.Customer", "Customer")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("PlayHub.Domain.Entities.Invoice", "Invoice")
                         .WithMany("Payments")
                         .HasForeignKey("InvoiceId")
@@ -3375,6 +3724,8 @@ namespace PlayHub.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("CollectedByUser");
+
+                    b.Navigation("Customer");
 
                     b.Navigation("Invoice");
                 });
@@ -3461,6 +3812,17 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("InvoicePayment");
 
                     b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.PlatformAlertSettings", b =>
+                {
+                    b.HasOne("PlayHub.Domain.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.PricingPlan", b =>
@@ -3949,6 +4311,18 @@ namespace PlayHub.Infrastructure.Migrations
                     b.Navigation("Rooms");
 
                     b.Navigation("UserBranches");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHold", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaHoldLine", b =>
+                {
+                    b.Navigation("AddOns");
+
+                    b.Navigation("IngredientDeducts");
                 });
 
             modelBuilder.Entity("PlayHub.Domain.Entities.CafeteriaItem", b =>

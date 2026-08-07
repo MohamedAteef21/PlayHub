@@ -15,10 +15,13 @@ const { Client, LocalAuth, MessageMedia, WAState } = require('whatsapp-web.js');
  */
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
-const SESSIONS_DIR = path.join(__dirname, 'sessions');
-const AUTH_ROOT = path.join(__dirname, '.wwebjs_auth');
+/** Persistent data root (Render disk mounts at /data). Falls back to app dir locally. */
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+const AUTH_ROOT = path.join(DATA_DIR, '.wwebjs_auth');
 const REQUIRE_SESSION_ID = process.env.REQUIRE_SESSION_ID !== '0' && process.env.REQUIRE_SESSION_ID !== 'false';
 const QUIET_QR_TERMINAL = process.env.QUIET_QR_TERMINAL === '1' || process.env.QUIET_QR_TERMINAL === 'true';
+const PUPPETEER_EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '';
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((s) => s.trim())
@@ -100,7 +103,8 @@ function puppeteerArgs() {
     '--disable-extensions',
     '--disable-background-networking',
     '--disable-features=TranslateUI',
-    '--mute-audio'
+    '--mute-audio',
+    '--disable-blink-features=AutomationControlled'
   ];
 }
 
@@ -141,9 +145,13 @@ class WaSession {
   clearConnectionState(reason) {
     const wasReady = this.isReady;
     this.isReady = false;
-    this.qrDataUrl = null;
-    this.qrGeneratedAt = null;
-    this.lastQrRaw = null;
+    // Keep last QR visible during transient reconnects so the UI does not go blank
+    const keepQr = !wasReady && !/LOGOUT|UNPAIRED|auth_failure|user_disconnect/i.test(String(reason));
+    if (!keepQr) {
+      this.qrDataUrl = null;
+      this.qrGeneratedAt = null;
+      this.lastQrRaw = null;
+    }
     this.currentSessionId = null;
     this.currentWidUser = null;
     this.sessionConnectedAt = null;
@@ -163,14 +171,47 @@ class WaSession {
   }
 
   tryRemoveStaleLockfile() {
+    const names = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    for (const name of names) {
+      const p = path.join(this.authPath, name);
+      try {
+        if (fs.existsSync(p)) {
+          fs.unlinkSync(p);
+          console.warn(`[${this.clientId}] Removed stale ${name}`);
+        }
+      } catch (e) {
+        console.warn(`[${this.clientId}] Could not remove ${name}:`, e.message);
+      }
+    }
+  }
+
+  async destroyBrowser({ logout = false } = {}) {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const client = this.client;
+    this.client = null;
+    this.isInitializing = false;
+    this.hasLoggedAuthenticated = false;
+    this.hasHandledReady = false;
+    if (!client) {
+      this.tryRemoveStaleLockfile();
+      return;
+    }
     try {
-      if (fs.existsSync(this.lockfile)) {
-        fs.unlinkSync(this.lockfile);
-        console.warn(`[${this.clientId}] Removed stale Chromium lockfile`);
+      if (logout && typeof client.logout === 'function') {
+        await client.logout();
       }
     } catch (e) {
-      console.warn(`[${this.clientId}] Could not remove lockfile:`, e.message);
+      console.warn(`[${this.clientId}] logout:`, e.message || e);
     }
+    try {
+      await client.destroy();
+    } catch (e) {
+      console.warn(`[${this.clientId}] destroy:`, e.message || e);
+    }
+    this.tryRemoveStaleLockfile();
   }
 
   ensureClient() {
@@ -183,12 +224,23 @@ class WaSession {
         clientId: this.clientId,
         dataPath: AUTH_ROOT
       }),
-      authTimeoutMs: 120000,
+      // Give phone time to finish linking after QR scan
+      authTimeoutMs: 180000,
+      // 0 = never stop refreshing QR (avoids empty "waiting for QR" gaps)
+      qrMaxRetries: 0,
       restartOnAuthFail: true,
       takeoverOnConflict: true,
+      // Default wwebjs UA is Chrome/101 — WhatsApp often rejects / times out linking
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html'
+      },
       puppeteer: {
         headless: true,
-        args: puppeteerArgs()
+        args: puppeteerArgs(),
+        ...(PUPPETEER_EXECUTABLE_PATH ? { executablePath: PUPPETEER_EXECUTABLE_PATH } : {})
       }
     });
 
@@ -201,6 +253,7 @@ class WaSession {
 
       this.lastQrRaw = qr;
       this.qrRotationCount += 1;
+      this.hasLoggedAuthenticated = false;
 
       if (QUIET_QR_TERMINAL) {
         console.log(`[${this.clientId}][QR] refreshed #${this.qrRotationCount}`);
@@ -211,9 +264,9 @@ class WaSession {
 
       try {
         this.qrDataUrl = await QRCode.toDataURL(qr, {
-          width: 512,
-          margin: 4,
-          errorCorrectionLevel: 'H',
+          width: 420,
+          margin: 2,
+          errorCorrectionLevel: 'M',
           color: { dark: '#000000', light: '#ffffff' }
         });
         this.qrGeneratedAt = Date.now();
@@ -230,7 +283,11 @@ class WaSession {
       this.lastQrRaw = null;
       if (this.hasLoggedAuthenticated) return;
       this.hasLoggedAuthenticated = true;
-      console.log(`[${this.clientId}] Authenticated`);
+      console.log(`[${this.clientId}] Authenticated — waiting for ready…`);
+    });
+
+    client.on('loading_screen', (percent, message) => {
+      console.log(`[${this.clientId}] loading ${percent}% — ${message}`);
     });
 
     client.on('ready', async () => {
@@ -278,10 +335,6 @@ class WaSession {
       this.scheduleReconnect(String(reason));
     });
 
-    client.on('loading_screen', (percent, message) => {
-      console.log(`[${this.clientId}] loading ${percent}% — ${message}`);
-    });
-
     client.on('change_state', (state) => {
       console.log(`[${this.clientId}] state`, state);
       if (!this.isReady) return;
@@ -303,11 +356,23 @@ class WaSession {
 
   scheduleReconnect(reason) {
     if (this.reconnectTimer) return;
-    console.log(`[${this.clientId}] Will re-init in 5s (${reason})...`);
+    const reasonText = String(reason);
+    // LOGOUT / UNPAIRED means local auth is dead — don't thrash reconnect; wait for QR via ensure.
+    const fatal = /LOGOUT|UNPAIRED|auth_failure|TOS_BLOCK|PROXYBLOCK/i.test(reasonText);
+    if (fatal) {
+      console.warn(`[${this.clientId}] Fatal disconnect (${reason}) — destroy browser; next /ensure will show QR`);
+      this.destroyBrowser({ logout: false }).catch(() => {});
+      return;
+    }
+    // QR retry limit (if enabled) — keep serving last QR until re-init produces a new one
+    const qrExhausted = /qrcode retries|max qr/i.test(reasonText);
+    console.log(`[${this.clientId}] Will re-init in ${qrExhausted ? 2 : 5}s (${reason})...`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.start(1).catch((e) => console.error(`[${this.clientId}] reconnect failed:`, e.message || e));
-    }, 5000);
+      this.destroyBrowser({ logout: false })
+        .then(() => this.start(1))
+        .catch((e) => console.error(`[${this.clientId}] reconnect failed:`, e.message || e));
+    }, qrExhausted ? 2000 : 5000);
   }
 
   async start(attempt = 1) {
@@ -321,6 +386,12 @@ class WaSession {
     this.hasLoggedAuthenticated = false;
     this.hasHandledReady = false;
 
+    // Always create a fresh Client after failures / reconnects
+    if (this.client && attempt > 1) {
+      await this.destroyBrowser({ logout: false });
+      this.isInitializing = true;
+    }
+
     const client = this.ensureClient();
     try {
       console.log(`[${this.clientId}] initialize (attempt ${attempt}/${maxAttempts})...`);
@@ -328,6 +399,7 @@ class WaSession {
       this.isInitializing = false;
     } catch (err) {
       console.error(`[${this.clientId}] init failed (attempt ${attempt}):`, err.message || err);
+      await this.destroyBrowser({ logout: false });
       if (attempt >= maxAttempts) {
         this.isInitializing = false;
         this.clearConnectionState(`init_failed:${err.message || err}`);
@@ -342,27 +414,31 @@ class WaSession {
 
   async ensureStarted() {
     if (this.isReady || this.isInitializing) return;
-    if (this.client) {
-      // Client exists but not ready — wait for QR / auth
+    if (this.client && !this.isReady) {
+      // Client exists but stuck waiting — leave it (QR flow)
       return;
     }
     await this.start(1);
   }
 
   statusPayload() {
-    const status = this.isReady ? 'AUTHENTICATED' : 'WAITING_QR';
+    const linking = !this.isReady && this.hasLoggedAuthenticated;
+    const status = this.isReady ? 'AUTHENTICATED' : linking ? 'LINKING' : 'WAITING_QR';
+    const qrAgeMs = this.qrGeneratedAt ? Date.now() - this.qrGeneratedAt : null;
     return {
       ok: true,
       clientId: this.clientId,
       ready: this.isReady,
+      linking,
       status,
       hasQr: Boolean(this.qrDataUrl),
       qrGeneratedAt: this.qrGeneratedAt,
+      qrAgeMs,
       hasSession: Boolean(this.currentSessionId),
       sessionId: this.currentSessionId,
       phone: phoneDigitsFromWid(this.currentWidUser),
       phoneNumber: phoneDigitsFromWid(this.currentWidUser),
-      qr: this.isReady ? null : this.qrDataUrl,
+      qr: this.isReady || linking ? null : this.qrDataUrl,
       initializing: this.isInitializing
     };
   }
@@ -394,12 +470,15 @@ class WaSession {
   }
 
   qrPayload() {
+    const linking = !this.isReady && this.hasLoggedAuthenticated;
     return {
       ready: this.isReady,
+      linking,
       clientId: this.clientId,
-      qr: this.qrDataUrl,
-      qrBase64: this.qrDataUrl,
+      qr: linking || this.isReady ? null : this.qrDataUrl,
+      qrBase64: linking || this.isReady ? null : this.qrDataUrl,
       generatedAt: this.qrGeneratedAt,
+      qrAgeMs: this.qrGeneratedAt ? Date.now() - this.qrGeneratedAt : null,
       rotation: this.qrRotationCount,
       sessionId: this.currentSessionId,
       widUser: this.currentWidUser,
@@ -459,37 +538,20 @@ class WaSession {
   }
 
   async disconnect({ logout = true } = {}) {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    const client = this.client;
-    this.client = null;
     this.clearConnectionState('user_disconnect');
-    this.hasLoggedAuthenticated = false;
-    this.hasHandledReady = false;
-    this.isInitializing = false;
-
-    if (client) {
-      try {
-        if (logout && typeof client.logout === 'function') {
-          await client.logout();
-        }
-      } catch (e) {
-        console.warn(`[${this.clientId}] logout:`, e.message || e);
-      }
-      try {
-        await client.destroy();
-      } catch (e) {
-        console.warn(`[${this.clientId}] destroy:`, e.message || e);
-      }
-    }
+    await this.destroyBrowser({ logout });
 
     try {
       if (fs.existsSync(this.sessionFile)) fs.unlinkSync(this.sessionFile);
     } catch (_) {
       /* ignore */
+    }
+
+    // Wipe LocalAuth so next scan is clean
+    try {
+      fs.rmSync(this.authPath, { recursive: true, force: true });
+    } catch (e) {
+      console.warn(`[${this.clientId}] auth wipe:`, e.message || e);
     }
 
     return { ok: true, disconnected: true, clientId: this.clientId };
@@ -690,6 +752,10 @@ process.on('uncaughtException', (err) => {
 
 app.listen(PORT, HOST, () => {
   console.log(`PlayHub WhatsApp gateway on http://${HOST}:${PORT}`);
+  console.log(`DATA_DIR=${DATA_DIR}`);
+  if (PUPPETEER_EXECUTABLE_PATH) {
+    console.log(`Chromium: ${PUPPETEER_EXECUTABLE_PATH}`);
+  }
   console.log('Multi-tenant: pass X-Client-Id (tenant GUID) on every request.');
   console.log('Sessions start lazily when /status|/qr|/ensure is called.');
 });

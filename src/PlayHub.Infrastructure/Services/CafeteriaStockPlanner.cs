@@ -187,7 +187,9 @@ public static class CafeteriaStockPlanner
         Guid referenceId,
         Action<CafeteriaSaleLineIngredientDeduct>? trackSaleIngredient = null,
         Action<SessionCafeteriaLineIngredientDeduct>? trackSessionIngredient = null,
-        bool sessionMode = false)
+        Action<CafeteriaHoldLineIngredientDeduct>? trackHoldIngredient = null,
+        bool sessionMode = false,
+        bool holdMode = false)
     {
         if (plan.ParentStockDeduct > 0)
         {
@@ -210,7 +212,16 @@ public static class CafeteriaStockPlanner
         {
             if (ing.Skipped || ing.Deduct <= 0)
             {
-                if (sessionMode)
+                if (holdMode)
+                {
+                    trackHoldIngredient?.Invoke(new CafeteriaHoldLineIngredientDeduct
+                    {
+                        WarehouseItemId = ing.WarehouseItem.Id,
+                        Quantity = 0,
+                        WasSkipped = true
+                    });
+                }
+                else if (sessionMode)
                 {
                     trackSessionIngredient?.Invoke(new SessionCafeteriaLineIngredientDeduct
                     {
@@ -246,7 +257,16 @@ public static class CafeteriaStockPlanner
                 PerformedByUserId = tenant.UserId
             });
 
-            if (sessionMode)
+            if (holdMode)
+            {
+                trackHoldIngredient?.Invoke(new CafeteriaHoldLineIngredientDeduct
+                {
+                    WarehouseItemId = ing.WarehouseItem.Id,
+                    Quantity = ing.Deduct,
+                    WasSkipped = false
+                });
+            }
+            else if (sessionMode)
             {
                 trackSessionIngredient?.Invoke(new SessionCafeteriaLineIngredientDeduct
                 {

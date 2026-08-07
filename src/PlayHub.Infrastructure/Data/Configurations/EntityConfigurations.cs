@@ -223,6 +223,7 @@ public class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.ToTable("sessions");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.RateSnapshot).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.BillingSegmentsJson).HasColumnType("nvarchar(max)");
         builder.Property(x => x.TimeCost).HasPrecision(18, 2);
         builder.Property(x => x.AccruedTimeCost).HasPrecision(18, 2);
         builder.Property(x => x.RoomSurchargePerHour).HasPrecision(18, 2);
@@ -484,6 +485,22 @@ public class MasterAlertSettingsConfiguration : IEntityTypeConfiguration<MasterA
     }
 }
 
+public class PlatformAlertSettingsConfiguration : IEntityTypeConfiguration<PlatformAlertSettings>
+{
+    public void Configure(EntityTypeBuilder<PlatformAlertSettings> builder)
+    {
+        builder.ToTable("platform_alert_settings");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.SmtpUsername).HasMaxLength(256);
+        builder.Property(x => x.SmtpPassword).HasMaxLength(500);
+        builder.Property(x => x.SenderDisplayName).HasMaxLength(200);
+        builder.Property(x => x.WhatsAppIntegrationApiBaseUrl).HasMaxLength(500);
+        builder.Property(x => x.WhatsAppIntegrationApiKey).HasMaxLength(500);
+        builder.HasIndex(x => x.TenantId).IsUnique();
+        builder.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+    }
+}
+
 public class DeviceMaintenanceConfiguration : IEntityTypeConfiguration<DeviceMaintenance>
 {
     public void Configure(EntityTypeBuilder<DeviceMaintenance> builder)
@@ -497,5 +514,77 @@ public class DeviceMaintenanceConfiguration : IEntityTypeConfiguration<DeviceMai
         builder.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId);
         builder.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
         builder.HasOne(x => x.ReportedByUser).WithMany().HasForeignKey(x => x.ReportedByUserId);
+    }
+}
+
+public class InvoicePaymentConfiguration : IEntityTypeConfiguration<InvoicePayment>
+{
+    public void Configure(EntityTypeBuilder<InvoicePayment> builder)
+    {
+        builder.ToTable("invoice_payments");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Amount).HasPrecision(18, 2);
+        builder.Property(x => x.DebtorName).HasMaxLength(200);
+        builder.Property(x => x.DebtorPhone).HasMaxLength(30);
+        builder.HasIndex(x => x.CustomerId);
+        builder.HasOne(x => x.Invoice).WithMany(x => x.Payments).HasForeignKey(x => x.InvoiceId);
+        builder.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId);
+        builder.HasOne(x => x.CollectedByUser).WithMany().HasForeignKey(x => x.CollectedByUserId);
+    }
+}
+
+public class CafeteriaHoldConfiguration : IEntityTypeConfiguration<CafeteriaHold>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaHold> builder)
+    {
+        builder.ToTable("cafeteria_holds");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.GuestName).HasMaxLength(200);
+        builder.Property(x => x.TotalAmount).HasPrecision(18, 2);
+        builder.HasIndex(x => new { x.TenantId, x.BranchId, x.Status });
+        builder.HasOne(x => x.Branch).WithMany().HasForeignKey(x => x.BranchId);
+        builder.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId);
+        builder.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
+        builder.HasOne(x => x.AttachedSession).WithMany().HasForeignKey(x => x.AttachedSessionId);
+        builder.HasOne(x => x.ConvertedSale).WithMany().HasForeignKey(x => x.ConvertedSaleId);
+    }
+}
+
+public class CafeteriaHoldLineConfiguration : IEntityTypeConfiguration<CafeteriaHoldLine>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaHoldLine> builder)
+    {
+        builder.ToTable("cafeteria_hold_lines");
+        builder.Property(x => x.VariantName).HasMaxLength(200);
+        builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
+        builder.Property(x => x.LineTotal).HasPrecision(18, 2);
+        builder.HasOne(x => x.Hold).WithMany(x => x.Lines).HasForeignKey(x => x.HoldId);
+        builder.HasOne(x => x.CafeteriaItem).WithMany().HasForeignKey(x => x.CafeteriaItemId);
+        builder.HasOne(x => x.Variant).WithMany().HasForeignKey(x => x.VariantId);
+    }
+}
+
+public class CafeteriaHoldLineAddOnConfiguration : IEntityTypeConfiguration<CafeteriaHoldLineAddOn>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaHoldLineAddOn> builder)
+    {
+        builder.ToTable("cafeteria_hold_line_add_ons");
+        builder.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
+        builder.Property(x => x.LineTotal).HasPrecision(18, 2);
+        builder.HasOne(x => x.HoldLine).WithMany(x => x.AddOns).HasForeignKey(x => x.HoldLineId);
+        builder.HasOne(x => x.AddOn).WithMany().HasForeignKey(x => x.AddOnId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class CafeteriaHoldLineIngredientDeductConfiguration : IEntityTypeConfiguration<CafeteriaHoldLineIngredientDeduct>
+{
+    public void Configure(EntityTypeBuilder<CafeteriaHoldLineIngredientDeduct> builder)
+    {
+        builder.ToTable("cafeteria_hold_line_ingredient_deducts");
+        builder.HasOne(x => x.HoldLine).WithMany(x => x.IngredientDeducts).HasForeignKey(x => x.HoldLineId);
+        builder.HasOne(x => x.WarehouseItem).WithMany().HasForeignKey(x => x.WarehouseItemId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

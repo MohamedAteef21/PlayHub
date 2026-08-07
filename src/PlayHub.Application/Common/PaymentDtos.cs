@@ -6,7 +6,8 @@ public record PaymentRequest(
     PaymentMethod PaymentMethod,
     string? DebtorName,
     string? DebtorPhone,
-    string? ProofFileUrl);
+    string? ProofFileUrl,
+    Guid? CustomerId = null);
 
 public static class PaymentValidator
 {

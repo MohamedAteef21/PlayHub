@@ -1,0 +1,10 @@
+node_modules
+.wwebjs_auth
+sessions
+*.md
+iis
+*.ps1
+.git
+.gitignore
+Dockerfile
+.dockerignore
