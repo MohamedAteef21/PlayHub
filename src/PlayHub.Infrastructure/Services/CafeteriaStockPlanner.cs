@@ -49,6 +49,9 @@ public static class CafeteriaStockPlanner
         if (quantity <= 0)
             throw new InvalidOperationException("Quantity must be at least 1.");
 
+        // stockDeductQuantity is kept for API compatibility but ignored; deduct follows quantity + unit.
+        _ = stockDeductQuantity;
+
         var item = await db.CafeteriaItems
             .Include(i => i.Variants).ThenInclude(v => v.RecipeLines)
             .FirstOrDefaultAsync(i => i.Id == itemId && i.BranchId == branchId && i.IsActive, ct)
@@ -140,19 +143,11 @@ public static class CafeteriaStockPlanner
         int parentStockDeduct = 0;
         if (!hasRecipe)
         {
-            // Sell-as-is (or menu without recipe): deduct from parent stock.
-            if (stockDeductQuantity > 0)
-            {
-                parentStockDeduct = unit == InventoryUnitKind.Large
-                    ? ItemUnitHelper.ToBaseQuantity(item, stockDeductQuantity, InventoryUnitKind.Large)
-                    : stockDeductQuantity;
-            }
-            else
-            {
-                parentStockDeduct = unit == InventoryUnitKind.Large
-                    ? ItemUnitHelper.ToBaseQuantity(item, quantity, InventoryUnitKind.Large)
-                    : quantity;
-            }
+            // Sell-as-is (or menu without recipe): always deduct by sell quantity + unit.
+            // Client StockDeductQuantity is ignored — sell qty is the source of truth.
+            parentStockDeduct = unit == InventoryUnitKind.Large
+                ? ItemUnitHelper.ToBaseQuantity(item, quantity, InventoryUnitKind.Large)
+                : quantity;
 
             if (item.CurrentQuantity < parentStockDeduct)
             {

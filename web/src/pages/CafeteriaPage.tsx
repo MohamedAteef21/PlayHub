@@ -24,7 +24,6 @@ interface CartLine {
   item: CafeteriaItem;
   variant: CafeteriaItemVariant;
   quantity: number;
-  stockDeduct: number;
   addOns: CartAddOn[];
 }
 
@@ -38,7 +37,8 @@ function variantHasRecipe(variant: CafeteriaItemVariant) {
   return (variant.recipeLines ?? []).length > 0;
 }
 
-function needsManualStockDeduct(item: CafeteriaItem, variant: CafeteriaItemVariant) {
+/** Sell-as-is without recipe: parent stock is deducted by sell quantity. */
+function isDirectStockItem(item: CafeteriaItem, variant: CafeteriaItemVariant) {
   return item.kind === CafeteriaItemKind.SellAsIs && !variantHasRecipe(variant);
 }
 
@@ -71,7 +71,6 @@ export function CafeteriaPage() {
   const [error, setError] = useState('');
   const [pickItem, setPickItem] = useState<CafeteriaItem | null>(null);
   const [pickVariantId, setPickVariantId] = useState('');
-  const [stockDeduct, setStockDeduct] = useState('1');
   const [sellQty, setSellQty] = useState('1');
   const [pickAddOns, setPickAddOns] = useState<Record<string, number>>({});
   const [missingDialog, setMissingDialog] = useState<{
@@ -123,21 +122,18 @@ export function CafeteriaPage() {
 
     setPickItem(item);
     setPickVariantId(variants[0].id);
-    setStockDeduct('1');
     setSellQty('1');
     setPickAddOns({});
     setError('');
   }
 
   const pickVariant = (pickItem?.variants ?? []).find((v) => v.id === pickVariantId);
-  const showStockDeduct = pickItem && pickVariant ? needsManualStockDeduct(pickItem, pickVariant) : false;
+  const showStockInfo = pickItem && pickVariant ? isDirectStockItem(pickItem, pickVariant) : false;
 
   function confirmPick() {
     if (!pickItem || !pickVariant) return;
     const qty = Math.max(1, Number(sellQty) || 1);
-    const manual = needsManualStockDeduct(pickItem, pickVariant);
-    const deduct = manual ? Math.max(1, Number(stockDeduct) || qty) : qty;
-    if (manual && deduct > pickItem.currentQuantity) {
+    if (isDirectStockItem(pickItem, pickVariant) && qty > pickItem.currentQuantity) {
       setError(t('inventory.insufficientStock'));
       return;
     }
@@ -158,7 +154,6 @@ export function CafeteriaPage() {
             ? {
                 ...l,
                 quantity: l.quantity + qty,
-                stockDeduct: l.stockDeduct + deduct,
                 item: pickItem,
                 variant: pickVariant,
                 addOns: mergeAddOns(existing.addOns, selectedAddOns),
@@ -172,7 +167,6 @@ export function CafeteriaPage() {
           item: pickItem,
           variant: pickVariant,
           quantity: qty,
-          stockDeduct: deduct,
           addOns: selectedAddOns,
         },
       ];
@@ -196,16 +190,7 @@ export function CafeteriaPage() {
       prev
         .map((l) => {
           if (l.item.id !== itemId || l.variant.id !== variantId) return l;
-          const next = Math.max(0, l.quantity + delta);
-          const manual = needsManualStockDeduct(l.item, l.variant);
-          const deductPer = l.quantity > 0 ? l.stockDeduct / l.quantity : 1;
-          return {
-            ...l,
-            quantity: next,
-            stockDeduct: manual
-              ? Math.max(next > 0 ? Math.round(deductPer * next) : 0, next > 0 ? 1 : 0)
-              : next,
-          };
+          return { ...l, quantity: Math.max(0, l.quantity + delta) };
         })
         .filter((l) => l.quantity > 0)
     );
@@ -220,7 +205,6 @@ export function CafeteriaPage() {
           line.item.id,
           line.variant.id,
           line.quantity,
-          line.stockDeduct,
           customerName.trim() || undefined,
           line.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
           allowSkip
@@ -233,7 +217,6 @@ export function CafeteriaPage() {
         cafeteriaItemId: l.item.id,
         variantId: l.variant.id,
         quantity: l.quantity,
-        stockDeductQuantity: l.stockDeduct,
         addOns: l.addOns.map((a) => ({ addOnId: a.addOn.id, quantity: a.quantity })),
       })),
       {
@@ -376,15 +359,7 @@ export function CafeteriaPage() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{lineLabel(l)}</p>
-                      <p className="text-xs text-muted">
-                        {formatCurrency(l.variant.sellPrice)}
-                        {needsManualStockDeduct(l.item, l.variant) && (
-                          <>
-                            {' · '}
-                            {t('inventory.stockDeduct')} {l.stockDeduct}
-                          </>
-                        )}
-                      </p>
+                      <p className="text-xs text-muted">{formatCurrency(l.variant.sellPrice)}</p>
                     </div>
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="secondary" onClick={() => updateQty(l.item.id, l.variant.id, -1)}>
@@ -431,10 +406,7 @@ export function CafeteriaPage() {
               <select
                 className="w-full rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm"
                 value={pickVariantId}
-                onChange={(e) => {
-                  setPickVariantId(e.target.value);
-                  setStockDeduct(sellQty);
-                }}
+                onChange={(e) => setPickVariantId(e.target.value)}
               >
                 {pickVariants.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -448,24 +420,12 @@ export function CafeteriaPage() {
               type="number"
               min={1}
               value={sellQty}
-              onChange={(e) => {
-                setSellQty(e.target.value);
-                if (showStockDeduct) setStockDeduct(e.target.value);
-              }}
+              onChange={(e) => setSellQty(e.target.value)}
             />
-            {showStockDeduct && (
-              <>
-                <Input
-                  label={t('inventory.stockDeduct')}
-                  type="number"
-                  min={1}
-                  value={stockDeduct}
-                  onChange={(e) => setStockDeduct(e.target.value)}
-                />
-                <p className="text-xs text-muted">
-                  {t('inventory.stockAvailable')}: {pickItem.currentQuantity}
-                </p>
-              </>
+            {showStockInfo && (
+              <p className="text-xs text-muted">
+                {t('inventory.stockAvailable')}: {pickItem.currentQuantity}
+              </p>
             )}
             {addOns.length > 0 && (
               <div className="space-y-2 border-t border-border pt-2">
