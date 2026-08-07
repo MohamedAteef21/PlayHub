@@ -97,7 +97,7 @@ public record AddSessionCafeteriaRequest(
     Guid CafeteriaItemId,
     Guid VariantId,
     int Quantity,
-    /// <summary>For SellAsIs: stock to deduct. Ignored for recipe menu items.</summary>
+    /// <summary>Deprecated: ignored. Parent stock deduct always follows Quantity + Unit.</summary>
     int StockDeductQuantity = 0,
     string? CustomerName = null,
     InventoryUnitKind Unit = InventoryUnitKind.Base,

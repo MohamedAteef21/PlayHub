@@ -227,7 +227,6 @@ export const sessionsApi = {
     cafeteriaItemId: string,
     variantId: string,
     quantity: number,
-    stockDeductQuantity: number,
     customerName?: string,
     addOns?: { addOnId: string; quantity: number }[],
     allowSkipMissingIngredients?: boolean
@@ -238,7 +237,6 @@ export const sessionsApi = {
         cafeteriaItemId,
         variantId,
         quantity,
-        stockDeductQuantity,
         customerName: customerName || undefined,
         addOns: addOns?.length ? addOns : undefined,
         allowSkipMissingIngredients: allowSkipMissingIngredients || undefined,
@@ -502,7 +500,6 @@ export const cafeteriaApi = {
       cafeteriaItemId: string;
       variantId: string;
       quantity: number;
-      stockDeductQuantity?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     payment: import('@/types').PaymentRequest,
@@ -524,7 +521,6 @@ export const cafeteriaApi = {
       cafeteriaItemId: string;
       variantId: string;
       quantity: number;
-      stockDeductQuantity?: number;
       addOns?: { addOnId: string; quantity: number }[];
     }[],
     opts?: { guestName?: string; customerId?: string; allowSkipMissingIngredients?: boolean }

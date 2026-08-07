@@ -106,7 +106,7 @@ public record CafeteriaSaleLineInput(
     Guid CafeteriaItemId,
     Guid VariantId,
     int Quantity,
-    /// <summary>For SellAsIs: stock to deduct (base units). Ignored for recipe menu items (auto from recipe).</summary>
+    /// <summary>Deprecated: ignored. Parent stock deduct always follows Quantity + Unit.</summary>
     int StockDeductQuantity = 0,
     InventoryUnitKind Unit = InventoryUnitKind.Base,
     IReadOnlyList<CafeteriaSaleLineAddOnInput>? AddOns = null);
